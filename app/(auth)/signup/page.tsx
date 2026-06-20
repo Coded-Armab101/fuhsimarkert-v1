@@ -130,7 +130,7 @@ export default function SignUpPage() {
         </form>
 
         <p className="text-xs text-center text-neutral-500 mt-6">
-          Already verified? <Link href="/auth/login" className="text-red-500 hover:underline">Log in here</Link>
+          Already verified? <Link href="/login" className="text-red-500 hover:underline">Log in here</Link>
         </p>
       </div>
     </div>

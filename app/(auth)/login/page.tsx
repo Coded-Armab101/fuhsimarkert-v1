@@ -99,7 +99,7 @@ export default function LoginPage() {
         </form>
 
         <p className="text-xs text-center text-neutral-500 mt-6">
-          New to the hub? <Link href="/auth/signup" className="text-red-500 hover:underline">Register here</Link>
+          New to the hub? <Link href="/signup" className="text-red-500 hover:underline">Register here</Link>
         </p>
       </div>
     </div>

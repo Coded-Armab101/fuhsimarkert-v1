@@ -12,10 +12,10 @@ export default function RootLandingPage() {
         </div>
         
         <div className="flex items-center space-x-4">
-          <Link href="/auth/login" className="text-sm font-medium text-neutral-400 hover:text-white transition-colors">
+          <Link href="/login" className="text-sm font-medium text-neutral-400 hover:text-white transition-colors">
             Sign In
           </Link>
-          <Link href="/auth/signup" className="bg-red-700 hover:bg-red-800 text-white text-sm font-bold px-4 py-2 rounded-xl transition-all shadow-lg shadow-red-950/20">
+          <Link href="/signup" className="bg-red-700 hover:bg-red-800 text-white text-sm font-bold px-4 py-2 rounded-xl transition-all shadow-lg shadow-red-950/20">
             Join Platform
           </Link>
         </div>
@@ -38,11 +38,11 @@ export default function RootLandingPage() {
 
         {/* PRIMARY GATEWAY BUTTONS */}
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4 w-full max-w-md">
-          <Link href="/auth/signup" className="w-full sm:w-auto bg-red-700 hover:bg-red-800 text-white font-bold px-8 py-4 rounded-xl flex items-center justify-center space-x-2 transition-all shadow-xl shadow-red-950/30 group">
+          <Link href="/signup" className="w-full sm:w-auto bg-red-700 hover:bg-red-800 text-white font-bold px-8 py-4 rounded-xl flex items-center justify-center space-x-2 transition-all shadow-xl shadow-red-950/30 group">
             <span>Get Started Immediately</span>
             <ArrowRight size={16} className="transform group-hover:translate-x-1 transition-transform" />
           </Link>
-          <Link href="/auth/login" className="w-full sm:w-auto bg-neutral-950 border border-neutral-800 hover:border-neutral-700 text-neutral-300 font-bold px-8 py-4 rounded-xl flex items-center justify-center transition-all">
+          <Link href="/login" className="w-full sm:w-auto bg-neutral-950 border border-neutral-800 hover:border-neutral-700 text-neutral-300 font-bold px-8 py-4 rounded-xl flex items-center justify-center transition-all">
             <span>Explore Dashboard</span>
           </Link>
         </div>
