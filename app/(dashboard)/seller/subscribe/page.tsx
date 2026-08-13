@@ -1,117 +1,92 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Store, CheckCircle2, ShieldCheck, ArrowRight, Lock, Loader2, AlertCircle } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
-import PaystackPop from '@paystack/inline-js';
+import { 
+  Store, 
+  PackagePlus, 
+  ShoppingBag, 
+  TrendingUp, 
+  Loader2, 
+  LayoutDashboard, 
+  Package, 
+  Receipt, 
+  Settings, 
+  Plus,
+  Trash2
+} from 'lucide-react';
 
-export default function SellerSubscribePage() {
+export default function SellerDashboardPage() {
   const router = useRouter();
   const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState(false);
-  const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
-  const [profileIncomplete, setProfileIncomplete] = useState(false);
+  const [products, setProducts] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'orders' | 'settings'>('overview');
 
   useEffect(() => {
-    const fetchUserData = async () => {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) {
-        router.push('/login?redirect=/seller/subscribe');
-        return;
+    const fetchSellerData = async () => {
+      try {
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+        if (authError || !user) {
+          router.push('/login?redirect=/seller/dashboard');
+          return;
+        }
+
+        // Fetch seller profile
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        setProfile(profileData);
+
+        if (!profileData || profileData.is_seller !== true) {
+          router.push('/seller/subscribe');
+          return;
+        }
+
+        // Fetch seller's products
+        const { data: productsData } = await supabase
+          .from('products')
+          .select('*')
+          .eq('seller_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (productsData) setProducts(productsData);
+
+        // Fetch seller's escrow orders
+        const { data: ordersData } = await supabase
+          .from('orders')
+          .select('*')
+          .eq('seller_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (ordersData) setOrders(ordersData);
+
+        setLoading(false);
+      } catch (err) {
+        console.error('Dashboard data load failed:', err);
+        setLoading(false);
       }
-      setUser(authUser);
-
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', authUser.id)
-        .single();
-
-      setProfile(profileData);
-
-      if (!profileData?.bank_name || !profileData?.account_number || !profileData?.full_name) {
-        setProfileIncomplete(true);
-      }
-
-      setLoading(false);
     };
 
-    fetchUserData();
+    fetchSellerData();
   }, [router, supabase]);
 
-  const verifySubscription = async (reference: string) => {
-    try {
-      const expireDate = new Date();
-      expireDate.setDate(expireDate.getDate() + 30);
+  const handleDeleteProduct = async (productId: string) => {
+    if (!confirm('Are you sure you want to delete this listing?')) return;
 
-      const res = await fetch('/api/seller/verify-subscription', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          reference: reference,
-          userId: user.id,
-          expiresAt: expireDate.toISOString(),
-        }),
-      });
-
-      if (res.ok) {
-        alert('Subscription activated successfully!');
-        window.location.href = '/seller/dashboard';
-      } else {
-        alert('Payment received, but activation failed. Please contact support.');
-      }
-    } catch (error) {
-      console.error('Error verifying payment:', error);
-      alert('An error occurred during verification.');
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  const handlePaystackPayment = () => {
-    if (profileIncomplete) {
-      alert('Please complete your profile details before placing an order!');
-      router.push('/profile');
-      return;
-    }
-
-    if (!user || !user.id || !user.email) {
-      alert('User session not loaded. Please refresh or log in again.');
-      return;
-    }
-
-    setProcessing(true);
-
-    try {
-      const popup = new PaystackPop();
-      popup.newTransaction({
-        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || 'pk_test_xxx',
-        email: user.email,
-        amount: 1500 * 100, // ₦1,500 in kobo
-        currency: 'NGN',
-        ref: `SUB_SELLER_${user.id.slice(0, 5)}_${Date.now()}`,
-        metadata: {
-          custom_fields: [
-            { display_name: 'User ID', variable_name: 'user_id', value: user.id },
-            { display_name: 'Subscription Type', variable_name: 'type', value: 'seller_monthly' }
-          ]
-        },
-        onSuccess: (transaction: { reference: string }) => {
-          verifySubscription(transaction.reference);
-        },
-        onCancel: () => {
-          setProcessing(false);
-          alert('Transaction cancelled.');
-        }
-      });
-    } catch (err) {
-      console.error('Paystack transaction error:', err);
-      setProcessing(false);
-      alert('Failed to launch Paystack modal. Please check console for details.');
+    const { error } = await supabase.from('products').delete().eq('id', productId);
+    if (!error) {
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+    } else {
+      alert('Failed to delete product. Please try again.');
     }
   };
 
@@ -119,104 +94,229 @@ export default function SellerSubscribePage() {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center text-xs font-mono text-neutral-400 gap-3">
         <Loader2 className="animate-spin text-red-500" size={24} />
-        <span>Loading Vendor Subscription Portal...</span>
+        <span>Loading Vendor Studio...</span>
       </div>
     );
   }
 
   return (
-    <div className="max-w-3xl mx-auto py-8 px-4 space-y-8">
-      {/* BANNER HEADER */}
-      <div className="bg-neutral-950 border border-neutral-800 rounded-3xl p-6 sm:p-8 space-y-3 relative overflow-hidden shadow-2xl">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-950/60 border border-red-800/60 text-red-400 text-xs font-mono font-bold">
-          <Store size={14} /> FUHSI Vendor Ecosystem
+    <div className="max-w-6xl mx-auto py-8 px-4 space-y-8 pb-12">
+      {/* HEADER */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-neutral-950 border border-neutral-800 p-6 sm:p-8 rounded-3xl shadow-2xl">
+        <div className="space-y-1">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/60 border border-emerald-800/60 text-emerald-400 text-xs font-mono font-bold">
+            <Store size={14} /> Active Vendor Studio
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-black text-white">
+            Welcome, {profile?.full_name || 'Vendor'}
+          </h1>
+          <p className="text-xs sm:text-sm text-neutral-400">
+            Manage your store listings, track orders, and view payout status.
+          </p>
         </div>
-        <h1 className="text-2xl sm:text-3xl font-black text-white">Activate Your Seller Studio</h1>
-        <p className="text-xs sm:text-sm text-neutral-400 max-w-xl">
-          Start listing products, host your campus storefront, and receive direct escrow-backed payments from FUHSI students.
-        </p>
+
+        <button
+          onClick={() => router.push('/seller/products/new')}
+          className="bg-red-600 hover:bg-red-500 text-white font-bold text-xs py-3 px-5 rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-950/40 cursor-pointer self-start md:self-auto"
+        >
+          <PackagePlus size={16} />
+          <span>Add New Product</span>
+        </button>
       </div>
 
-      {/* PROFILE INCOMPLETE ALERT */}
-      {profileIncomplete && (
-        <div className="bg-amber-950/40 border border-amber-800/60 rounded-2xl p-4 flex items-start gap-3 text-amber-300 text-xs">
-          <AlertCircle size={18} className="shrink-0 text-amber-400 mt-0.5" />
-          <div className="space-y-1">
-            <span className="font-bold block">Bank Payout Info Required</span>
-            <span>You haven't linked your 10-digit Nigerian bank account in your profile yet. Please complete it so sales revenue can be routed to you.</span>
-            <button
-              onClick={() => router.push('/profile')}
-              className="mt-2 text-xs font-bold underline text-amber-200 block hover:text-white"
-            >
-              Go to Profile to Update Bank Info &rarr;
-            </button>
-          </div>
-        </div>
-      )}
+      {/* ACTIVE TAB CONTENT DISPLAY AREA */}
+      <div className="min-h-[350px]">
+        {/* 1. OVERVIEW TAB */}
+        {activeTab === 'overview' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono">
+              <div className="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl space-y-2">
+                <div className="flex justify-between items-center text-neutral-400 text-xs">
+                  <span>Total Revenue</span>
+                  <TrendingUp size={16} className="text-emerald-500" />
+                </div>
+                <div className="text-2xl font-black text-white">₦0.00</div>
+              </div>
 
-      {/* PRICING & FEATURES CARD */}
-      <div className="bg-neutral-950 border border-neutral-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-neutral-900 pb-6">
-          <div>
-            <h2 className="text-lg font-bold text-white">Monthly Vendor Pass</h2>
-            <p className="text-xs text-neutral-400">Full access to sell unlimited products on campus</p>
-          </div>
-          <div className="text-left sm:text-right">
-            <span className="text-3xl font-black font-mono text-red-500">₦1,500</span>
-            <span className="text-xs text-neutral-500 block font-mono">/ per month</span>
-          </div>
-        </div>
+              <div className="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl space-y-2">
+                <div className="flex justify-between items-center text-neutral-400 text-xs">
+                  <span>Active Products</span>
+                  <ShoppingBag size={16} className="text-blue-500" />
+                </div>
+                <div className="text-2xl font-black text-white">{products.length}</div>
+              </div>
 
-        {/* INCLUDED PRIVILEGES */}
-        <div className="space-y-3">
-          <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-neutral-400">Included Privileges</h3>
-          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-neutral-300 font-mono">
-            <li className="flex items-center gap-2 bg-neutral-900/60 p-3 rounded-xl border border-neutral-800">
-              <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
-              <span>Unlimited Campus Listings</span>
-            </li>
-            <li className="flex items-center gap-2 bg-neutral-900/60 p-3 rounded-xl border border-neutral-800">
-              <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
-              <span>Dedicated Vendor Store Page</span>
-            </li>
-            <li className="flex items-center gap-2 bg-neutral-900/60 p-3 rounded-xl border border-neutral-800">
-              <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
-              <span>Escrow Anti-Scam Buyer Protection</span>
-            </li>
-            <li className="flex items-center gap-2 bg-neutral-900/60 p-3 rounded-xl border border-neutral-800">
-              <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
-              <span>Real-time Orders & Sales Analytics</span>
-            </li>
-          </ul>
-        </div>
+              <div className="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl space-y-2">
+                <div className="flex justify-between items-center text-neutral-400 text-xs">
+                  <span>Subscription Status</span>
+                  <Store size={16} className="text-emerald-500" />
+                </div>
+                <div className="text-sm font-bold text-emerald-400 uppercase">ACTIVE</div>
+              </div>
+            </div>
 
-        {/* PAYMENT BUTTON */}
-        <div className="pt-2">
-          <button
-            onClick={handlePaystackPayment}
-            disabled={processing || profileIncomplete}
-            className="w-full bg-red-600 hover:bg-red-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white font-bold text-sm py-4 rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-950/40 cursor-pointer"
-          >
-            {processing ? (
-              <>
-                <Loader2 size={18} className="animate-spin" />
-                <span>Initializing Paystack Channel...</span>
-              </>
+            <div className="bg-neutral-950 border border-neutral-800 rounded-3xl p-6 sm:p-8 space-y-4 shadow-xl">
+              <h2 className="text-lg font-bold text-white">Your Campus Storefront</h2>
+              <p className="text-xs text-neutral-400">
+                {products.length > 0
+                  ? `You have ${products.length} product(s) currently listed on FUHSI Market.`
+                  : 'You have no active product listings on FUHSI Market yet. Click "Add New Product" above to create your first listing.'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* 2. PRODUCTS TAB */}
+        {activeTab === 'products' && (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-3xl p-6 sm:p-8 space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-lg font-bold text-white">Product Inventory</h2>
+                <p className="text-xs text-neutral-400">Manage your items listed on FUHSI Market</p>
+              </div>
+              <button
+                onClick={() => router.push('/seller/products/new')}
+                className="bg-red-600 hover:bg-red-500 text-white font-bold text-xs py-2.5 px-4 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus size={15} />
+                <span>Add Item</span>
+              </button>
+            </div>
+
+            {products.length === 0 ? (
+              <div className="border border-neutral-900 rounded-2xl p-8 text-center space-y-3">
+                <Package size={32} className="mx-auto text-neutral-600" />
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold text-white">No products listed yet</h3>
+                  <p className="text-xs text-neutral-400 max-w-sm mx-auto">
+                    Start selling to FUHSI students by adding your first product.
+                  </p>
+                </div>
+              </div>
             ) : (
-              <>
-                <Lock size={16} />
-                <span>Pay ₦1,500 via Dynamic Bank Transfer / Card</span>
-                <ArrowRight size={16} />
-              </>
-            )}
-          </button>
-        </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {products.map((item) => (
+                  <div key={item.id} className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl flex flex-col justify-between gap-4">
+                    <div className="space-y-2">
+                      {item.image_url && (
+                        <img src={item.image_url} alt={item.title} className="w-full h-36 object-cover rounded-xl" />
+                      )}
+                      <h4 className="font-bold text-white text-sm line-clamp-1">{item.title}</h4>
+                      <p className="text-xs text-neutral-400 line-clamp-2">{item.description}</p>
+                      <div className="text-red-400 font-bold font-mono text-sm">₦{Number(item.price).toLocaleString()}</div>
+                    </div>
 
-        {/* TRUST BADGES */}
-        <div className="flex items-center justify-center gap-2 text-[11px] text-neutral-500 font-mono pt-2">
-          <ShieldCheck size={14} className="text-emerald-500" />
-          <span>Secured by Paystack • Instant Automated Verification</span>
-        </div>
+                    <button
+                      onClick={() => handleDeleteProduct(item.id)}
+                      className="w-full bg-neutral-800 hover:bg-red-950 text-neutral-300 hover:text-red-400 border border-neutral-700 hover:border-red-800 font-bold text-xs py-2 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Trash2 size={14} />
+                      <span>Delete Listing</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 3. ORDERS TAB */}
+        {activeTab === 'orders' && (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-3xl p-6 sm:p-8 space-y-6">
+            <div>
+              <h2 className="text-lg font-bold text-white">Escrow Orders</h2>
+              <p className="text-xs text-neutral-400">Track student purchases & payouts</p>
+            </div>
+
+            <div className="border border-neutral-900 rounded-2xl p-8 text-center space-y-3">
+              <Receipt size={32} className="mx-auto text-neutral-600" />
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-white">No incoming orders yet</h3>
+                <p className="text-xs text-neutral-400 max-w-sm mx-auto">
+                  When a student purchases one of your items via Escrow, it will show up here.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 4. SETTINGS TAB */}
+        {activeTab === 'settings' && (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-3xl p-6 sm:p-8 space-y-6">
+            <div>
+              <h2 className="text-lg font-bold text-white">Payout Settings</h2>
+              <p className="text-xs text-neutral-400">Your bank account details for receiving sale settlements</p>
+            </div>
+
+            <div className="space-y-4 font-mono text-xs">
+              <div className="bg-neutral-900 border border-neutral-800 p-5 rounded-2xl space-y-3">
+                <span className="text-neutral-400 font-bold block">Linked Bank Account</span>
+                <div className="space-y-1 text-white">
+                  <div><span className="text-neutral-500">Bank:</span> {profile?.bank_name || 'Not set'}</div>
+                  <div><span className="text-neutral-500">Account Number:</span> {profile?.account_number || 'Not set'}</div>
+                  <div><span className="text-neutral-500">Account Name:</span> {profile?.account_name || profile?.full_name || 'Not set'}</div>
+                </div>
+                <button
+                  onClick={() => router.push('/profile')}
+                  className="mt-2 text-red-400 hover:text-red-300 font-bold text-xs underline cursor-pointer"
+                >
+                  Update Bank Details in Profile →
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* BOTTOM TAB NAVIGATION BAR */}
+      <div className="bg-neutral-950 border border-neutral-800 p-2 rounded-2xl shadow-2xl flex items-center justify-between gap-1 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab('overview')}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'overview'
+              ? 'bg-red-600 text-white shadow-md shadow-red-950/30'
+              : 'text-neutral-400 hover:text-white hover:bg-neutral-900'
+          }`}
+        >
+          <LayoutDashboard size={16} />
+          <span>Overview</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('products')}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'products'
+              ? 'bg-red-600 text-white shadow-md shadow-red-950/30'
+              : 'text-neutral-400 hover:text-white hover:bg-neutral-900'
+          }`}
+        >
+          <Package size={16} />
+          <span>Products ({products.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('orders')}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'orders'
+              ? 'bg-red-600 text-white shadow-md shadow-red-950/30'
+              : 'text-neutral-400 hover:text-white hover:bg-neutral-900'
+          }`}
+        >
+          <Receipt size={16} />
+          <span>Orders ({orders.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('settings')}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'settings'
+              ? 'bg-red-600 text-white shadow-md shadow-red-950/30'
+              : 'text-neutral-400 hover:text-white hover:bg-neutral-900'
+          }`}
+        >
+          <Settings size={16} />
+          <span>Settings</span>
+        </button>
       </div>
     </div>
   );
