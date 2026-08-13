@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { User, Wallet, ShieldCheck, Landmark, Save, RefreshCw, ArrowUpRight, PlusCircle } from 'lucide-react';
+import Link from 'next/link';
+import { User, Wallet, Landmark, Save, RefreshCw, PlusCircle, Cake, Store, TrendingUp, X, CheckCircle, ArrowRight, Zap, Sparkles } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
 
 // Comprehensive list of Nigerian Banks for Paystack settlement routing
@@ -21,12 +22,16 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [userAuth, setUserAuth] = useState<any>(null);
+  
+  // State for Role Selection Modal
+  const [showRoleModal, setShowRoleModal] = useState(false);
 
   // Unified Form & Profile State
   const [profileData, setProfileData] = useState({
     fullName: '',
     matricNo: '',
     hostel: '',
+    dob: '', 
     bankName: '',
     accountNumber: '',
     walletBalance: 0
@@ -53,6 +58,7 @@ export default function ProfilePage() {
         fullName: profile?.full_name || '',
         matricNo: profile?.matric_no || '',
         hostel: profile?.hostel || '',
+        dob: profile?.dob || '', 
         bankName: profile?.bank_name || '',
         accountNumber: profile?.account_number || '',
         walletBalance: wallet?.balance || 0
@@ -76,6 +82,7 @@ export default function ProfilePage() {
         full_name: profileData.fullName,
         matric_no: profileData.matricNo,
         hostel: profileData.hostel,
+        dob: profileData.dob, 
         bank_name: profileData.bankName,
         account_number: profileData.accountNumber,
         updated_at: new Date().toISOString()
@@ -99,7 +106,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
       
       {/* HEADER MATRIX */}
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-xl">
@@ -113,10 +120,14 @@ export default function ProfilePage() {
           </p>
         </div>
 
-        <a href="/seller" className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-4 py-3 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-amber-950/30 active:scale-95">
+        {/* ROLE SELECTION BUTTON */}
+        <button 
+          onClick={() => setShowRoleModal(true)}
+          className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-4 py-3 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-amber-950/30 active:scale-95 cursor-pointer"
+        >
           <PlusCircle size={16} />
-          <span>Become a Seller</span>
-        </a>
+          <span>Choose a Role to Become</span>
+        </button>
       </div>
 
       <form onSubmit={handleUpdateProfile} className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
@@ -143,7 +154,7 @@ export default function ProfilePage() {
           
           {/* STUDENT CAMPUS METADATA */}
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-4 shadow-xl">
-            <h3 className="text-sm font-bold text-neutral-200 border-b border-neutral-900 pb-3 uppercase tracking-wider font-mono text-xs text-neutral-400">
+            <h3 className="text-sm font-bold border-b border-neutral-900 pb-3 uppercase tracking-wider font-mono text-xs text-neutral-400">
               Personal Identity Parameters
             </h3>
             
@@ -172,6 +183,20 @@ export default function ProfilePage() {
                 />
               </div>
 
+              {/* DATE OF BIRTH FIELD */}
+              <div className="space-y-1 sm:col-span-2">
+                <label className="text-neutral-400 flex items-center gap-1">
+                  <Cake size={13} className="text-amber-500" /> Date of Birth (Birthday Campaign Rewards)
+                </label>
+                <input 
+                  type="date"
+                  required
+                  value={profileData.dob}
+                  onChange={(e) => setProfileData({...profileData, dob: e.target.value})}
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-red-500 font-mono"
+                />
+              </div>
+
               <div className="space-y-1 sm:col-span-2">
                 <label className="text-neutral-400">Current Campus Hostel / Location Residence</label>
                 <input 
@@ -188,7 +213,7 @@ export default function ProfilePage() {
 
           {/* EXTENDED BANK SYSTEM SELECTION */}
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-4 shadow-xl">
-            <h3 className="text-sm font-bold text-neutral-200 border-b border-neutral-900 pb-3 flex items-center gap-2 uppercase tracking-wider font-mono text-xs text-neutral-400">
+            <h3 className="text-sm font-bold border-b border-neutral-900 pb-3 flex items-center gap-2 uppercase tracking-wider font-mono text-xs text-neutral-400">
               <Landmark size={15} className="text-amber-500" /> Paystack Routing System Destination
             </h3>
 
@@ -236,6 +261,125 @@ export default function ProfilePage() {
         </div>
 
       </form>
+
+      {/* 🚀 ROLE SELECTION MODAL */}
+      {showRoleModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-3xl max-w-2xl w-full p-6 sm:p-8 space-y-6 shadow-2xl relative animate-in fade-in zoom-in duration-150">
+            
+            {/* CLOSE BUTTON */}
+            <button 
+              onClick={() => setShowRoleModal(false)}
+              className="absolute top-5 right-5 text-neutral-400 hover:text-white p-1 rounded-lg bg-neutral-900 border border-neutral-800 transition-all cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+
+            {/* MODAL HEADER */}
+            <div className="space-y-1 text-center sm:text-left">
+              <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-amber-500 bg-amber-950/50 px-2.5 py-0.5 rounded border border-amber-800/60">
+                FUHSI Role Activation
+              </span>
+              <h2 className="text-xl sm:text-2xl font-black text-white">Choose a Role to Become</h2>
+              <p className="text-xs text-neutral-400">Select how you want to expand your profile capabilities on FUHSI Market.</p>
+            </div>
+
+            {/* OPTIONS GRID */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              
+              {/* CARD 1: SELLER */}
+              <div className="bg-neutral-900/80 border border-neutral-800 hover:border-red-500/50 rounded-2xl p-5 space-y-4 flex flex-col justify-between transition-all">
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <div className="p-2.5 rounded-xl bg-red-950/50 border border-red-900/50 text-red-500">
+                      <Store size={22} />
+                    </div>
+                    <span className="text-[10px] font-mono font-bold text-red-400 bg-red-950/40 px-2.5 py-1 rounded border border-red-800/60">
+                      ₦1,500 / mo
+                    </span>
+                  </div>
+
+                  <div>
+                    <h3 className="text-base font-bold text-white">Become a Seller</h3>
+                    <p className="text-xs text-neutral-400 mt-1">
+                      List and sell your goods, electronics, books, or hostel services directly to students.
+                    </p>
+                  </div>
+
+                  <ul className="space-y-1.5 text-[11px] text-neutral-300 font-mono">
+                    <li className="flex items-center gap-1.5">
+                      <CheckCircle size={13} className="text-emerald-500 shrink-0" /> Unlimited product listings
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <CheckCircle size={13} className="text-emerald-500 shrink-0" /> Seller Studio & Order Management
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <CheckCircle size={13} className="text-emerald-500 shrink-0" /> Escrow payment protection
+                    </li>
+                  </ul>
+                </div>
+
+                <Link href="/seller/subscribe" className="block pt-2">
+                  <button className="w-full bg-red-600 hover:bg-red-500 text-white font-bold text-xs py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                    Become Seller (₦1.5k/mo) <ArrowRight size={14} />
+                  </button>
+                </Link>
+              </div>
+
+              {/* CARD 2: AFFILIATE (ALL-IN-ONE) */}
+              <div className="bg-neutral-900/80 border border-amber-500/40 hover:border-amber-500 rounded-2xl p-5 space-y-4 flex flex-col justify-between transition-all relative overflow-hidden">
+                <div className="absolute -top-3 -right-3 bg-amber-500 text-black text-[9px] font-black uppercase tracking-wider px-3 py-1 rounded-bl-lg flex items-center gap-1">
+                  <Sparkles size={10} /> All-In-One
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <div className="p-2.5 rounded-xl bg-amber-950/50 border border-amber-900/50 text-amber-500">
+                      <TrendingUp size={22} />
+                    </div>
+                    <span className="text-[10px] font-mono font-bold text-amber-400 bg-amber-950/40 px-2.5 py-1 rounded border border-amber-800/60">
+                      ₦2,000 / mo
+                    </span>
+                  </div>
+
+                  <div>
+                    <h3 className="text-base font-bold text-white">Become an Affiliate</h3>
+                    <p className="text-xs text-neutral-400 mt-1">
+                      Get <strong>ALL Seller features</strong> PLUS referral commissions when you bring vendors to FUHSI Market.
+                    </p>
+                  </div>
+
+                  <ul className="space-y-1.5 text-[11px] text-neutral-300 font-mono">
+                    <li className="flex items-center gap-1.5">
+                      <CheckCircle size={13} className="text-amber-500 shrink-0" /> Includes <strong>ALL Seller Features</strong>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <CheckCircle size={13} className="text-amber-500 shrink-0" /> Full Affiliate Hub & Link Generator
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <CheckCircle size={13} className="text-amber-500 shrink-0" /> Earn commissions on recruited sellers
+                    </li>
+                  </ul>
+                </div>
+
+                <Link href="/affiliate/subscribe" className="block pt-2">
+                  <button className="w-full bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                    Become Affiliate (₦2k/mo) <Zap size={14} />
+                  </button>
+                </Link>
+              </div>
+
+            </div>
+
+            {/* MODAL FOOTER */}
+            <div className="text-center text-[11px] text-neutral-500 border-t border-neutral-900 pt-3">
+              💡 <strong>Pro Tip:</strong> Becoming an Affiliate (₦2,000/mo) includes full seller privileges so you don't need to pay for a Seller sub separately!
+            </div>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
