@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Heart, ShoppingCart, Trash2 } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
+import { formatNaira } from '@/utils/money';
 
 export default function WishlistPage() {
   const supabase = createClient();
@@ -87,7 +88,7 @@ export default function WishlistPage() {
                   <div className="flex justify-between items-start gap-2">
                     <h3 className="text-sm font-bold text-neutral-200 line-clamp-1">{product.title}</h3>
                     <span className="text-emerald-400 font-mono font-black text-xs">
-                      ₦{(product.price / 100).toLocaleString()}
+                      ₦{formatNaira(product.price)}
                     </span>
                   </div>
                   <p className="text-[11px] text-neutral-500 line-clamp-2 mt-1">{product.description}</p>

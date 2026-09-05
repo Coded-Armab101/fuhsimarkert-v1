@@ -6,6 +6,27 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { User, Mail, Lock, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 
+const GoogleIcon = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+    <path
+      fill="#4285F4"
+      d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.08 3.56-5.16 3.56-8.82Z"
+    />
+    <path
+      fill="#34A853"
+      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09A11.99 11.99 0 0 0 12 24Z"
+    />
+    <path
+      fill="#FBBC05"
+      d="M5.27 14.29a7.19 7.19 0 0 1 0-4.58V6.62H1.29a12.02 12.02 0 0 0 0 10.76l3.98-3.09Z"
+    />
+    <path
+      fill="#EA4335"
+      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0A11.99 11.99 0 0 0 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75Z"
+    />
+  </svg>
+);
+
 export default function SignUpPage() {
   const router = useRouter();
   const supabase = createClient();
@@ -14,6 +35,7 @@ export default function SignUpPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogle, setIsGoogle] = useState(false);
   const [uiStatus, setUiStatus] = useState({ type: '', text: '' });
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -33,6 +55,12 @@ export default function SignUpPage() {
         email,
         password,
         options: {
+          // Send the confirmation link back to whichever origin the user
+          // actually signed up on. Without this it always follows the Site URL
+          // configured in the Supabase dashboard, so a localhost signup mails a
+          // link to the ngrok host — landing the session on a different origin
+          // (and therefore a different localStorage cart).
+          emailRedirectTo: `${window.location.origin}/login`,
           // The user metadata maps directly to our public profile trigger!
           data: {
             full_name: fullName
@@ -52,10 +80,33 @@ export default function SignUpPage() {
       setEmail('');
       setPassword('');
 
-    } catch (err: any) {
-      setUiStatus({ type: 'error', text: err.message || 'An error occurred during account registration.' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An error occurred during account registration.';
+      setUiStatus({ type: 'error', text: message });
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleGoogle = async () => {
+    setIsGoogle(true);
+    setUiStatus({ type: '', text: '' });
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          // Supabase's PKCE flow bounces back here with a one-time `code` that
+          // `/auth/callback` exchanges for a session cookie before landing the
+          // user on `/buyer`. Redirecting straight to a protected route would
+          // never exchange the code, so no session is created.
+          redirectTo: `${window.location.origin}/auth/callback?next=/buyer`,
+        },
+      });
+      if (error) throw error;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not start Google sign-in.';
+      setUiStatus({ type: 'error', text: message });
+      setIsGoogle(false);
     }
   };
 
@@ -128,6 +179,25 @@ export default function SignUpPage() {
             {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <span>Register Profile</span>}
           </button>
         </form>
+
+        <div className="relative my-6">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-neutral-800" />
+          </div>
+          <div className="relative flex justify-center text-xs">
+            <span className="bg-neutral-950 px-3 text-neutral-500 font-mono">or sign up with</span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleGoogle}
+          disabled={isGoogle}
+          className="w-full bg-neutral-900 hover:bg-neutral-800 disabled:bg-neutral-900 border border-neutral-700 hover:border-neutral-600 text-white font-semibold py-3 px-4 rounded-xl flex items-center justify-center space-x-2 transition-all cursor-pointer disabled:opacity-70"
+        >
+          {isGoogle ? <Loader2 className="animate-spin" size={18} /> : <GoogleIcon />}
+          <span>{isGoogle ? 'Redirecting to Google…' : 'Continue with Google'}</span>
+        </button>
 
         <p className="text-xs text-center text-neutral-500 mt-6">
           Already verified? <Link href="/login" className="text-red-500 hover:underline">Log in here</Link>

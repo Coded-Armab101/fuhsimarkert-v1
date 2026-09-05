@@ -3,14 +3,24 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
-import { Package, Plus, Trash2, Loader2, Image as ImageIcon } from 'lucide-react';
+import { formatNaira } from '@/utils/money';
+import { Package, Plus, Trash2, Pencil, Loader2, Image as ImageIcon } from 'lucide-react';
+
+type Product = {
+  id: string;
+  title: string;
+  description?: string | null;
+  price: number;
+  image_url?: string | null;
+  stock?: number | null;
+};
 
 export default function SellerProductsPage() {
   const router = useRouter();
   const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
-  const [products, setProducts] = useState<any[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -89,25 +99,45 @@ export default function SellerProductsPage() {
           {products.map((item) => (
             <div key={item.id} className="bg-neutral-950 border border-neutral-800 p-4 rounded-2xl flex flex-col justify-between gap-4">
               <div className="space-y-2">
-                {item.image_url ? (
-                  <img src={item.image_url} alt={item.title} className="w-full h-40 object-cover rounded-xl" />
-                ) : (
-                  <div className="w-full h-40 bg-neutral-900 rounded-xl flex items-center justify-center text-neutral-700">
-                    <ImageIcon size={28} />
-                  </div>
-                )}
+                <div className="relative">
+                  {item.image_url ? (
+                    <img src={item.image_url} alt={item.title} className="w-full h-40 object-cover rounded-xl" />
+                  ) : (
+                    <div className="w-full h-40 bg-neutral-900 rounded-xl flex items-center justify-center text-neutral-700">
+                      <ImageIcon size={28} />
+                    </div>
+                  )}
+                  {item.stock !== null && item.stock !== undefined && (
+                    <span className={`absolute top-2 left-2 text-[9px] font-mono font-bold uppercase px-2 py-0.5 rounded ${
+                      Number(item.stock) > 0
+                        ? 'bg-emerald-950/80 border border-emerald-800/60 text-emerald-400'
+                        : 'bg-red-950/80 border border-red-800/60 text-red-400'
+                    }`}>
+                      {Number(item.stock) > 0 ? `${item.stock} in stock` : 'Out of stock'}
+                    </span>
+                  )}
+                </div>
                 <h4 className="font-bold text-white text-sm line-clamp-1">{item.title}</h4>
                 <p className="text-xs text-neutral-400 line-clamp-2">{item.description}</p>
-                <div className="text-red-500 font-bold font-mono text-sm">₦{Number(item.price).toLocaleString()}</div>
+                <div className="text-red-500 font-bold font-mono text-sm">₦{formatNaira(item.price)}</div>
               </div>
 
-              <button
-                onClick={() => handleDeleteProduct(item.id)}
-                className="w-full bg-neutral-900 hover:bg-red-950 text-neutral-300 hover:text-red-400 border border-neutral-800 hover:border-red-800 font-bold text-xs py-2 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Trash2 size={14} />
-                <span>Delete Listing</span>
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => router.push(`/seller/products/${item.id}`)}
+                  className="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 font-bold text-xs py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Pencil size={13} />
+                  <span>Edit</span>
+                </button>
+                <button
+                  onClick={() => handleDeleteProduct(item.id)}
+                  className="bg-neutral-900 hover:bg-red-950 text-neutral-300 hover:text-red-400 border border-neutral-800 hover:border-red-800 font-bold text-xs py-2 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Trash2 size={13} />
+                  <span>Delete</span>
+                </button>
+              </div>
             </div>
           ))}
         </div>

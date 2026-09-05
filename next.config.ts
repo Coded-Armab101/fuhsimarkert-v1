@@ -1,7 +1,8 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  allowedDevOrigins: ['quail-conjoined-reverb.ngrok-free.dev'],
+  /* keep any other existing configs here */
 };
 
 export default nextConfig;

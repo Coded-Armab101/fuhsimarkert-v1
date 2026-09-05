@@ -4,14 +4,21 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { Store, PackagePlus, ShoppingBag, TrendingUp, Loader2 } from 'lucide-react';
+import { formatNaira } from '@/utils/money';
+
+type Profile = {
+  full_name?: string | null;
+  is_seller?: boolean | null;
+};
 
 export default function SellerPage() {
   const router = useRouter();
   const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<any>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [productCount, setProductCount] = useState(0);
+  const [balanceKobo, setBalanceKobo] = useState(0);
 
   useEffect(() => {
     const fetchSellerData = async () => {
@@ -36,12 +43,16 @@ export default function SellerPage() {
           return;
         }
 
-        const { count } = await supabase
-          .from('products')
-          .select('*', { count: 'exact', head: true })
-          .eq('seller_id', user.id);
+        const [{ count }, { data: wallet }] = await Promise.all([
+          supabase
+            .from('products')
+            .select('*', { count: 'exact', head: true })
+            .eq('seller_id', user.id),
+          supabase.from('wallets').select('balance').eq('user_id', user.id).maybeSingle(),
+        ]);
 
         setProductCount(count || 0);
+        setBalanceKobo(wallet ? Number(wallet.balance) || 0 : 0);
         setLoading(false);
       } catch (err) {
         console.error('Failed to load seller overview:', err);
@@ -88,10 +99,16 @@ export default function SellerPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono">
         <div className="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl space-y-2">
           <div className="flex justify-between items-center text-neutral-400 text-xs">
-            <span>Total Revenue</span>
+            <span>Wallet Balance</span>
             <TrendingUp size={16} className="text-emerald-500" />
           </div>
-          <div className="text-2xl font-black text-white">₦0.00</div>
+          <button
+            onClick={() => router.push('/seller/wallet')}
+            className="text-2xl font-black text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
+            title="View wallet"
+          >
+            ₦{formatNaira(balanceKobo)}
+          </button>
         </div>
 
         <div className="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl space-y-2">

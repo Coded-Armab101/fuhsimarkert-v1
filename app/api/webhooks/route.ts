@@ -1,70 +1,120 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
 import crypto from 'crypto';
+import { createAdminClient } from '@/utils/supabase/admin';
+import { recordOrder } from '@/utils/paystack/recordOrder';
+
+/**
+ * Paystack webhook — `charge.success` → escrow orders.
+ *
+ * This is an inbound push from Paystack. It carries no cookies, so it must use
+ * the service-role client; the cookie-based client would run as `anon` and RLS
+ * would reject every write. The order-creation logic is shared with the active
+ * verify path (`/api/paystack/verify`) via `utils/paystack/recordOrder`, so an
+ * order is created whether or not this webhook ever fires.
+ */
+
+function isFromPaystack(rawBody: string, signature: string | null) {
+  const secret = process.env.PAYSTACK_SECRET_KEY;
+  if (!secret || !signature) return false;
+
+  const expected = crypto.createHmac('sha512', secret).update(rawBody).digest('hex');
+
+  // timingSafeEqual throws on length mismatch, so compare lengths first. Both
+  // sides are hex of a fixed-width digest, so this leaks nothing useful.
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  const receivedBuf = Buffer.from(signature, 'utf8');
+  if (expectedBuf.length !== receivedBuf.length) return false;
+
+  return crypto.timingSafeEqual(expectedBuf, receivedBuf);
+}
 
 export async function POST(request: Request) {
+  let rawBody: string;
   try {
-    const rawBody = await request.text();
-    
-    // 🔒 SECURITY CHECK: Verify the request genuinely came from Paystack's official system
-    const hash = crypto
-      .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY!)
-      .update(rawBody)
-      .digest('hex');
-      
-    if (hash !== request.headers.get('x-paystack-signature')) {
-      return NextResponse.json({ error: 'Unauthorized signature bypass attempt.' }, { status: 401 });
-    }
+    rawBody = await request.text();
+  } catch {
+    return NextResponse.json({ error: 'Malformed request.' }, { status: 400 });
+  }
 
-    const event = JSON.parse(rawBody);
+  if (!isFromPaystack(rawBody, request.headers.get('x-paystack-signature'))) {
+    // Deliberately vague: do not tell an attacker which check failed.
+    return NextResponse.json({ error: 'Invalid signature.' }, { status: 401 });
+  }
 
-    // Only proceed if the transaction event is officially successful
-    if (event.event === 'charge.success') {
-      const supabase = await createClient();
-      const sessionData = event.data;
-      const metadata = sessionData.metadata; // Pulling back the data variables we sent in Step 2
+  let event: {
+    event?: string;
+    data?: {
+      reference?: string;
+      metadata?: {
+        buyer_id?: string;
+        product_ids?: string[];
+        delivery_type?: string;
+        delivery_fee_kobo?: number;
+        receiver_name?: string;
+        receiver_phone?: string;
+        matric_number?: string;
+        delivery_address?: string | null;
+        wallet_kobo?: number;
+      };
+    };
+  };
+  try {
+    event = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json({ error: 'Malformed payload.' }, { status: 400 });
+  }
 
-      const buyerId = metadata.buyer_id;
-      const productIds = metadata.product_ids; // This is our array of purchased items
+  // Acknowledge anything we do not handle, so Paystack stops retrying it.
+  if (event.event !== 'charge.success') {
+    return NextResponse.json({ received: true }, { status: 200 });
+  }
 
-      // 1. Fetch details for all purchased products to read their true names, prices, and seller IDs
-      const { data: products } = await supabase
-        .from('products')
-        .select('id, title, price, seller_id')
-        .in('id', productIds);
+  const reference = event.data?.reference;
+  const buyerId = event.data?.metadata?.buyer_id;
+  const productIds = event.data?.metadata?.product_ids;
+  const deliveryType = event.data?.metadata?.delivery_type === 'delivery' ? 'delivery' : 'pickup';
+  const deliveryFeeKobo = Number(event.data?.metadata?.delivery_fee_kobo) > 0
+    ? Number(event.data?.metadata?.delivery_fee_kobo)
+    : 0;
+  const receiverName = event.data?.metadata?.receiver_name ?? null;
+  const receiverPhone = event.data?.metadata?.receiver_phone ?? null;
+  const matricNumber = event.data?.metadata?.matric_number ?? null;
+  const receiverAddress = event.data?.metadata?.delivery_address ?? null;
+  const walletKobo = Number(event.data?.metadata?.wallet_kobo) > 0
+    ? Number(event.data?.metadata?.wallet_kobo)
+    : 0;
 
-      if (products && products.length > 0) {
-        // 2. Loop through each item and create an escrow record inside the orders table
-        for (const product of products) {
-          await supabase.from('orders').insert([
-            {
-              buyer_id: buyerId,
-              seller_id: product.seller_id,
-              product_name: product.title,
-              amount: product.price, // Kept safely in Kobo
-              status: 'locked',      // Locked in escrow safely
-              paystack_reference: sessionData.reference
-            }
-          ]);
+  if (!reference || !buyerId || !Array.isArray(productIds) || productIds.length === 0) {
+    console.error('[webhook] charge.success missing reference/buyer_id/product_ids', {
+      reference,
+    });
+    return NextResponse.json({ received: true }, { status: 200 });
+  }
 
-          // Optional: Mark the original product item as sold so it drops off the public shop feed
-          await supabase
-            .from('products')
-            .update({ is_sold: true })
-            .eq('id', product.id);
-        }
-
-        // 3. Clear the buyer's cart clean since they have completed the checkout
-        await supabase
-          .from('carts')
-          .delete()
-          .eq('user_id', buyerId);
-      }
-    }
+  try {
+    const supabase = createAdminClient();
+    await recordOrder(supabase, {
+      buyerId,
+      reference,
+      productIds,
+      deliveryType,
+      deliveryFeeKobo,
+      receiverName,
+      receiverPhone,
+      matricNumber,
+      deliveryAddress: receiverAddress,
+      walletKobo,
+    });
 
     return NextResponse.json({ received: true }, { status: 200 });
-
   } catch (err) {
-    return NextResponse.json({ error: 'Webhook processing fault.' }, { status: 500 });
+    // Log server-side with the reference so it can be reconciled by hand; never
+    // return the database error to the caller.
+    console.error('[webhook] failed to record escrow order', { reference, err });
+
+    // 200, not 500: the signature was valid and the payload was understood, so
+    // Paystack retrying will not help. Reconcile from the log instead of
+    // accumulating retries.
+    return NextResponse.json({ received: true }, { status: 200 });
   }
 }

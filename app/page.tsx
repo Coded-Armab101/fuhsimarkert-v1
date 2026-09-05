@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ShoppingBag, ArrowRight, ShieldCheck, Users } from 'lucide-react';
+import { ShoppingBag, ArrowRight, ShieldCheck, CheckCircle } from 'lucide-react';
 
 export default function RootLandingPage() {
   return (
@@ -29,11 +29,11 @@ export default function RootLandingPage() {
         </div>
 
         <h1 className="text-4xl md:text-6xl font-black tracking-tight leading-tight max-w-3xl">
-          Buy, Sell, and Promote Safely Within Your <span className="text-red-500">Campus.</span>
+          Buy, Sell, and Explore Safely Within Your <span className="text-red-500">Campus.</span>
         </h1>
         
         <p className="text-neutral-400 mt-6 max-w-xl text-sm md:text-base leading-relaxed">
-          Fuhsi Market bridges the trust gap between student buyers, sellers, and affiliates with zero stress and absolute safety.
+          Fuhsi Market bridges the trust gap between student buyers and sellers with zero stress and absolute safety.
         </p>
 
         {/* PRIMARY GATEWAY BUTTONS */}
@@ -67,10 +67,10 @@ export default function RootLandingPage() {
 
           <div className="space-y-2">
             <div className="w-8 h-8 rounded-lg bg-red-950/40 border border-red-900/40 flex items-center justify-center text-red-500">
-              <Users size={18} />
+              <CheckCircle size={18} />
             </div>
-            <h3 className="text-sm font-bold text-neutral-200">Affiliate Scaling</h3>
-            <p className="text-xs text-neutral-500 leading-relaxed">Promote active peer marketplace links across group chats and earn clean percentage commissions.</p>
+            <h3 className="text-sm font-bold text-neutral-200">Student Verified</h3>
+            <p className="text-xs text-neutral-500 leading-relaxed">Every member is tied to a verified campus identity before trading on the platform.</p>
           </div>
         </div>
       </main>

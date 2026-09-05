@@ -1,96 +1,33 @@
-'use client';
+import { redirect } from 'next/navigation';
+import { createClient } from '@/utils/supabase/server';
 
-import React from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Package, Plus, Receipt, Settings } from 'lucide-react';
-
-export default function SellerLayout({
+/**
+ * Server-side auth gate for every dashboard route.
+ *
+ * `proxy.ts` already redirects signed-out visitors, but proxy coverage can be
+ * lost by a matcher edit and the Next docs treat it as an optimistic check only.
+ * This layout is the backstop that runs during render, so no dashboard page can
+ * be reached — or start fetching — without a verified session.
+ *
+ * Role checks are per-area (see `proxy.ts` and `seller/subscribe/page.tsx`), not
+ * here, because `/buyer` is open to any signed-in user.
+ */
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const pathname = usePathname();
+  const supabase = await createClient();
 
-  const navItems = [
-    {
-      label: 'Home',
-      href: '/seller',
-      icon: LayoutDashboard,
-    },
-    {
-      label: 'Products',
-      href: '/seller/products',
-      icon: Package,
-    },
-    {
-      label: 'Post',
-      href: '/seller/products/new',
-      icon: Plus,
-      isAction: true,
-    },
-    {
-      label: 'Orders',
-      href: '/seller/orders',
-      icon: Receipt,
-    },
-    {
-      label: 'Settings',
-      href: '/seller/settings',
-      icon: Settings,
-    },
-  ];
+  // getUser() verifies the token with Supabase. getSession() would trust a
+  // cookie, which is client-supplied.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  return (
-    <div className="min-h-screen bg-black text-white relative pb-28">
-      {/* SELLER PAGES CONTENT */}
-      <main className="w-full">{children}</main>
+  if (!user) {
+    redirect('/login');
+  }
 
-      {/* FIXED SELLER FLOATING BOTTOM NAV BAR */}
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-md">
-        <div className="bg-neutral-950/95 backdrop-blur-xl border border-neutral-800/80 p-2 rounded-2xl shadow-2xl flex items-center justify-between gap-1">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            
-            // Check exact match for root `/seller` or sub-route match
-            const isActive =
-              item.href === '/seller'
-                ? pathname === '/seller'
-                : pathname?.startsWith(item.href);
-
-            if (item.isAction) {
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="flex-1 flex flex-col items-center justify-center group"
-                >
-                  <div className="bg-red-600 group-hover:bg-red-500 text-white p-2.5 rounded-xl shadow-lg shadow-red-950/60 transition-transform active:scale-95 flex items-center justify-center">
-                    <Icon size={18} strokeWidth={2.5} />
-                  </div>
-                </Link>
-              );
-            }
-
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex-1 flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all ${
-                  isActive
-                    ? 'bg-neutral-900 text-red-500 font-bold border border-neutral-800 shadow-inner'
-                    : 'text-neutral-400 hover:text-white hover:bg-neutral-900/50'
-                }`}
-              >
-                <Icon size={18} />
-                <span className="text-[10px] font-mono tracking-tight mt-1">
-                  {item.label}
-                </span>
-              </Link>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
+  return <>{children}</>;
 }
