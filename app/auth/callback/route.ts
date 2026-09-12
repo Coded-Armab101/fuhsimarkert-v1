@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import {
+  SESSION_NONCE_COOKIE,
+  SESSION_NONCE_COOKIE_MAX_AGE,
+  rotateSessionNonce,
+} from '@/utils/single-session';
 
 /**
  * OAuth callback for Supabase's PKCE flow.
@@ -30,7 +35,24 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // The exchange just wrote the session cookies. Redirect (not rewrite) so the
-  // browser requests the protected page with the new cookies in hand.
-  return NextResponse.redirect(new URL(next, request.nextUrl.origin));
+  // The exchange just wrote the session cookies. Mint the single-session nonce
+  // here — one request, one DB write — and carry the httpOnly cookie on the
+  // redirect, so the protected page's navigation never has to mint it lazily
+  // (which caused sign-out races under concurrent proxy requests).
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const redirect = NextResponse.redirect(new URL(next, request.nextUrl.origin));
+  if (user) {
+    const nonce = await rotateSessionNonce(supabase, user.id);
+    redirect.cookies.set(SESSION_NONCE_COOKIE, nonce, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: SESSION_NONCE_COOKIE_MAX_AGE,
+    });
+  }
+  return redirect;
 }

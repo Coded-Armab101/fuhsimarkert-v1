@@ -56,6 +56,17 @@ export default function LoginPage() {
 
       if (error) throw error;
 
+      // Mint the single-session nonce now, server-side (one request, one DB
+      // write), so the browser carries its httpOnly cookie into /buyer. Doing
+      // this eagerly — instead of letting the proxy mint it on the first
+      // navigation — avoids concurrent proxy requests racing and signing the
+      // user straight back out.
+      try {
+        await fetch('/api/session/rotate', { method: 'POST' });
+      } catch (rotateError) {
+        console.error('Session nonce mint failed (non-fatal):', rotateError);
+      }
+
       // Upon success, push them straight past the entry gate to the default hub
       router.push('/buyer');
 

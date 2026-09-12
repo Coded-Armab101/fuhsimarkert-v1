@@ -5,7 +5,6 @@ import {
   SESSION_NONCE_COOKIE,
   SESSION_NONCE_COOKIE_MAX_AGE,
   rotateSessionNonce,
-  nonceValid,
 } from '@/utils/single-session';
 
 /**
@@ -156,8 +155,8 @@ export async function proxy(request: NextRequest) {
 
   const storedNonce = nonceRow?.session_nonce ?? null;
 
-  if (cookieNonce && !nonceValid(cookieNonce, storedNonce)) {
-    // Newer session exists elsewhere — revoke this one.
+  if (cookieNonce && storedNonce && cookieNonce !== storedNonce) {
+    // Cookie belongs to a superseded session — revoke.
     await supabase.auth.signOut();
     const login = request.nextUrl.clone();
     login.pathname = '/login';
@@ -168,11 +167,23 @@ export async function proxy(request: NextRequest) {
     return redirect;
   }
 
-  if (!cookieNonce) {
-    // Fresh session: rotate the nonce and bind this device to it. The anon-key
-    // server client runs as this signed-in user, so the profiles UPDATE is
-    // governed by "Users can update their own profile" RLS — it can only touch
-    // their own row.
+  if (!cookieNonce && storedNonce) {
+    // Cookie was lost (cleared, new browser tab, etc.) but the stored nonce
+    // confirms an active session on this device. Adopt it — no DB write,
+    // no race. Concurrent proxy runs all converge on the same value.
+    response.cookies.set(SESSION_NONCE_COOKIE, storedNonce, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: SESSION_NONCE_COOKIE_MAX_AGE,
+    });
+  }
+
+  if (!cookieNonce && !storedNonce) {
+    // Truly fresh session (first-ever login or pre-nonce user).
+    // Mint once. If concurrent requests race this, only one nonce ends up
+    // in the DB; the next navigation converges via the adopt path above.
     const fresh = await rotateSessionNonce(supabase, user.id);
     response.cookies.set(SESSION_NONCE_COOKIE, fresh, {
       httpOnly: true,
