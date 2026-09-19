@@ -90,13 +90,27 @@ export async function POST(request: Request) {
   const walletKobo = Number(event.data?.metadata?.wallet_kobo) > 0
     ? Number(event.data?.metadata?.wallet_kobo)
     : 0;
-  const checkoutItems = Array.isArray(event.data?.metadata?.checkout_items)
-    ? event.data!.metadata!.checkout_items.map((item) => ({
-        productId: item?.product_id,
-        quantity: Number(item?.quantity),
-        unitPriceKobo: Number(item?.unit_price_kobo),
+
+const checkoutItems = Array.isArray(event.data?.metadata?.checkout_items)
+  ? event.data.metadata.checkout_items
+      .filter(
+        (
+          item,
+        ): item is {
+          product_id: string;
+          quantity?: number;
+          unit_price_kobo?: number;
+        } =>
+          typeof item?.product_id === 'string' &&
+          item.product_id.length > 0,
+      )
+      .map((item) => ({
+        productId: item.product_id,
+        quantity: Number(item.quantity),
+        unitPriceKobo: Number(item.unit_price_kobo),
       }))
-    : [];
+  : [];  
+
   const expectedTotalKobo = Number(event.data?.metadata?.expected_total_kobo);
   const gatewayAmountKobo = Number(event.data?.amount);
   const currency = event.data?.currency;
