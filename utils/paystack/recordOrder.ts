@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
 import { sellerCommissionKobo, buyerServiceFeeKobo } from '@/utils/pricing';
 
 /**
@@ -26,7 +27,7 @@ export function generateDeliveryCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1 for clarity
   let code = '';
   for (let i = 0; i < 6; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
+    code += chars[crypto.randomInt(chars.length)];
   }
   return `FHSI-${code}`;
 }
@@ -35,6 +36,8 @@ export interface RecordOrderInput {
   buyerId: string;
   reference: string;
   productIds: string[];
+  /** Frozen checkout snapshot created server-side before payment. */
+  items: Array<{ productId: string; quantity: number; unitPriceKobo: number }>;
   deliveryType: 'pickup' | 'delivery';
   deliveryFeeKobo: number;
   receiverName: string | null;
@@ -49,21 +52,91 @@ export interface RecordOrderInput {
    * webhook and the browser verify never double-charges the wallet.
    */
   walletKobo?: number;
+  /** Actual Paystack amount in kobo; 0 for wallet-only checkout. */
+  gatewayAmountKobo: number;
 }
 
 export async function recordOrder(
   supabase: SupabaseClient,
   input: RecordOrderInput,
 ): Promise<number> {
-  // Wallet-first split payment: debit the buyer's wallet for the agreed amount
-  // before escrowing anything, so an insufficient wallet aborts with no side
-  // effects. `debit_wallet` is a SECURITY DEFINER function that runs atomically:
-  // it only decrements when the balance still covers the amount, records the
-  // debit in the wallet_debits ledger (unique on order_ref, so the webhook +
-  // verify race for the same reference only charges once), and returns false
-  // when the balance is too low. No order/escrow/cart rows have been written at
-  // this point, so a failure here leaves the system untouched.
+  // The payment flow passes a server-created, immutable checkout snapshot.
+  // Never derive paid quantities/prices from the current cart here: the cart may
+  // have changed after payment initialization. We still re-read product identity,
+  // seller and stock from the database.
+  const snapshotById = new Map(
+    input.items.map((item) => [item.productId, item]),
+  );
+  const snapshotIds = [...snapshotById.keys()];
+  const uniqueProductIds = new Set(input.productIds);
+  if (snapshotIds.length === 0 || uniqueProductIds.size !== input.productIds.length ||
+      snapshotIds.length !== input.productIds.length ||
+      input.productIds.some((id) => !snapshotById.has(id))) {
+    throw new Error('invalid checkout snapshot');
+  }
+
+  const { data: products, error: productsError } = await supabase
+    .from('products')
+    .select('id, price, seller_id, stock')
+    .in('id', snapshotIds);
+
+  if (productsError) throw productsError;
+  if (!products || products.length !== snapshotIds.length) {
+    throw new Error('one or more products are unavailable');
+  }
+
+  const productById = new Map(products.map((p) => [p.id, p]));
+  const qtyByProduct = new Map<string, number>();
+
+  for (const item of input.items) {
+    const quantity = Number(item.quantity);
+    const unitPrice = Number(item.unitPriceKobo);
+    if (!Number.isSafeInteger(quantity) || quantity < 1 ||
+        !Number.isSafeInteger(unitPrice) || unitPrice < 0) {
+      throw new Error('invalid checkout snapshot values');
+    }
+
+    const product = productById.get(item.productId);
+    if (!product) throw new Error(`product ${item.productId} is unavailable`);
+
+    // Price is frozen at checkout. A later catalog-price change must not alter
+    // what the buyer paid or what gets escrowed.
+    qtyByProduct.set(item.productId, quantity);
+
+    const stock = product.stock;
+    if (stock !== null && stock !== undefined &&
+        (Number(stock) < 1 || quantity > Number(stock))) {
+      throw new Error(`insufficient stock for product ${item.productId}`);
+    }
+  }
+
+  const expectedGoodsKobo = input.items.reduce(
+    (sum, item) => sum + item.unitPriceKobo * item.quantity,
+    0,
+  );
+  const expectedBuyerFeeKobo = buyerServiceFeeKobo(expectedGoodsKobo);
+  const expectedTotalKobo =
+    expectedGoodsKobo +
+    Math.floor(Number(input.deliveryFeeKobo) || 0) +
+    expectedBuyerFeeKobo;
+
+  if (!Number.isSafeInteger(expectedTotalKobo) || expectedTotalKobo <= 0) {
+    throw new Error('invalid checkout total');
+  }
+
   const walletKobo = Math.floor(Number(input.walletKobo) || 0);
+  const gatewayAmountKobo = Math.floor(Number(input.gatewayAmountKobo));
+  if (!Number.isSafeInteger(gatewayAmountKobo) || gatewayAmountKobo < 0) {
+    throw new Error('invalid gateway amount');
+  }
+  if (walletKobo < 0 || walletKobo > expectedTotalKobo ||
+      gatewayAmountKobo + walletKobo !== expectedTotalKobo) {
+    throw new Error('payment amount does not match checkout total');
+  }
+
+  // Debit wallet only after the immutable checkout snapshot and payment amount
+  // have both been validated. This prevents a malformed/replayed payment from
+  // consuming wallet funds before validation fails.
   if (walletKobo > 0) {
     const { data: ok, error: debitError } = await supabase.rpc('debit_wallet', {
       p_user_id: input.buyerId,
@@ -73,48 +146,6 @@ export async function recordOrder(
     if (debitError) throw debitError;
     if (ok !== true) {
       throw new Error('Wallet balance is insufficient to complete the order.');
-    }
-  }
-
-  // Prices come from the database, never from the caller — the same rule
-  // /api/paystack follows when it computes the amount to charge.
-  const { data: products, error: productsError } = await supabase
-    .from('products')
-    .select('id, price, seller_id, stock')
-    .in('id', input.productIds);
-
-  if (productsError) throw productsError;
-  if (!products || products.length === 0) {
-    throw new Error('no products matched product_ids');
-  }
-
-  // Quantity lives in this buyer's `carts` rows (set at checkout), never in the
-  // request payload, so an order for quantity 5 is escrowed at 5 × price, not
-  // 1 × price — closing the undercharging/fraud case.
-  const { data: cartRows, error: cartRowsError } = await supabase
-    .from('carts')
-    .select('product_id, quantity')
-    .eq('user_id', input.buyerId)
-    .in('product_id', input.productIds);
-
-  if (cartRowsError) throw cartRowsError;
-
-  const qtyByProduct = new Map(
-    (cartRows || []).map((row) => [
-      row.product_id,
-      Number(row.quantity) > 0 ? Number(row.quantity) : 1,
-    ]),
-  );
-
-  // Stock guard: refuse to escrow more units than are in stock. The initial
-  // checkout route also checks, but the webhook/verify path re-checks here so a
-  // stale cart (or stock that changed mid-payment) cannot oversell.
-  const stockByProduct = new Map(products.map((p) => [p.id, p.stock]));
-  for (const product of products) {
-    const stock = stockByProduct.get(product.id);
-    const qty = qtyByProduct.get(product.id) ?? 1;
-    if (stock !== null && stock !== undefined && (Number(stock) < 1 || qty > Number(stock))) {
-      throw new Error(`insufficient stock for product ${product.id}`);
     }
   }
 
@@ -130,7 +161,7 @@ export async function recordOrder(
   const { error: ordersError } = await supabase.from('orders').upsert(
     products.map((product) => {
       const quantity = qtyByProduct.get(product.id) ?? 1;
-      const amountKobo = product.price * quantity;
+      const amountKobo = snapshotById.get(product.id)!.unitPriceKobo * quantity;
       return {
         buyer_id: input.buyerId,
         seller_id: product.seller_id,
@@ -241,11 +272,19 @@ export async function recordOrder(
     }
   }
 
-  const { error: soldError } = await supabase
-    .from('products')
-    .update({ is_sold: true })
-    .in('id', products.map((product) => product.id));
-  if (soldError) throw soldError;
+  // Mark tracked products sold out only when this purchase consumes the
+  // remaining stock. Unlimited-stock products remain available.
+  for (const product of products) {
+    if (product.stock === null || product.stock === undefined) continue;
+    const quantity = qtyByProduct.get(product.id) ?? 1;
+    if (Number(product.stock) - quantity <= 0) {
+      const { error: soldError } = await supabase
+        .from('products')
+        .update({ is_sold: true })
+        .eq('id', product.id);
+      if (soldError) throw soldError;
+    }
+  }
 
   // Decrement tracked stock. Row-level decrement keeps this atomic even when
   // two buyers pay around the same time; products with NULL stock (untracked /
@@ -265,7 +304,7 @@ export async function recordOrder(
     .from('carts')
     .delete()
     .eq('user_id', input.buyerId)
-    .in('id', products.map((product) => product.id));
+    .in('product_id', products.map((product) => product.id));
   if (cartError) throw cartError;
 
   return walletKobo;

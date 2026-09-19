@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { recordOrder } from '@/utils/paystack/recordOrder';
+import { buyerServiceFeeKobo } from '@/utils/pricing';
 
 /**
  * Paystack webhook — `charge.success` → escrow orders.
@@ -45,6 +46,8 @@ export async function POST(request: Request) {
     event?: string;
     data?: {
       reference?: string;
+      amount?: number;
+      currency?: string;
       metadata?: {
         buyer_id?: string;
         product_ids?: string[];
@@ -55,6 +58,10 @@ export async function POST(request: Request) {
         matric_number?: string;
         delivery_address?: string | null;
         wallet_kobo?: number;
+        checkout_items?: Array<{ product_id?: string; quantity?: number; unit_price_kobo?: number }>;
+        expected_total_kobo?: number;
+        purpose?: string;
+        currency?: string;
       };
     };
   };
@@ -83,11 +90,42 @@ export async function POST(request: Request) {
   const walletKobo = Number(event.data?.metadata?.wallet_kobo) > 0
     ? Number(event.data?.metadata?.wallet_kobo)
     : 0;
+  const checkoutItems = Array.isArray(event.data?.metadata?.checkout_items)
+    ? event.data!.metadata!.checkout_items.map((item) => ({
+        productId: item?.product_id,
+        quantity: Number(item?.quantity),
+        unitPriceKobo: Number(item?.unit_price_kobo),
+      }))
+    : [];
+  const expectedTotalKobo = Number(event.data?.metadata?.expected_total_kobo);
+  const gatewayAmountKobo = Number(event.data?.amount);
+  const currency = event.data?.currency;
 
   if (!reference || !buyerId || !Array.isArray(productIds) || productIds.length === 0) {
     console.error('[webhook] charge.success missing reference/buyer_id/product_ids', {
       reference,
     });
+    return NextResponse.json({ received: true }, { status: 200 });
+  }
+
+  if (event.data?.metadata?.purpose !== 'marketplace_checkout' ||
+      event.data?.metadata?.currency !== 'NGN' || currency !== 'NGN' ||
+      !Number.isSafeInteger(expectedTotalKobo) || expectedTotalKobo <= 0 ||
+      !Number.isSafeInteger(gatewayAmountKobo) || gatewayAmountKobo < 0 ||
+      new Set(productIds).size !== productIds.length ||
+      checkoutItems.length !== productIds.length ||
+      checkoutItems.some((i) => !i.productId || !Number.isSafeInteger(i.quantity) || i.quantity < 1 ||
+        !Number.isSafeInteger(i.unitPriceKobo) || i.unitPriceKobo < 0)) {
+    console.error('[webhook] payment integrity metadata mismatch', { reference });
+    return NextResponse.json({ received: true }, { status: 200 });
+  }
+
+  const goodsKobo = checkoutItems.reduce((sum, i) => sum + i.unitPriceKobo * i.quantity, 0);
+  const expectedDeliveryKobo = deliveryFeeKobo;
+  const expectedFeeKobo = buyerServiceFeeKobo(goodsKobo);
+  if (goodsKobo + expectedDeliveryKobo + expectedFeeKobo !== expectedTotalKobo ||
+      gatewayAmountKobo + walletKobo !== expectedTotalKobo) {
+    console.error('[webhook] payment amount mismatch', { reference });
     return NextResponse.json({ received: true }, { status: 200 });
   }
 
@@ -97,6 +135,7 @@ export async function POST(request: Request) {
       buyerId,
       reference,
       productIds,
+      items: checkoutItems,
       deliveryType,
       deliveryFeeKobo,
       receiverName,
@@ -104,6 +143,7 @@ export async function POST(request: Request) {
       matricNumber,
       deliveryAddress: receiverAddress,
       walletKobo,
+      gatewayAmountKobo,
     });
 
     return NextResponse.json({ received: true }, { status: 200 });

@@ -66,7 +66,7 @@ export async function POST(request: Request) {
         ? JSON.parse(transaction.metadata || '{}')
         : transaction.metadata || {};
 
-    if (metadata.user_id && metadata.user_id !== user.id) {
+    if (metadata.user_id !== user.id) {
       return NextResponse.json(
         { error: 'This payment belongs to a different account.' },
         { status: 403 }
@@ -74,6 +74,13 @@ export async function POST(request: Request) {
     }
 
     const planType = metadata.plan_type;
+
+    if (metadata.purpose !== 'role_subscription' || metadata.currency !== 'NGN') {
+      return NextResponse.json(
+        { error: 'This payment is not a valid role subscription transaction.' },
+        { status: 400 }
+      );
+    }
 
     if (!isRolePlan(planType)) {
       return NextResponse.json(
@@ -87,6 +94,28 @@ export async function POST(request: Request) {
         { error: 'Amount paid is below the price of this plan.' },
         { status: 400 }
       );
+    }
+
+    // Check idempotency BEFORE changing any privilege state. A replay of an
+    // already-consumed reference must never extend the subscription again.
+    const { data: existingSubscription, error: existingSubscriptionError } = await admin
+      .from('subscriptions')
+      .select('user_id, plan_type, expires_at')
+      .eq('reference', reference)
+      .maybeSingle();
+    if (existingSubscriptionError) throw existingSubscriptionError;
+    if (existingSubscription) {
+      if (existingSubscription.user_id !== user.id) {
+        return NextResponse.json(
+          { error: 'This payment reference was already used for another account.' },
+          { status: 403 }
+        );
+      }
+      return NextResponse.json({
+        success: true,
+        role: existingSubscription.plan_type,
+        expiresAt: existingSubscription.expires_at,
+      });
     }
 
     const expiresAt = new Date(
@@ -140,29 +169,14 @@ export async function POST(request: Request) {
       });
 
     if (ledgerError) {
-      // UNIQUE(reference) collision -> this reference was already used, by this
-      // user (benign retry) or by someone else (replay attempt). Reject the
-      // replay; permit an idempotent retry only for the same paying user.
-      const { data: existing } = await admin
-        .from('subscriptions')
-        .select('user_id')
-        .eq('reference', reference)
-        .maybeSingle();
-      if (existing && existing.user_id !== user.id) {
-        return NextResponse.json(
-          { error: 'This payment reference was already used for another account.' },
-          { status: 403 }
-        );
-      }
-      // Same user retrying the same paid reference: benign, return success.
-      return NextResponse.json({ success: true, role: planType, expiresAt });
+      console.error('Subscription ledger insert failed:', ledgerError);
+      return NextResponse.json(
+        { error: 'Payment confirmed but the subscription could not be recorded.' },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json({
-      success: true,
-      role: planType,
-      expiresAt,
-    });
+    return NextResponse.json({ success: true, role: planType, expiresAt });
   } catch (err) {
     console.error('Subscription verification error:', err);
     return NextResponse.json({ error: 'Could not verify this payment.' }, { status: 500 });

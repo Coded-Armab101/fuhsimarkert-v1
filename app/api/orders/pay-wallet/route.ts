@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { recordOrder } from '@/utils/paystack/recordOrder';
+import { buyerServiceFeeKobo } from '@/utils/pricing';
 
 /**
  * Wallet-only checkout: the buyer's wallet balance covers the entire order, so
@@ -60,19 +62,38 @@ export async function POST(request: Request) {
       const qty = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
       return acc + unit * qty;
     }, 0);
-    const totalKobo = itemsTotalKobo + (isPaidDelivery ? DELIVERY_FEE_KOBO : 0);
+    const buyerFeeKobo = buyerServiceFeeKobo(itemsTotalKobo);
+    const totalKobo = itemsTotalKobo + (isPaidDelivery ? DELIVERY_FEE_KOBO : 0) + buyerFeeKobo;
     if (!Number.isFinite(totalKobo) || totalKobo <= 0) {
       return NextResponse.json({ error: 'Invalid financial amount calculation.' }, { status: 400 });
     }
 
     // Fresh wallet reference: unique, so the idempotent wallet debit runs once.
-    const walletRef = `WAL-${crypto.randomUUID()}`;
+    const walletRef = `WAL-${crypto.createHash('sha256').update(JSON.stringify({
+      userId: user.id,
+      productIds,
+      items: (cartItems as { product_id: string; quantity: number }[]).map((item) => ({
+        productId: item.product_id,
+        quantity: Number(item.quantity) > 0 ? Number(item.quantity) : 1,
+        unitPriceKobo: priceById.get(item.product_id) ?? 0,
+      })),
+      deliveryType,
+      receiverName,
+      receiverPhone,
+      matricNumber,
+      deliveryAddress,
+    })).digest('hex').slice(0, 32)}`;
 
     const admin = createAdminClient();
     await recordOrder(admin, {
       buyerId: user.id,
       reference: walletRef,
       productIds,
+      items: (cartItems as { product_id: string; quantity: number }[]).map((item) => ({
+        productId: item.product_id,
+        quantity: Number(item.quantity) > 0 ? Number(item.quantity) : 1,
+        unitPriceKobo: priceById.get(item.product_id) ?? 0,
+      })),
       deliveryType,
       deliveryFeeKobo: isPaidDelivery ? DELIVERY_FEE_KOBO : 0,
       receiverName,
@@ -80,6 +101,7 @@ export async function POST(request: Request) {
       matricNumber,
       deliveryAddress,
       walletKobo: totalKobo,
+      gatewayAmountKobo: 0,
     });
 
     return NextResponse.json({

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { useCart } from '@/context/CartContext';
 import { formatNaira } from '@/utils/money';
+import { buyerServiceFeeKobo } from '@/utils/pricing';
 import { ShoppingBag, Trash2, ArrowLeft, ShieldCheck, Plus, Minus, Loader2, Truck, Store, User, Phone, Hash, Wallet } from 'lucide-react';
 
 const DELIVERY_FEE_NGN = 500;
@@ -59,8 +60,9 @@ export default function BuyerCartPage() {
     prefill();
   }, [supabase]);
 
+  const buyerFeeKobo = buyerServiceFeeKobo(totalAmount);
   const grandTotalKobo =
-    totalAmount + (delivery.type === 'delivery' ? DELIVERY_FEE_NGN * 100 : 0);
+    totalAmount + (delivery.type === 'delivery' ? DELIVERY_FEE_NGN * 100 : 0) + buyerFeeKobo;
 
   // Wallet-first split: wallet covers as much as it can, the remainder via
   // card/transfer. When the wallet covers the whole total, no Paystack needed.

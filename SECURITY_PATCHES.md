@@ -1,0 +1,30 @@
+# Security hardening — 2026-09-18
+
+This patch addresses payment/order integrity issues found during the authorized review.
+
+## Fixed in code
+
+- Marketplace Paystack checkout now stores a server-created checkout snapshot in Paystack metadata: product ID, quantity, unit price, expected total, currency and purpose.
+- `/api/paystack/verify` now requires the marketplace purpose, NGN currency, valid snapshot, and exact payment equation:
+  `Paystack amount + wallet contribution = frozen checkout total`.
+- Payment verification now fulfills the frozen checkout snapshot instead of reading the mutable cart quantity after payment.
+- Paystack webhook handling applies the same amount/snapshot/currency checks before fulfillment.
+- Wallet-only checkout now includes the buyer service fee, matching the card checkout pricing model.
+- Wallet-only references are deterministic for the same checkout snapshot, reducing concurrent duplicate wallet debits.
+- Subscription verification now requires the expected purpose, user binding and NGN currency.
+- Subscription reference replay is checked before changing role privileges, preventing repeated verification of one reference from extending the subscription.
+- Product IDs in payment metadata are required to be unique and to match the checkout snapshot exactly.
+- Cart cleanup now filters `carts.product_id` rather than `carts.id`.
+- Delivery handoff codes use a cryptographically secure random generator instead of `Math.random()`.
+- Product upload object names use `crypto.randomUUID()` instead of predictable timestamps/random strings.
+- `is_sold` is only set when tracked stock is exhausted; unlimited-stock products are not marked sold.
+
+## Database deployment requirement
+
+Apply `supabase/migrations/20260918_security_payment_hardening.sql` against the production Supabase database. The application relies on unique `(order_ref, product_id)` order idempotency and unique payment subscription references.
+
+The existing RLS/profile privilege hardening described in `SECURITY.md` still requires the production database state to match that audit. Do not weaken those policies to make the new payment code work.
+
+## Validation note
+
+`git diff --check` passes. A full TypeScript build could not be completed in the audit container because dependency installation timed out / the available `node_modules` did not contain the required type packages. Run `npm ci`, then `npx tsc --noEmit`, `npm run lint`, and `npm run build` before deployment.

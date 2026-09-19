@@ -57,7 +57,7 @@ export async function uploadProductImage(
   }
 
   const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
-  const path = `${sellerId}/${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${ext}`;
+  const path = `${sellerId}/${globalThis.crypto.randomUUID()}.${ext}`;
 
   const { data, error } = await supabase.storage.from(BUCKET).upload(path, file, {
     cacheControl: '3600',

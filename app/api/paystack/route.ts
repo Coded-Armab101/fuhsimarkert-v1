@@ -171,6 +171,14 @@ const paystackResponse = await fetch('https://api.paystack.co/transaction/initia
     metadata: {
       buyer_id: user.id,
       product_ids: productIds, // Array of IDs being purchased
+      checkout_items: (cartItems as CartRow[]).map((item) => ({
+        product_id: item.product_id,
+        quantity: Number(item.quantity) > 0 ? Number(item.quantity) : 1,
+        unit_price_kobo: priceById.get(item.product_id) ?? 0,
+      })),
+      expected_total_kobo: trueTotalKobo,
+      currency: 'NGN',
+      purpose: 'marketplace_checkout',
       wallet_kobo: walletKobo,
       delivery_type: deliveryType,
       delivery_fee_kobo: isPaidDelivery ? DELIVERY_FEE_KOBO : 0,

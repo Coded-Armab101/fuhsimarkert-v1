@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { recordOrder } from '@/utils/paystack/recordOrder';
+import { buyerServiceFeeKobo } from '@/utils/pricing';
 
 /**
  * Verify a Paystack transaction by reference.
@@ -51,41 +52,62 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Transaction does not belong to this account.' }, { status: 403 });
     }
 
-    // On a confirmed success, create the escrow order right here. Guard on
-    // metadata.product_ids so we only act on this app's transactions. Writes go
-    // through the service-role client (RLS would reject a buyer INSERT).
     if (transaction.status === 'success') {
-      const productIds = Array.isArray(transaction.metadata?.product_ids)
-        ? transaction.metadata.product_ids
-        : [];
+      const metadata = typeof transaction.metadata === 'string'
+        ? JSON.parse(transaction.metadata || '{}')
+        : transaction.metadata || {};
+      const productIds = Array.isArray(metadata.product_ids) ? metadata.product_ids : [];
+      const items = Array.isArray(metadata.checkout_items) ? metadata.checkout_items.map((item: any) => ({
+        productId: item?.product_id,
+        quantity: Number(item?.quantity),
+        unitPriceKobo: Number(item?.unit_price_kobo),
+      })) : [];
+      const expectedTotalKobo = Number(metadata.expected_total_kobo);
+      const walletKobo = Number(metadata.wallet_kobo) > 0 ? Number(metadata.wallet_kobo) : 0;
 
-      if (productIds.length > 0) {
-        try {
-          await recordOrder(createAdminClient(), {
-            buyerId: user.id,
-            reference,
-            productIds,
-            deliveryType:
-              transaction.metadata?.delivery_type === 'delivery' ? 'delivery' : 'pickup',
-            deliveryFeeKobo:
-              Number(transaction.metadata?.delivery_fee_kobo) > 0
-                ? Number(transaction.metadata?.delivery_fee_kobo)
-                : 0,
-            receiverName: transaction.metadata?.receiver_name ?? null,
-            receiverPhone: transaction.metadata?.receiver_phone ?? null,
-            matricNumber: transaction.metadata?.matric_number ?? null,
-            deliveryAddress: transaction.metadata?.delivery_address ?? null,
-            walletKobo:
-              Number(transaction.metadata?.wallet_kobo) > 0
-                ? Number(transaction.metadata?.wallet_kobo)
-                : 0,
-          });
-        } catch (err) {
-          // Do not fail the whole verify response — still report success so the
-          // buyer isn't charged twice or confused; the seller page will reflect
-          // the true state. Log for reconciliation.
-          console.error('[paystack/verify] failed to record order', { reference, err });
-        }
+      if (metadata.purpose !== 'marketplace_checkout' || metadata.currency !== 'NGN' ||
+          !Number.isSafeInteger(expectedTotalKobo) || expectedTotalKobo <= 0 ||
+          !Array.isArray(items) || items.length === 0 ||
+          items.some((i: any) => !i.productId || !Number.isSafeInteger(i.quantity) || i.quantity < 1 ||
+            !Number.isSafeInteger(i.unitPriceKobo) || i.unitPriceKobo < 0)) {
+        return NextResponse.json({ error: 'Invalid payment checkout metadata.' }, { status: 400 });
+      }
+
+      const goodsKobo = items.reduce((sum: number, i: any) => sum + i.quantity * i.unitPriceKobo, 0);
+      const deliveryFeeKobo = Number(metadata.delivery_fee_kobo) > 0 ? Number(metadata.delivery_fee_kobo) : 0;
+      const expectedBuyerFeeKobo = buyerServiceFeeKobo(goodsKobo);
+      if (goodsKobo + deliveryFeeKobo + expectedBuyerFeeKobo !== expectedTotalKobo ||
+          Number(transaction.amount) + walletKobo !== expectedTotalKobo ||
+          transaction.currency !== 'NGN') {
+        console.error('[paystack/verify] payment integrity mismatch', { reference });
+        return NextResponse.json({ error: 'Payment amount could not be validated.' }, { status: 400 });
+      }
+
+      const uniqueProductIds = new Set(productIds);
+      if (uniqueProductIds.size !== productIds.length ||
+          productIds.length !== items.length ||
+          productIds.some((id: string) => !items.some((i: any) => i.productId === id))) {
+        return NextResponse.json({ error: 'Invalid payment item set.' }, { status: 400 });
+      }
+
+      try {
+        await recordOrder(createAdminClient(), {
+          buyerId: user.id,
+          reference,
+          productIds,
+          items,
+          deliveryType: metadata.delivery_type === 'delivery' ? 'delivery' : 'pickup',
+          deliveryFeeKobo,
+          receiverName: metadata.receiver_name ?? null,
+          receiverPhone: metadata.receiver_phone ?? null,
+          matricNumber: metadata.matric_number ?? null,
+          deliveryAddress: metadata.delivery_address ?? null,
+          walletKobo,
+          gatewayAmountKobo: Number(transaction.amount),
+        });
+      } catch (err) {
+        console.error('[paystack/verify] failed to record order', { reference, err });
+        return NextResponse.json({ error: 'Payment confirmed but the order could not be recorded.' }, { status: 500 });
       }
     }
 
