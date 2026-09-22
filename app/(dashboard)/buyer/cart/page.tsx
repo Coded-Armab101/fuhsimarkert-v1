@@ -164,16 +164,25 @@ export default function BuyerCartPage() {
       // 1. Sync the localStorage cart into the `carts` table, carrying each
       //    line's quantity. The table used to have no quantity column (so any
       //    quantity > 1 was charged as 1 — a fraud hole); it now stores it, and
-      //    the server charges `price * quantity`. We overwrite the row so the
-      //    DB reflects the exact UI cart (upsert without ignoreDuplicates).
-      const { error: syncError } = await supabase.from('carts').upsert(
+      //    the server charges `price * quantity`. We overwrite every row so the
+      //    DB reflects the exact UI cart: first drop any stale rows left behind
+      //    by an abandoned checkout, then insert the current lines. The wallet
+      //    and card routes recompute the amount from THIS table, so leftover
+      //    rows would silently inflate the total and falsely fail the wallet
+      //    balance check even when the visible balance covers the visible total.
+      const { error: clearError } = await supabase
+        .from('carts')
+        .delete()
+        .eq('user_id', user.id);
+      if (clearError) throw clearError;
+
+      const { error: syncError } = await supabase.from('carts').insert(
         cart.map((item) => ({
           user_id: user.id,
           product_id: item.id,
           quantity: item.quantity,
           created_at: new Date().toISOString(),
         })),
-        { onConflict: 'user_id,product_id' },
       );
 
       if (syncError) throw syncError;
@@ -246,15 +255,15 @@ export default function BuyerCartPage() {
         <ArrowLeft size={14} /> Back to home
       </Link>
 
-      <div className="bg-neutral-950 border border-neutral-800 p-6 rounded-3xl flex items-center justify-between">
-        <div className="space-y-1">
-          <h1 className="text-xl font-bold text-white">Your cart</h1>
-          <p className="text-xs text-neutral-400">Check your items before you pay.</p>
+<div className="flex items-center justify-between px-1">
+        <div className="space-y-0.5">
+          <h1 className="text-xl font-black text-[#251d18]">Your cart</h1>
+          <p className="text-xs text-[#81756d]">Check your items before you pay.</p>
         </div>
         {cart.length > 0 && (
           <button
             onClick={clearCart}
-            className="text-xs font-mono text-neutral-500 hover:text-red-400 transition-colors cursor-pointer"
+            className="text-xs font-bold text-[#81756d] hover:text-[#d8552e] transition-colors cursor-pointer"
           >
             Clear cart
           </button>
@@ -262,17 +271,17 @@ export default function BuyerCartPage() {
       </div>
 
       {cart.length === 0 ? (
-        <div className="bg-neutral-950 border border-neutral-900 rounded-3xl p-12 text-center space-y-4">
-          <ShoppingBag size={40} className="mx-auto text-neutral-700" />
+        <div className="rounded-3xl bg-white p-12 text-center space-y-4">
+          <ShoppingBag size={40} className="mx-auto text-[#e7ddd4]" />
           <div className="space-y-1">
-            <h3 className="text-sm font-bold text-white">Your cart is empty</h3>
-            <p className="text-xs text-neutral-500">
+            <h3 className="text-sm font-bold text-[#251d18]">Your cart is empty</h3>
+            <p className="text-xs text-[#81756d]">
               Explore the market and add something you like.
             </p>
           </div>
           <Link
             href="/buyer"
-            className="inline-block bg-red-600 hover:bg-red-500 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition-all"
+            className="inline-block bg-[#2e2520] hover:bg-black text-white font-bold text-xs py-2.5 px-6 rounded-xl transition-all"
           >
             Explore market
           </Link>
@@ -288,21 +297,21 @@ export default function BuyerCartPage() {
             {cart.map((item) => (
               <div
                 key={item.id}
-                className="bg-neutral-950 border border-neutral-800 p-4 rounded-2xl flex items-center justify-between gap-4"
+                className="bg-white border border-[#f0e9e2] p-4 rounded-2xl flex items-center justify-between gap-4"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-14 h-14 bg-neutral-900 rounded-xl overflow-hidden flex-shrink-0">
+                  <div className="w-14 h-14 bg-[#f3eee8] rounded-xl overflow-hidden flex-shrink-0">
                     {item.image_url ? (
                       <img src={item.image_url} alt={item.title} className="w-full h-full object-cover" />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-neutral-700">
+                      <div className="w-full h-full flex items-center justify-center text-[#c9bfb2]">
                         <ShoppingBag size={18} />
                       </div>
                     )}
                   </div>
                   <div>
-                    <h4 className="font-bold text-white text-xs">{item.title}</h4>
-                    <p className="text-xs font-mono text-red-500 mt-1">
+                    <h4 className="font-bold text-[#251d18] text-xs">{item.title}</h4>
+                    <p className="text-xs font-bold text-[#ef6b3b] mt-1">
                       ₦{formatNaira(item.price)} x {item.quantity}
                     </p>
                   </div>
@@ -310,20 +319,20 @@ export default function BuyerCartPage() {
 
                 <div className="flex items-center gap-3">
                   {/* QUANTITY STEPPER */}
-                  <div className="flex items-center gap-1.5 bg-neutral-900 border border-neutral-800 rounded-xl px-1 py-1">
+                  <div className="flex items-center gap-1.5 bg-[#fff0e9] border border-[#ffe0cf] rounded-xl px-1 py-1">
                     <button
                       onClick={() => decreaseQuantity(item.id)}
-                      className="p-1.5 rounded-lg text-neutral-300 hover:text-red-400 hover:bg-red-950/40 transition-all cursor-pointer"
+                      className="p-1.5 rounded-lg text-[#c9552e] hover:text-[#a04523] hover:bg-[#ffe2d2] transition-all cursor-pointer"
                       aria-label={`Decrease ${item.title}`}
                     >
                       <Minus size={14} />
                     </button>
-                    <span className="text-xs font-mono font-bold text-white w-4 text-center">
+                    <span className="text-xs font-mono font-bold text-[#251d18] w-4 text-center">
                       {item.quantity}
                     </span>
                     <button
                       onClick={() => addToCart(item)}
-                      className="p-1.5 rounded-lg text-neutral-300 hover:text-red-400 hover:bg-red-950/40 transition-all cursor-pointer"
+                      className="p-1.5 rounded-lg text-[#c9552e] hover:text-[#a04523] hover:bg-[#ffe2d2] transition-all cursor-pointer"
                       aria-label={`Increase ${item.title}`}
                     >
                       <Plus size={14} />
@@ -332,7 +341,7 @@ export default function BuyerCartPage() {
 
                   <button
                     onClick={() => removeFromCart(item.id)}
-                    className="p-2 text-neutral-500 hover:text-red-400 transition-colors cursor-pointer"
+                    className="p-2 text-[#b4aaa2] hover:text-[#d8552e] transition-colors cursor-pointer"
                     aria-label={`Remove ${item.title}`}
                   >
                     <Trash2 size={16} />
@@ -350,29 +359,29 @@ export default function BuyerCartPage() {
           <button onClick={() => setCheckoutStage('items')} className="text-xs font-bold text-[#d8552e]">← Edit items</button>
 
           {/* DELIVERY / FULFILMENT DETAILS */}
-          <div className="bg-neutral-950 border border-neutral-800 p-6 rounded-3xl space-y-4">
-            <div className="flex items-center gap-2 text-sm font-bold text-white border-b border-neutral-900 pb-3">
-              <Truck size={16} className="text-red-500" />
+<div className="bg-white border border-[#f0e9e2] p-6 rounded-3xl space-y-4">
+            <div className="flex items-center gap-2 text-sm font-bold text-[#251d18] border-b border-[#f0e9e2] pb-3">
+              <Truck size={16} className="text-[#ef6b3b]" />
               Delivery details
             </div>
 
             {/* Receiver name */}
             <div className="space-y-1.5">
-              <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+              <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-[#81756d]">
                 <User size={11} /> Receiver full name
               </label>
               <input
                 value={delivery.name}
                 onChange={(e) => setDelivery({ ...delivery, name: e.target.value })}
                 placeholder="e.g. Adebayo Ola"
-                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-neutral-600 outline-none focus:border-red-600"
+                className="w-full bg-[#faf6f2] border border-[#eee6de] rounded-xl px-3 py-2.5 text-xs text-[#251d18] placeholder:text-[#b4aaa2] outline-none focus:border-[#ef6b3b]"
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Phone */}
               <div className="space-y-1.5">
-                <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-[#81756d]">
                   <Phone size={11} /> Phone number
                 </label>
                 <input
@@ -380,20 +389,20 @@ export default function BuyerCartPage() {
                   onChange={(e) => setDelivery({ ...delivery, phone: e.target.value })}
                   placeholder="08012345678"
                   inputMode="tel"
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-neutral-600 outline-none focus:border-red-600"
+                  className="w-full bg-[#faf6f2] border border-[#eee6de] rounded-xl px-3 py-2.5 text-xs text-[#251d18] placeholder:text-[#b4aaa2] outline-none focus:border-[#ef6b3b]"
                 />
               </div>
 
               {/* Matric number */}
               <div className="space-y-1.5">
-                <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-[#81756d]">
                   <Hash size={11} /> Matric number
                 </label>
                 <input
                   value={delivery.matric}
                   onChange={(e) => setDelivery({ ...delivery, matric: e.target.value })}
                   placeholder="e.g. FUHSI/22/0012"
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-neutral-600 outline-none focus:border-red-600"
+                  className="w-full bg-[#faf6f2] border border-[#eee6de] rounded-xl px-3 py-2.5 text-xs text-[#251d18] placeholder:text-[#b4aaa2] outline-none focus:border-[#ef6b3b]"
                 />
               </div>
             </div>
@@ -405,26 +414,26 @@ export default function BuyerCartPage() {
                 onClick={() => setDelivery({ ...delivery, type: 'pickup' })}
                 className={`rounded-2xl border p-3 text-left transition-all cursor-pointer ${
                   delivery.type === 'pickup'
-                    ? 'border-red-600 bg-red-950/30'
-                    : 'border-neutral-800 bg-neutral-900 hover:border-neutral-700'
+                    ? 'border-[#ef6b3b] bg-[#fff0e9]'
+                    : 'border-[#eee6de] bg-[#faf6f2] hover:border-[#d8cfc5]'
                 }`}
               >
-                <Store size={16} className="text-red-500" />
-                <p className="text-xs font-bold text-white mt-2">School Pickup</p>
-                <p className="text-[10px] text-emerald-400 font-mono mt-0.5">FREE</p>
+                <Store size={16} className="text-[#ef6b3b]" />
+                <p className="text-xs font-bold text-[#251d18] mt-2">School Pickup</p>
+                <p className="text-[10px] text-[#17805b] font-mono mt-0.5">FREE</p>
               </button>
               <button
                 type="button"
                 onClick={() => setDelivery({ ...delivery, type: 'delivery' })}
                 className={`rounded-2xl border p-3 text-left transition-all cursor-pointer ${
                   delivery.type === 'delivery'
-                    ? 'border-red-600 bg-red-950/30'
-                    : 'border-neutral-800 bg-neutral-900 hover:border-neutral-700'
+                    ? 'border-[#ef6b3b] bg-[#fff0e9]'
+                    : 'border-[#eee6de] bg-[#faf6f2] hover:border-[#d8cfc5]'
                 }`}
               >
-                <Truck size={16} className="text-red-500" />
-                <p className="text-xs font-bold text-white mt-2">Deliver to a place</p>
-                <p className="text-[10px] text-amber-400 font-mono mt-0.5">
+                <Truck size={16} className="text-[#ef6b3b]" />
+                <p className="text-xs font-bold text-[#251d18] mt-2">Deliver to a place</p>
+                <p className="text-[10px] text-[#c77b22] font-mono mt-0.5">
                   +₦{DELIVERY_FEE_NGN}
                 </p>
               </button>
@@ -432,14 +441,14 @@ export default function BuyerCartPage() {
 
             {delivery.type === 'delivery' && (
               <div className="space-y-1.5">
-                <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-[#81756d]">
                   <Truck size={11} /> Delivery address
                 </label>
                 <input
                   value={delivery.address}
                   onChange={(e) => setDelivery({ ...delivery, address: e.target.value })}
                   placeholder="e.g. Room 12, Alfa Hall or off-campus address"
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-neutral-600 outline-none focus:border-red-600"
+                  className="w-full bg-[#faf6f2] border border-[#eee6de] rounded-xl px-3 py-2.5 text-xs text-[#251d18] placeholder:text-[#b4aaa2] outline-none focus:border-[#ef6b3b]"
                 />
               </div>
             )}
@@ -449,12 +458,12 @@ export default function BuyerCartPage() {
           {paymentNotice && (
             <div
               role="status"
-              className={`rounded-2xl border p-4 flex items-start gap-3 text-[11px] font-mono ${
+className={`rounded-2xl border p-4 flex items-start gap-3 text-[11px] font-mono ${
                 paymentNotice.kind === 'success'
-                  ? 'bg-emerald-950/30 border-emerald-800/60 text-emerald-400'
+                  ? 'bg-[#e8f7ef] border-[#cdeeda] text-[#0f6b4a]'
                   : paymentNotice.kind === 'pending'
-                    ? 'bg-amber-950/30 border-amber-800/60 text-amber-400'
-                    : 'bg-red-950/30 border-red-900/60 text-red-400'
+                    ? 'bg-[#fff7e8] border-[#f2e0b8] text-[#8a650f]'
+                    : 'bg-[#fff0e9] border-[#ffd9c4] text-[#b04a27]'
               }`}
             >
               <ShieldCheck size={18} className="flex-shrink-0 mt-0.5" />
@@ -462,39 +471,39 @@ export default function BuyerCartPage() {
             </div>
           )}
 
-          <div className="bg-neutral-950 border border-neutral-800 p-6 rounded-3xl space-y-4">
-            <div className="flex justify-between items-center text-sm font-bold border-b border-neutral-900 pb-3">
-              <span className="text-neutral-400 font-mono">Total Amount:</span>
-              <span className="text-lg font-mono text-red-500">
+          <div className="bg-white border border-[#f0e9e2] p-6 rounded-3xl space-y-4">
+            <div className="flex justify-between items-center text-sm font-bold border-b border-[#f0e9e2] pb-3">
+              <span className="text-[#81756d] font-mono">Total Amount:</span>
+              <span className="text-lg font-black text-[#ef6b3b]">
                 ₦{formatNaira(grandTotalKobo)}
               </span>
             </div>
 
             {delivery.type === 'delivery' && (
-              <div className="flex justify-between items-center text-[11px] font-mono text-neutral-400 border-b border-neutral-900/70 pb-2">
+              <div className="flex justify-between items-center text-[11px] font-mono text-[#81756d] border-b border-[#f0e9e2] pb-2">
                 <span>Items subtotal</span>
                 <span>₦{formatNaira(totalAmount)}</span>
               </div>
             )}
             {delivery.type === 'delivery' && (
-              <div className="flex justify-between items-center text-[11px] font-mono text-neutral-400 border-b border-neutral-900/70 pb-2">
+              <div className="flex justify-between items-center text-[11px] font-mono text-[#81756d] border-b border-[#f0e9e2] pb-2">
                 <span className="flex items-center gap-1">
-                  <Truck size={11} className="text-amber-400" /> Delivery fee
+                  <Truck size={11} className="text-[#c77b22]" /> Delivery fee
                 </span>
-                <span className="text-amber-400">+₦{DELIVERY_FEE_NGN}</span>
+                <span className="text-[#c77b22]">+₦{DELIVERY_FEE_NGN}</span>
               </div>
             )}
 
-            <div className="flex items-center gap-2 text-[11px] font-mono text-neutral-400 bg-neutral-900/60 border border-neutral-800 p-3 rounded-xl">
-              <ShieldCheck size={16} className="text-emerald-500 flex-shrink-0" />
+            <div className="flex items-center gap-2 text-[11px] font-mono text-[#81756d] bg-[#faf6f2] border border-[#eee6de] p-3 rounded-xl">
+              <ShieldCheck size={16} className="text-[#17805b] flex-shrink-0" />
               <span>Your payment is safe until you confirm that your order arrived.</span>
             </div>
 
             {/* PAYMENT METHOD */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-[11px] font-mono text-neutral-400">
+              <div className="flex items-center justify-between text-[11px] font-mono text-[#81756d]">
                 <span>Wallet balance</span>
-                <span className="text-emerald-400">₦{formatNaira(walletBalance)}</span>
+                <span className="text-[#17805b]">₦{formatNaira(walletBalance)}</span>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <button
@@ -502,20 +511,20 @@ export default function BuyerCartPage() {
                   onClick={() => setPaymentMethod('wallet')}
                   className={`text-left text-[11px] font-bold px-3 py-3 rounded-xl border transition-all cursor-pointer ${
                     paymentMethod === 'wallet'
-                      ? 'bg-emerald-950/40 border-emerald-700 text-emerald-300'
-                      : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-600'
+                      ? 'bg-[#e8f7ef] border-[#17805b] text-[#0f6b4a]'
+                      : 'bg-[#faf6f2] border-[#eee6de] text-[#81756d] hover:border-[#d8cfc5]'
                   }`}
                 >
                   <div className="flex items-center gap-1.5 mb-1">
                     <Wallet size={13} /> Wallet First
                   </div>
                   {walletShareKobo >= grandTotalKobo ? (
-                    <span className="text-[10px] font-normal text-emerald-400">
+                    <span className="text-[10px] font-normal text-[#17805b]">
                       Pays the full ₦{formatNaira(grandTotalKobo)}
                     </span>
                   ) : (
-                    <span className="text-[10px] font-normal text-neutral-500">
-                      ₦{formatNaira(walletShareKobo)} from wallet · <span className="text-amber-400">₦{formatNaira(paystackShareKobo)}</span> by card
+                    <span className="text-[10px] font-normal text-[#9d9188]">
+                      ₦{formatNaira(walletShareKobo)} from wallet · <span className="text-[#c77b22]">₦{formatNaira(paystackShareKobo)}</span> by card
                     </span>
                   )}
                 </button>
@@ -525,20 +534,20 @@ export default function BuyerCartPage() {
                   onClick={() => setPaymentMethod('paystack')}
                   className={`text-left text-[11px] font-bold px-3 py-3 rounded-xl border transition-all cursor-pointer ${
                     paymentMethod === 'paystack'
-                      ? 'bg-red-950/40 border-red-700 text-red-300'
-                      : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-600'
+                      ? 'bg-[#fff0e9] border-[#ef6b3b] text-[#c9552e]'
+                      : 'bg-[#faf6f2] border-[#eee6de] text-[#81756d] hover:border-[#d8cfc5]'
                   }`}
                 >
                   <div className="flex items-center gap-1.5 mb-1">
                     <ShieldCheck size={13} /> Card / Transfer
                   </div>
-                  <span className="text-[10px] font-normal text-neutral-500">
+                  <span className="text-[10px] font-normal text-[#9d9188]">
                     Pay the full ₦{formatNaira(grandTotalKobo)} via Paystack
                   </span>
                 </button>
               </div>
               {paymentMethod === 'wallet' && paystackShareKobo > 0 && (
-                <p className="text-[10px] text-neutral-500">
+                <p className="text-[10px] text-[#9d9188]">
                   Wallet pays the first ₦{formatNaira(walletShareKobo)}, then you complete the
                   remaining ₦{formatNaira(paystackShareKobo)} on Paystack. Both go into escrow.
                 </p>
@@ -548,7 +557,7 @@ export default function BuyerCartPage() {
             {checkoutError && (
               <p
                 role="alert"
-                className="text-[11px] font-mono text-red-400 bg-red-950/30 border border-red-900/50 rounded-xl px-3 py-2.5"
+                className="text-[11px] font-mono text-[#b04a27] bg-[#fff0e9] border border-[#ffd9c4] rounded-xl px-3 py-2.5"
               >
                 {checkoutError}
               </p>
@@ -557,7 +566,7 @@ export default function BuyerCartPage() {
             <button
               onClick={handleCheckout}
               disabled={checkingOut}
-              className="w-full bg-red-600 hover:bg-red-500 disabled:bg-neutral-800 disabled:cursor-not-allowed text-white font-bold text-xs py-3.5 rounded-2xl transition-all cursor-pointer shadow-xl shadow-red-950/50 flex items-center justify-center gap-2"
+              className="w-full bg-[#2e2520] hover:bg-black disabled:bg-[#e3dad1] disabled:cursor-not-allowed text-white font-bold text-xs py-3.5 rounded-2xl transition-all cursor-pointer shadow-xl shadow-[#2e2520]/20 flex items-center justify-center gap-2"
             >
               {checkingOut ? (
                 <>

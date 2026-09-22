@@ -39,16 +39,6 @@ type RoleGate = {
   persona: string;
   /** Where to send someone who does not have it. Never itself. */
   fallback: string;
-  /**
-   * When true, the gate ALSO requires `profiles.is_approved_seller` (seller
-   * verification approved by an admin) on top of a paid, active role.
-   */
-  requiresApproval?: boolean;
-  /**
-   * Where to send a user who IS paid/active but has NOT been approved yet
-   * (e.g. the onboarding/verification page). Never the gate's own prefix.
-   */
-  approvalFallback?: string;
 };
 
 /**
@@ -63,8 +53,12 @@ const ROLE_GATES: RoleGate[] = [
     prefix: '/seller',
     persona: 'seller',
     fallback: '/seller/subscribe',
-    requiresApproval: true,
-    approvalFallback: '/buyer/profile',
+    /*
+     * No approval redirect: a paid but not-yet-verified seller is allowed onto
+     * /seller, where the seller layout renders a verification onboarding that
+     * blocks the tools until an admin approves them. Redirecting them back to
+     * /buyer/profile would hide that onboarding entirely.
+     */
   },
   { prefix: '/admin-dashboard', persona: '__no_such_persona__', fallback: '/buyer' },
 ];
@@ -216,15 +210,6 @@ export async function proxy(request: NextRequest) {
       fallback.pathname = gate.fallback;
       fallback.search = '';
       return redirectPreservingCookies(fallback, response);
-    }
-
-    // Paid/active but the seller has not been approved yet → send them to the
-    // onboarding/verification page so they can upload their ID + video.
-    if (gate.requiresApproval && profile?.is_approved_seller !== true) {
-      const onramp = request.nextUrl.clone();
-      onramp.pathname = gate.approvalFallback || '/buyer/profile';
-      onramp.search = '';
-      return redirectPreservingCookies(onramp, response);
     }
   }
 

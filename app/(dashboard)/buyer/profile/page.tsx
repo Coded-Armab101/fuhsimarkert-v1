@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { User, Wallet, Landmark, Save, PlusCircle, Cake, Store, X, CheckCircle, Zap, LayoutDashboard, Loader2, LogOut, IdCard, UploadCloud, ShieldCheck } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
+import { useCart } from '@/context/CartContext';
 import { ROLE_PLANS, type RolePlan } from '@/utils/plans';
 import { activeRole } from '@/utils/roles';
 import { formatNaira } from '@/utils/money';
@@ -31,6 +32,7 @@ function naira(kobo: number): string {
 export default function ProfilePage() {
   const supabase = createClient();
   const router = useRouter();
+  const { clearCart } = useCart();
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [paymentLoading, setPaymentLoading] = useState<string | null>(null);
@@ -175,6 +177,11 @@ export default function ProfilePage() {
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
+      // The cart lives in localStorage under one key for every account, so a
+      // second user signing in on the same device would inherit the previous
+      // user's cart. Drop it on logout to keep each account's cart isolated.
+      clearCart();
+      localStorage.removeItem('fuhsi_cart');
       await supabase.auth.signOut();
       router.push('/login');
     } catch {
@@ -336,7 +343,9 @@ export default function ProfilePage() {
 
           setIsSeller(true);
           setShowRoleModal(false);
-          window.location.reload();
+          // Head to the seller area: the seller layout shows the verification
+          // onboarding there, which blocks the tools until an admin approves.
+          window.location.href = '/seller';
         } catch (verifyErr: unknown) {
           console.error('Subscription verification failed:', verifyErr);
           alert(
@@ -408,7 +417,7 @@ export default function ProfilePage() {
           </Link>
         ) : isSeller ? (
           <button
-            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            onClick={() => router.push('/seller')}
             className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-4 py-3 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-amber-950/30 active:scale-95 cursor-pointer"
           >
             <ShieldCheck size={16} />
@@ -543,18 +552,18 @@ export default function ProfilePage() {
       <form onSubmit={handleUpdateProfile} className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         
         {/* ESCROW WALLET GRAPH */}
-        <div id="wallet-details" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 shadow-xl">
+<div id="wallet-details" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 shadow-xl">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-mono font-bold text-neutral-400">ESCROW LEDGER</span>
+            <span className="text-xs font-mono font-bold text-white">ESCROW LEDGER</span>
             <Wallet size={16} className="text-emerald-400" />
           </div>
           <div className="space-y-1">
-            <p className="text-[10px] text-neutral-500 uppercase font-bold tracking-wider">Wallet balance</p>
-            <h2 className="text-3xl font-black font-mono text-emerald-400">
+            <p className="text-[10px] text-white/80 uppercase font-bold tracking-wider">Wallet balance</p>
+            <h2 className="text-3xl font-black font-mono text-white">
               ₦{(profileData.walletBalance / 100).toLocaleString()}
             </h2>
           </div>
-          <p className="text-[11px] text-neutral-500 leading-relaxed">
+          <p className="text-[11px] text-neutral-300 leading-relaxed">
             Refunds and money from completed sales are kept here. You can withdraw to your bank.
           </p>
           {profileData.walletBalance > 0 && (

@@ -184,16 +184,16 @@ export default function OrdersPage() {
       <DeliveryAnnouncement />
 
       <div className="bg-white border border-[#eee4dc] rounded-[1.75rem] p-6 shadow-sm">
-        <h1 className="text-xl font-black text-white flex items-center gap-2">
-          <CreditCard className="text-red-500" /> Your orders
+<h1 className="text-xl font-black text-[#251d18] flex items-center gap-2">
+          <CreditCard className="text-[#ef6b3b]" /> Your orders
         </h1>
-        <p className="text-xs text-neutral-400 mt-1">
+        <p className="text-xs text-[#81756d] mt-1">
           Items from different sellers are shown together here. Show the code when your order arrives, then tap “Confirm received” once you have everything.
         </p>
       </div>
 
       {groups.length === 0 ? (
-        <div className="p-12 border border-[#eee4dc] bg-white rounded-[1.75rem] text-center text-xs text-neutral-500 font-mono">
+        <div className="p-12 border border-[#eee4dc] bg-white rounded-[1.75rem] text-center text-xs text-[#81756d] font-mono">
           No orders yet. When you buy something, its delivery updates will show here.
         </div>
       ) : (
@@ -208,38 +208,38 @@ export default function OrdersPage() {
             return (
               <div key={group.order_ref} className="bg-white border border-[#eee4dc] rounded-[1.75rem] p-5 max-w-2xl space-y-5 shadow-sm">
                 {/* SUMMARY */}
-                <div className="flex justify-between items-start border-b border-neutral-900 pb-4">
+                <div className="flex justify-between items-start border-b border-[#f0e9e2] pb-4">
                   <div className="space-y-1">
                     <span className={`text-[10px] font-mono px-2.5 py-1 rounded border uppercase tracking-wider font-bold ${
                       isDisputed
-                        ? 'bg-red-950/40 border-red-800/60 text-red-400'
+                        ? 'bg-[#fff0e9] border-[#ffd9c4] text-[#b04a27]'
                         : isTerminal
-                          ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-400'
-                          : 'bg-amber-950/40 border-amber-800/60 text-amber-400'
+                          ? 'bg-[#e8f7ef] border-[#cdeeda] text-[#17805b]'
+                          : 'bg-[#fff7e8] border-[#f2e0b8] text-[#8a650f]'
                     }`}>
                       {group.status === 'rejected' ? 'Order not accepted' : group.status.replace(/_/g, ' ')}
                     </span>
 
                     {/* THE HANDOFF CODE */}
                     <div className="mt-3 flex items-center gap-2">
-                      <Boxes size={18} className="text-red-500" />
+                      <Boxes size={18} className="text-[#ef6b3b]" />
                       <div>
-                        <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Show this code at delivery</p>
-                        <p className="text-2xl font-black font-mono text-white tracking-widest">{group.delivery_code}</p>
+                        <p className="text-[10px] font-mono uppercase tracking-wider text-[#81756d]">Show this code at delivery</p>
+                        <p className="text-2xl font-black font-mono text-[#251d18] tracking-widest">{group.delivery_code}</p>
                       </div>
                     </div>
 
-                    <p className="text-[10px] font-mono text-neutral-600 mt-1">
+                    <p className="text-[10px] font-mono text-[#9d9188] mt-1">
                       {group.items.length} item{group.items.length === 1 ? '' : 's'} · {group.order_ref?.slice(0, 8)}
                     </p>
                   </div>
 
                   <div className="text-right">
-                    <p className="text-emerald-400 font-mono font-black text-lg">
+                    <p className="text-[#17805b] font-mono font-black text-lg">
                       ₦{formatNaira(group.totalKobo)}
                     </p>
                     {group.deliveryFeeKobo > 0 && (
-                      <p className="text-[10px] font-mono text-neutral-500">
+                      <p className="text-[10px] font-mono text-[#81756d]">
                         incl. delivery ₦{formatNaira(group.deliveryFeeKobo)}
                       </p>
                     )}
@@ -248,7 +248,7 @@ export default function OrdersPage() {
 
                 {/* ITEM LIST (all sellers' items in this combined order) */}
                 <div className="space-y-2">
-                    <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 flex items-center gap-1">
+                    <p className="text-[10px] font-mono uppercase tracking-wider text-[#81756d] flex items-center gap-1">
                     <Package size={12} /> Items in this order
                   </p>
                   {group.items.map((item) => {
@@ -258,13 +258,13 @@ export default function OrdersPage() {
                         {product?.image_url ? (
                           <img src={product.image_url} alt={product.title || ''} className="w-12 h-12 rounded-lg object-cover" />
                         ) : (
-                          <div className="w-12 h-12 rounded-lg bg-neutral-800 flex items-center justify-center">
-                            <Package size={18} className="text-neutral-500" />
+<div className="w-12 h-12 rounded-lg bg-[#f3eee8] flex items-center justify-center">
+                            <Package size={18} className="text-[#c9bfb2]" />
                           </div>
                         )}
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-neutral-200 truncate">{product?.title || 'Campus purchase'}</p>
-                          <p className="text-[10px] font-mono text-neutral-500">
+                          <p className="text-xs font-semibold text-[#251d18] truncate">{product?.title || 'Campus purchase'}</p>
+                          <p className="text-[10px] font-mono text-[#81756d]">
                             {item.quantity > 1 ? `x${item.quantity} · ` : ''}₦{formatNaira(item.amount_kobo)}
                           </p>
                         </div>
@@ -276,7 +276,7 @@ export default function OrdersPage() {
                 {/* LIVE TRACKING TIMELINE */}
                 {!isDisputed && group.status !== 'cancelled' && (
                   <div className="space-y-3">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Delivery progress</p>
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-[#81756d]">Delivery progress</p>
                     <div className="flex items-center justify-between">
                       {TRACK_STEPS.map((step, idx) => {
                         const done = statusIndex !== -1 && idx <= statusIndex;
@@ -285,13 +285,13 @@ export default function OrdersPage() {
                           <div key={step} className="flex-1 flex items-center flex-col gap-1.5">
                             <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center text-[10px] font-mono transition-all ${
                               done
-                                ? 'bg-emerald-950 border-emerald-500 text-emerald-400'
-                                : 'bg-neutral-900 border-neutral-700 text-neutral-600'
-                            } ${current ? 'ring-2 ring-emerald-500/40' : ''}`}>
+                                ? 'bg-[#e8f7ef] border-[#17805b] text-[#17805b]'
+                                : 'bg-[#faf6f2] border-[#e3dad1] text-[#b4aaa2]'
+                            } ${current ? 'ring-2 ring-[#17805b]/40' : ''}`}>
                               {done ? <CheckCircle2 size={13} /> : idx + 1}
                             </div>
                             <span className={`text-[9px] text-center font-mono uppercase leading-tight ${
-                              done ? 'text-emerald-400' : 'text-neutral-600'
+                              done ? 'text-[#17805b]' : 'text-[#9d9188]'
                             } ${current ? 'font-bold' : ''}`}>
                               {STEP_LABEL[step]}
                             </span>
@@ -305,9 +305,9 @@ export default function OrdersPage() {
                 {/* DELIVERY INFO */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div className="bg-[#faf6f2] border border-[#eee4dc] rounded-2xl p-3">
-                    <span className="text-[10px] text-neutral-500 uppercase font-mono block">Method</span>
-                    <p className="font-semibold text-neutral-200 mt-0.5 flex items-center gap-1">
-                      {group.delivery_type === 'delivery' ? <Truck size={12} className="text-red-500" /> : <MapPin size={12} className="text-emerald-500" />}
+                    <span className="text-[10px] text-[#81756d] uppercase font-mono block">Method</span>
+                    <p className="font-semibold text-[#251d18] mt-0.5 flex items-center gap-1">
+                      {group.delivery_type === 'delivery' ? <Truck size={12} className="text-[#ef6b3b]" /> : <MapPin size={12} className="text-[#17805b]" />}
                       {group.delivery_type === 'delivery'
                         ? `Deliver to: ${group.delivery_address || '—'}`
                         : 'On-campus pickup'}
@@ -315,15 +315,15 @@ export default function OrdersPage() {
                   </div>
 
                   <div className="bg-[#faf6f2] border border-[#eee4dc] rounded-2xl p-3 space-y-1">
-                    <span className="text-[10px] text-neutral-500 uppercase font-mono block">Receiver</span>
-                    <p className="font-semibold text-neutral-200 flex items-center gap-1">
-                      <User size={12} className="text-neutral-500" /> {group.receiver_name || '—'}
+                    <span className="text-[10px] text-[#81756d] uppercase font-mono block">Receiver</span>
+                    <p className="font-semibold text-[#251d18] flex items-center gap-1">
+                      <User size={12} className="text-[#81756d]" /> {group.receiver_name || '—'}
                     </p>
-                    <p className="text-neutral-400 flex items-center gap-1">
-                      <Phone size={11} className="text-neutral-500" /> {group.receiver_phone || '—'}
+                    <p className="text-[#81756d] flex items-center gap-1">
+                      <Phone size={11} className="text-[#81756d]" /> {group.receiver_phone || '—'}
                     </p>
-                    <p className="text-neutral-400 flex items-center gap-1">
-                      <Hash size={11} className="text-neutral-500" /> {group.matric_number || '—'}
+                    <p className="text-[#81756d] flex items-center gap-1">
+                      <Hash size={11} className="text-[#81756d]" /> {group.matric_number || '—'}
                     </p>
                   </div>
                 </div>
@@ -340,13 +340,13 @@ export default function OrdersPage() {
                   </button>
                 )}
 
-                {isDelivered && (
-                  <div className="p-4 bg-emerald-950/20 border border-emerald-900/30 text-emerald-400 text-xs rounded-xl text-center font-medium font-mono">
+{isDelivered && (
+                  <div className="p-4 bg-[#e8f7ef] border border-[#cdeeda] text-[#0f6b4a] text-xs rounded-xl text-center font-medium font-mono">
                     <CheckCircle2 size={16} className="inline mr-1" /> You confirmed this order. Payment has been released to the seller.
                   </div>
                 )}
                 {isDisputed && (
-                  <div className="p-4 bg-red-950/20 border border-red-900/30 text-red-400 text-xs rounded-xl text-center font-medium font-mono">
+                  <div className="p-4 bg-[#fff0e9] border border-[#ffd9c4] text-[#b04a27] text-xs rounded-xl text-center font-medium font-mono">
                     <AlertTriangle size={16} className="inline mr-1" /> We are checking this order. Your money is still protected.
                   </div>
                 )}

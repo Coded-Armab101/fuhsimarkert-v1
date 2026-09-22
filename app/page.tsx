@@ -136,7 +136,7 @@ function BackCircle({ onClick }: { onClick: () => void }) {
       type="button"
       onClick={onClick}
       aria-label="Go back"
-      className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white text-neutral-900 shadow-lg shadow-black/5 ring-1 ring-black/10 transition-colors hover:bg-neutral-50 active:scale-95"
+      className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/50 text-neutral-500 ring-1 ring-black/10 backdrop-blur-md transition-colors hover:bg-white/90 hover:text-neutral-800 active:scale-95"
     >
       <ArrowLeft size={20} />
     </button>
@@ -247,7 +247,7 @@ export default function OnboardingPage() {
             }}
           >
             {/* SLIDE 1 — brand */}
-            <section className="flex h-full w-full shrink-0 flex-col px-7" aria-hidden={active !== 0}>
+            <section className="flex h-full w-full shrink-0 flex-col px-7 pb-10" aria-hidden={active !== 0}>
               <div className="flex flex-1 items-center justify-center pb-6">
                 <BrandGraphic />
               </div>
@@ -269,7 +269,7 @@ export default function OnboardingPage() {
             </section>
 
             {/* SLIDE 2 — buyer */}
-            <section className="flex h-full w-full shrink-0 flex-col px-7" aria-hidden={active !== 1}>
+            <section className="flex h-full w-full shrink-0 flex-col px-7 pb-10" aria-hidden={active !== 1}>
               <div className="flex flex-1 items-center justify-center pb-6">
                 <BuyerGraphic />
               </div>
@@ -292,7 +292,7 @@ export default function OnboardingPage() {
             </section>
 
             {/* SLIDE 3 — seller */}
-            <section className="flex h-full w-full shrink-0 flex-col px-7" aria-hidden={active !== 2}>
+            <section className="flex h-full w-full shrink-0 flex-col px-7 pb-10" aria-hidden={active !== 2}>
               <div className="flex flex-1 items-center justify-center pb-6">
                 <SellerGraphic />
               </div>
@@ -315,7 +315,7 @@ export default function OnboardingPage() {
             </section>
 
             {/* SLIDE 4 — get started */}
-            <section className="flex h-full w-full shrink-0 flex-col px-7" aria-hidden={active !== 3}>
+            <section className="flex h-full w-full shrink-0 flex-col px-7 pb-10" aria-hidden={active !== 3}>
               <div className="flex flex-1 items-center justify-center pb-6">
                 <div className="relative flex h-80 w-full max-w-[300px] items-center justify-center">
                   <div aria-hidden className="absolute h-60 w-60 rounded-full bg-[#fe7743]/20 blur-3xl" />

@@ -79,10 +79,10 @@ export default function SellerPage() {
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#fff0e9] text-[#c9552e] text-xs font-bold">
             <Store size={14} /> Your seller space
           </div>
-          <h1 className="text-2xl font-black text-white">
+<h1 className="text-2xl font-black text-[#251d18]">
             Welcome, {profile?.full_name || 'Vendor'}
           </h1>
-          <p className="text-xs text-neutral-400">
+          <p className="text-xs text-[#81756d]">
             Add products, prepare orders, and see your earnings.
           </p>
         </div>
@@ -97,14 +97,14 @@ export default function SellerPage() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono">
-        <div className="bg-white border border-[#eee4dc] p-5 rounded-2xl space-y-2 shadow-sm">
-          <div className="flex justify-between items-center text-neutral-400 text-xs">
+<div className="bg-white border border-[#eee4dc] p-5 rounded-2xl space-y-2 shadow-sm">
+          <div className="flex justify-between items-center text-[#81756d] text-xs">
             <span>Wallet Balance</span>
-            <TrendingUp size={16} className="text-emerald-500" />
+            <TrendingUp size={16} className="text-[#17805b]" />
           </div>
           <button
             onClick={() => router.push('/seller/wallet')}
-            className="text-2xl font-black text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
+            className="text-2xl font-black text-[#17805b] hover:text-[#0f6b4a] transition-colors cursor-pointer"
             title="View wallet"
           >
             ₦{formatNaira(balanceKobo)}
@@ -112,19 +112,19 @@ export default function SellerPage() {
         </div>
 
         <div className="bg-white border border-[#eee4dc] p-5 rounded-2xl space-y-2 shadow-sm">
-          <div className="flex justify-between items-center text-neutral-400 text-xs">
+          <div className="flex justify-between items-center text-[#81756d] text-xs">
             <span>Active Listings</span>
             <ShoppingBag size={16} className="text-blue-500" />
           </div>
-          <div className="text-2xl font-black text-white">{productCount}</div>
+          <div className="text-2xl font-black text-[#251d18]">{productCount}</div>
         </div>
 
         <div className="bg-white border border-[#eee4dc] p-5 rounded-2xl space-y-2 shadow-sm">
-          <div className="flex justify-between items-center text-neutral-400 text-xs">
+          <div className="flex justify-between items-center text-[#81756d] text-xs">
             <span>Subscription</span>
-            <Store size={16} className="text-emerald-500" />
+            <Store size={16} className="text-[#17805b]" />
           </div>
-          <div className="text-sm font-bold text-emerald-400 uppercase">ACTIVE</div>
+          <div className="text-sm font-bold text-[#17805b] uppercase">ACTIVE</div>
         </div>
       </div>
     </div>
