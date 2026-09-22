@@ -92,7 +92,7 @@ export async function POST(request: Request) {
     : 0;
   const checkoutItems = Array.isArray(event.data?.metadata?.checkout_items)
     ? event.data!.metadata!.checkout_items.map((item) => ({
-        productId: item?.product_id,
+        productId: item?.product_id as string,
         quantity: Number(item?.quantity),
         unitPriceKobo: Number(item?.unit_price_kobo),
       }))
