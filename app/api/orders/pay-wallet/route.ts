@@ -1,350 +1,106 @@
-'use client';
+import { NextResponse } from 'next/server';
+import crypto from 'crypto';
+import { createClient } from '@/utils/supabase/server';
+import { createAdminClient } from '@/utils/supabase/admin';
+import { recordOrder } from '@/utils/paystack/recordOrder';
+import { DELIVERY_FEE_KOBO, buyerServiceFeeKobo } from '@/utils/pricing';
 
-import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { createClient } from '@/utils/supabase';
-import { useCart } from '@/context/CartContext';
-import { formatNaira } from '@/utils/money';
-import { buyerServiceFeeKobo } from '@/utils/pricing';
-import { ShoppingBag, Trash2, ArrowLeft, ShieldCheck, Plus, Minus, Loader2, Truck, Store, User, Phone, Hash, Wallet } from 'lucide-react';
+/**
+ * Wallet-only checkout: the buyer's wallet balance covers the entire order, so
+ * no Paystack charge is needed. The amount is recomputed server-side from the
+ * carts table (never from the client), verified against the wallet balance, and
+ * the wallet is debited atomically + idempotently via recordOrder's debit_wallet
+ * path using a fresh wallet reference. Escrow/order/stock/cart handling is 100%
+ * shared with the card path via recordOrder, so a wallet order behaves exactly
+ * like a card order once escrowed.
+ */
 
-const DELIVERY_FEE_NGN = 500;
-
-export default function BuyerCartPage() {
-  const router = useRouter();
-  const supabase = createClient();
-  const { cart, addToCart, decreaseQuantity, removeFromCart, clearCart, totalAmount } = useCart();
-  const [checkingOut, setCheckingOut] = useState(false);
-  const [checkoutError, setCheckoutError] = useState<string | null>(null);
-  const [walletBalance, setWalletBalance] = useState(0);
-  const [paymentMethod, setPaymentMethod] = useState<'paystack' | 'wallet'>('paystack');
-  const [paymentNotice, setPaymentNotice] = useState<{
-    kind: 'success' | 'error' | 'pending';
-    message: string;
-  } | null>(null);
-
-  // Delivery / fulfilment details entered before checkout.
-  const [delivery, setDelivery] = useState({
-    name: '',
-    phone: '',
-    matric: '',
-    type: 'pickup' as 'pickup' | 'delivery',
-    address: '',
-  });
-
-  // Prefill delivery fields from the buyer's profile on mount.
-  useEffect(() => {
-    const prefill = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name, matric_no, hostel')
-        .eq('id', user.id)
-        .maybeSingle();
-      setDelivery((d) => ({
-        ...d,
-        name: d.name || profile?.full_name || '',
-        matric: d.matric || profile?.matric_no || '',
-        address: d.address || profile?.hostel || '',
-      }));
-      // Load the buyer's wallet balance so the UI can offer split payment.
-      const { data: wallet } = await supabase
-        .from('wallets')
-        .select('balance')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      if (wallet) setWalletBalance(Number(wallet.balance) || 0);
-    };
-    prefill();
-  }, [supabase]);
-
-  const buyerFeeKobo = buyerServiceFeeKobo(totalAmount);
-  const grandTotalKobo =
-    totalAmount + (delivery.type === 'delivery' ? DELIVERY_FEE_NGN * 100 : 0) + buyerFeeKobo;
-
-  // Wallet-first split: wallet covers as much as it can, the remainder via
-  // card/transfer. When the wallet covers the whole total, no Paystack needed.
-  const walletShareKobo = Math.min(walletBalance, grandTotalKobo);
-  const paystackShareKobo = grandTotalKobo - walletShareKobo;
-  const walletCoversAll = paymentMethod === 'wallet' && walletShareKobo >= grandTotalKobo;
-
-  // When Paystack redirects the buyer back here after payment, it appends
-  // ?reference=... to the URL. We strip the param immediately (so a refresh
-  // doesn't re-verify), then confirm the real transaction status with Paystack.
-  // The localStorage cart is only cleared on confirmed success — a cancelled
-  // or failed payment leaves the cart untouched.
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    const reference = url.searchParams.get('reference') || url.searchParams.get('trxref');
-    if (!reference) return;
-
-    url.searchParams.delete('reference');
-    url.searchParams.delete('trxref');
-    window.history.replaceState(null, '', url.toString());
-
-    (async () => {
-      try {
-        const res = await fetch(`/api/paystack/verify?reference=${encodeURIComponent(reference)}`);
-        const data = await res.json();
-
-        if (res.ok && data.status === 'success') {
-          // Payment confirmed. Clear the paid items and send the buyer straight
-          // to their orders page to see the live tracking. We only redirect
-          // here (not on failure) so a cancelled pay keeps the cart intact.
-          clearCart();
-          router.replace('/buyer/orders');
-          return;
-        } else if (res.ok && (data.status === 'failed' || data.status === 'abandoned')) {
-          setPaymentNotice({
-            kind: 'error',
-            message: 'Payment was cancelled or failed. Nothing was charged and your cart is untouched.',
-          });
-        } else {
-          setPaymentNotice({
-            kind: 'pending',
-            message: 'Your payment is still being confirmed. Check the Orders page in a moment.',
-          });
-        }
-      } catch {
-        setPaymentNotice({
-          kind: 'error',
-          message: 'Could not confirm your payment status right now. Your cart has been kept.',
-        });
-      }
-    })();
-  }, [clearCart, router]);
-
-  /**
-   * Proceeds to Paystack escrow checkout.
-   *
-   * The UI cart lives in localStorage but `/api/paystack` reads the `carts`
-   * DB table, so first we sync every distinct item into that table, then ask
-   * the server to open a Paystack transaction, then send the buyer to the
-   * hosted checkout page. Paystack returns here with a transaction reference;
-   * that return handler (above) clears the cart only if payment succeeded.
-   */
-  const handleCheckout = async () => {
-    if (cart.length === 0) return;
-
-    // Validate the delivery form before starting the transaction.
-    if (!delivery.name.trim()) {
-      setCheckoutError('Please enter the receiver\'s full name.');
-      return;
-    }
-    if (!/^[\d+\s-]{7,15}$/.test(delivery.phone.trim())) {
-      setCheckoutError('Please enter a valid phone number.');
-      return;
-    }
-    if (!delivery.matric.trim()) {
-      setCheckoutError('Please enter your matric number.');
-      return;
-    }
-    if (delivery.type === 'delivery' && !delivery.address.trim()) {
-      setCheckoutError('Please enter the delivery address.');
-      return;
-    }
-
-    setCheckingOut(true);
-    setCheckoutError(null);
-
+export async function POST(request: Request) {
+  try {
+    let delivery;
     try {
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
-
-      if (authError || !user) {
-        router.push('/login?redirect=/buyer/cart');
-        return;
-      }
-
-      // 1. Sync the localStorage cart into the `carts` table, carrying each
-      //    line's quantity. The table used to have no quantity column (so any
-      //    quantity > 1 was charged as 1 — a fraud hole); it now stores it, and
-      //    the server charges `price * quantity`. We overwrite the row so the
-      //    DB reflects the exact UI cart (upsert without ignoreDuplicates).
-      const { error: syncError } = await supabase.from('carts').upsert(
-        cart.map((item) => ({
-          user_id: user.id,
-          product_id: item.id,
-          quantity: item.quantity,
-          created_at: new Date().toISOString(),
-        })),
-        { onConflict: 'user_id,product_id' },
-      );
-
-      if (syncError) throw syncError;
-
-      // 2. Choose the payment path. With wallet-first selected and the balance
-      //    covering the whole order, no Paystack charge happens — call the
-      //    wallet-only route. Otherwise ask the server to open a Paystack
-      //    transaction for just the remainder (the server reads the carts
-      //    table and recomputes the amount; nothing is taken from the client).
-      const deliveryPayload = {
-        type: delivery.type,
-        name: delivery.name,
-        phone: delivery.phone,
-        matric: delivery.matric,
-        address: delivery.address,
-      };
-
-      if (walletCoversAll) {
-        const walletRes = await fetch('/api/orders/pay-wallet', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ delivery: deliveryPayload }),
-        });
-        const walletData = await walletRes.json();
-        if (walletRes.ok && walletData.ok) {
-          clearCart();
-          router.replace('/buyer/orders');
-          return;
-        }
-        throw new Error(
-          walletData?.error || 'Could not process your wallet payment. Please try again.',
-        );
-      }
-
-      const initRes = await fetch('/api/paystack', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          walletFirst: paymentMethod === 'wallet',
-          delivery: deliveryPayload,
-        }),
-      });
-
-      const initData = await initRes.json();
-
-      if (!initRes.ok || !initData.authorization_url) {
-        throw new Error(
-          initData?.error || 'Could not start the checkout. Please try again.',
-        );
-      }
-
-      // 3. Send the buyer to Paystack's hosted page. The cart is NOT cleared
-      //    here — it stays until the return handler confirms payment success,
-      //    so an abandoned payment keeps the full cart history.
-      window.location.href = initData.authorization_url;
-    } catch (err) {
-      console.error('Checkout error:', err);
-      setCheckoutError(
-        err instanceof Error
-          ? err.message
-          : 'Could not start the checkout. Please try again.'
-      );
-      setCheckingOut(false);
+      const body = await request.json();
+      delivery = body?.delivery ?? {};
+    } catch {
+      delivery = {};
     }
-  };
+    const deliveryType = delivery.type === 'delivery' ? 'delivery' : 'pickup';
+    const receiverName = String(delivery.name || '').trim();
+    const receiverPhone = String(delivery.phone || '').trim();
+    const matricNumber = String(delivery.matric || '').trim();
+    const deliveryAddress = deliveryType === 'delivery' ? String(delivery.address || '').trim() : null;
+    const isPaidDelivery = deliveryType === 'delivery';
 
-  return (
-    <div className="max-w-3xl mx-auto py-6 px-4 space-y-6 pb-28">
-      <button
-        onClick={() => router.back()}
-        className="inline-flex items-center gap-2 text-xs font-mono text-neutral-400 hover:text-white transition-colors cursor-pointer"
-      >
-        <ArrowLeft size={14} /> Back to Market
-      </button>
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized system access request.' }, { status: 401 });
+    }
 
-      <div className="bg-neutral-950 border border-neutral-800 p-6 rounded-3xl flex items-center justify-between">
-        <div className="space-y-1">
-          <h1 className="text-xl font-bold text-white">Your Shopping Cart</h1>
-          <p className="text-xs text-neutral-400">Review items before placing Escrow order</p>
-        </div>
-        {cart.length > 0 && (
-          <button
-            onClick={clearCart}
-            className="text-xs font-mono text-neutral-500 hover:text-red-400 transition-colors cursor-pointer"
-          >
-            Clear Cart
-          </button>
-        )}
-      </div>
+    const { data: cartItems, error: cartError } = await supabase
+      .from('carts')
+      .select('product_id, quantity')
+      .eq('user_id', user.id);
+    if (cartError || !cartItems || cartItems.length === 0) {
+      return NextResponse.json({ error: 'Shopping cart ledger is empty.' }, { status: 400 });
+    }
+    const productIds = (cartItems as { product_id: string; quantity: number }[]).map((i) => i.product_id);
 
-      {cart.length === 0 ? (
-        <div className="bg-neutral-950 border border-neutral-900 rounded-3xl p-12 text-center space-y-4">
-          <ShoppingBag size={40} className="mx-auto text-neutral-700" />
-          <div className="space-y-1">
-            <h3 className="text-sm font-bold text-white">Your cart is empty</h3>
-            <p className="text-xs text-neutral-500">
-              Explore items on campus market and add them to your cart.
-            </p>
-          </div>
-          <Link
-            href="/buyer"
-            className="inline-block bg-red-600 hover:bg-red-500 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition-all"
-          >
-            Browse Products
-          </Link>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="space-y-3">
-            {cart.map((item) => (
-              <div
-                key={item.id}
-                className="bg-neutral-950 border border-neutral-800 p-4 rounded-2xl flex items-center justify-between gap-4"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-14 h-14 bg-neutral-900 rounded-xl overflow-hidden flex-shrink-0">
-                    {item.image_url ? (
-                      <img src={item.image_url} alt={item.title} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-neutral-700">
-                        <ShoppingBag size={18} />
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-white text-xs">{item.title}</h4>
-                    <p className="text-xs font-mono text-red-500 mt-1">
-                      ₦{formatNaira(item.price)} x {item.quantity}
-                    </p>
-                  </div>
-                </div>
+    const { data: products, error: productsError } = await supabase
+      .from('products')
+      .select('id, price, stock')
+      .in('id', productIds);
+    if (productsError || !products) {
+      return NextResponse.json({ error: 'Internal system pricing error.' }, { status: 500 });
+    }
+    const priceById = new Map((products ?? []).map((p) => [p.id, Number(p.price) || 0]));
 
-                <div className="flex items-center gap-3">
-                  {/* QUANTITY STEPPER */}
-                  <div className="flex items-center gap-1.5 bg-neutral-900 border border-neutral-800 rounded-xl px-1 py-1">
-                    <button
-                      onClick={() => decreaseQuantity(item.id)}
-                      className="p-1.5 rounded-lg text-neutral-300 hover:text-red-400 hover:bg-red-950/40 transition-all cursor-pointer"
-                      aria-label={`Decrease ${item.title}`}
-                    >
-                      <Minus size={14} />
-                    </button>
-                    <span className="text-xs font-mono font-bold text-white w-4 text-center">
-                      {item.quantity}
-                    </span>
-                    <button
-                      onClick={() => addToCart(item)}
-                      className="p-1.5 rounded-lg text-neutral-300 hover:text-red-400 hover:bg-red-950/40 transition-all cursor-pointer"
-                      aria-label={`Increase ${item.title}`}
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
+    const itemsTotalKobo = (cartItems as { product_id: string; quantity: number }[]).reduce((acc, item) => {
+      const unit = priceById.get(item.product_id) ?? 0;
+      const qty = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
+      return acc + unit * qty;
+    }, 0);
+    const buyerFeeKobo = buyerServiceFeeKobo(itemsTotalKobo);
+    const totalKobo = itemsTotalKobo + (isPaidDelivery ? DELIVERY_FEE_KOBO : 0) + buyerFeeKobo;
+    if (!Number.isFinite(totalKobo) || totalKobo <= 0) {
+      return NextResponse.json({ error: 'Invalid financial amount calculation.' }, { status: 400 });
+    }
 
-                  <button
-                    onClick={() => removeFromCart(item.id)}
-                    className="p-2 text-neutral-500 hover:text-red-400 transition-colors cursor-pointer"
-                    aria-label={`Remove ${item.title}`}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+    // Fresh wallet reference: unique, so the idempotent wallet debit runs once.
+    const walletRef = `WAL-${crypto.createHash('sha256').update(JSON.stringify({
+      userId: user.id,
+      productIds,
+      items: (cartItems as { product_id: string; quantity: number }[]).map((item) => ({
+        productId: item.product_id,
+        quantity: Number(item.quantity) > 0 ? Number(item.quantity) : 1,
+        unitPriceKobo: priceById.get(item.product_id) ?? 0,
+      })),
+      deliveryType,
+      receiverName,
+      receiverPhone,
+      matricNumber,
+      deliveryAddress,
+    })).digest('hex').slice(0, 32)}`;
 
-          {/* DELIVERY / FULFILMENT DETAILS */}
-          <div className="bg-neutral-950 border border-neutral-800 p-6 rounded-3xl space-y-4">
-            <div className="flex items-center gap-2 text-sm font-bold text-white border-b border-neutral-900 pb-3">
-              <Truck size={16} className="text-red-500" />
-              Delivery & Receiver Details
-            </div>
+    const admin = createAdminClient();
+    await recordOrder(admin, {
+      buyerId: user.id,
+      reference: walletRef,
+      productIds,
+      items: (cartItems as { product_id: string; quantity: number }[]).map((item) => ({
+        productId: item.product_id,
+        quantity: Number(item.quantity) > 0 ? Number(item.quantity) : 1,
+        unitPriceKobo: priceById.get(item.product_id) ?? 0,
+      })),
+      deliveryType,
+      deliveryFeeKobo: isPaidDelivery ? DELIVERY_FEE_KOBO : 0,
+      receiverName,
+      receiverPhone,
+      matricNumber,
+      deliveryAddress,
+      walletKobo: totalKobo,
+      gatewayAmountKobo: 0,
+    });
 
             {/* Receiver name */}
             <div className="space-y-1.5">
@@ -572,4 +328,15 @@ export default function BuyerCartPage() {
       )}
     </div>
   );
+}
+    return NextResponse.json({
+      ok: true,
+      status: 'in_escrow',
+      reference: walletRef,
+      wallet_kobo: totalKobo,
+    });
+  } catch (err) {
+    console.error('[orders/pay-wallet] error:', err);
+    return NextResponse.json({ error: 'Could not process your wallet payment. Please try again.' }, { status: 500 });
+  }
 }
