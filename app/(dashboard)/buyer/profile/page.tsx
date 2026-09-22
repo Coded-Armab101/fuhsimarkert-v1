@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { User, Wallet, Landmark, Save, RefreshCw, PlusCircle, Cake, Store, X, CheckCircle, Zap, LayoutDashboard, Loader2, LogOut, IdCard, UploadCloud, ShieldCheck } from 'lucide-react';
+import { User, Wallet, Landmark, Save, PlusCircle, Cake, Store, X, CheckCircle, Zap, LayoutDashboard, Loader2, LogOut, IdCard, UploadCloud, ShieldCheck } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
 import { ROLE_PLANS, type RolePlan } from '@/utils/plans';
 import { activeRole } from '@/utils/roles';
@@ -40,6 +40,7 @@ export default function ProfilePage() {
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [withdrawing, setWithdrawing] = useState(false);
+  const [avatar, setAvatar] = useState('🦊');
 
   // Seller identity verification (after paying for a seller role).
   const [verification, setVerification] = useState<{
@@ -74,6 +75,7 @@ export default function ProfilePage() {
 
   const streamProfileData = async () => {
     try {
+      const savedAvatar = window.localStorage.getItem('fuhsi-avatar');
       // 1. Get authenticated user
       const { data: { user }, error: authError } = await supabase.auth.getUser();
 
@@ -103,6 +105,7 @@ export default function ProfilePage() {
         .maybeSingle();
 
       if (isMounted) {
+        if (savedAvatar) setAvatar(savedAvatar);
         setIsSeller(activeRole(profile) !== null);
         setVerification({
           isApproved: profile?.is_approved_seller === true,
@@ -162,7 +165,7 @@ export default function ProfilePage() {
 
     setUpdating(false);
     if (!error) {
-      alert('🔒 Profile data and secure bank pathways bound successfully!');
+      alert('Your profile has been saved.');
     } else {
       console.error('Failed to update profile:', error);
       alert('Could not update your profile. Please try again.');
@@ -188,7 +191,7 @@ export default function ProfilePage() {
       return;
     }
     if (!profileData.bankName || !profileData.accountNumber) {
-      alert('Please set your bank and account number in the Paystack Routing section first.');
+      alert('Add your bank and account number first.');
       return;
     }
     if (!userAuth?.id) {
@@ -368,24 +371,30 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <div className="h-[60vh] flex flex-col items-center justify-center text-xs font-mono text-neutral-500 gap-2">
-        <RefreshCw className="animate-spin text-red-500" size={20} />
-        <span>Synchronizing decentralized identity records...</span>
+      <div className="space-y-4 animate-pulse pt-3">
+        <div className="mx-auto h-20 w-20 rounded-full bg-[#eee4dc]" />
+        <div className="mx-auto h-4 w-36 rounded bg-[#eee4dc]" />
+        <div className="rounded-[2rem] bg-white p-5"><div className="h-14 rounded-2xl bg-[#f4eee9]" /><div className="mt-2 h-14 rounded-2xl bg-[#faf6f2]" /><div className="mt-2 h-14 rounded-2xl bg-[#faf6f2]" /></div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 relative">
+    <div className="buyer-secondary space-y-5 relative py-2">
+      <Link href="/buyer" className="inline-flex items-center gap-2 text-xs font-bold text-[#81756d] hover:text-[#d8552e]">← Back to home</Link>
       {/* HEADER MATRIX */}
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-xl">
-        <div className="space-y-1">
+      <div className="bg-neutral-950 border border-neutral-800 rounded-[2rem] p-6 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-xl text-center sm:text-left">
+        <div className="space-y-1 flex flex-col items-center sm:items-start">
+          <div className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-[#c5a4ff] to-[#8c6ae8] text-3xl">
+            {avatar}
+          </div>
+          <p className="mt-2 text-[10px] font-bold uppercase tracking-[.18em] text-[#8f8279]">Settings</p>
           <h1 className="text-xl md:text-2xl font-black text-white flex items-center gap-2">
             <User className="text-red-500" size={24} />
-            {profileData.fullName || 'New Campus User'}
+            {profileData.fullName || 'Your account'}
           </h1>
           <p className="text-xs text-neutral-400 font-mono text-[11px] max-w-sm truncate">
-            UID Link: {userAuth?.email}
+            {userAuth?.email}
           </p>
         </div>
 
@@ -424,9 +433,21 @@ export default function ProfilePage() {
         </button>
       </div>
 
+      <section className="rounded-[1.75rem] bg-white p-4 shadow-sm">
+        <p className="text-xs font-bold text-[#251d18]">Choose your profile icon</p>
+        <p className="mt-1 text-[11px] text-[#81756d]">Saved only on this device. It does not use database space.</p>
+        <div className="mt-3 flex flex-wrap gap-2">{['🦊','🐼','🐸','🐯','🐙','🦋','⚽','🎧','📚','🚀','🌻','🍕'].map(icon => <button key={icon} onClick={() => { setAvatar(icon); window.localStorage.setItem('fuhsi-avatar', icon); }} className={`grid h-10 w-10 place-items-center rounded-xl text-xl ${avatar === icon ? 'bg-[#fff0e9] ring-2 ring-[#ef6b3b]' : 'bg-[#faf6f2]'}`} aria-label={`Use ${icon} as your profile icon`}>{icon}</button>)}</div>
+      </section>
+
+      <section className="grid gap-2 rounded-[1.75rem] bg-white p-3 shadow-sm">
+        <button onClick={() => document.getElementById('profile-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><User size={17} className="text-[#d8552e]" />Manage profile</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
+        <button onClick={() => document.getElementById('wallet-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Wallet size={17} className="text-[#d8552e]" />Wallet and bank</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
+        <button onClick={() => document.getElementById('seller-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Store size={17} className="text-[#d8552e]" />Selling on FuhsiMarket</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
+      </section>
+
       {/* SELLER VERIFICATION ONBOARDING */}
       {isSeller && !verification.isApproved && (
-        <div className="bg-neutral-950 border border-amber-800/50 rounded-2xl p-6 space-y-4 shadow-xl">
+        <div id="seller-details" className="bg-neutral-950 border border-amber-800/50 rounded-2xl p-6 space-y-4 shadow-xl">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3">
               <div className="p-2.5 rounded-xl bg-amber-950/50 border border-amber-800/50 text-amber-500">
@@ -522,19 +543,19 @@ export default function ProfilePage() {
       <form onSubmit={handleUpdateProfile} className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         
         {/* ESCROW WALLET GRAPH */}
-        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 shadow-xl">
+        <div id="wallet-details" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 shadow-xl">
           <div className="flex items-center justify-between">
             <span className="text-xs font-mono font-bold text-neutral-400">ESCROW LEDGER</span>
             <Wallet size={16} className="text-emerald-400" />
           </div>
           <div className="space-y-1">
-            <p className="text-[10px] text-neutral-500 uppercase font-bold tracking-wider">Guarantee Account Balance</p>
+            <p className="text-[10px] text-neutral-500 uppercase font-bold tracking-wider">Wallet balance</p>
             <h2 className="text-3xl font-black font-mono text-emerald-400">
               ₦{(profileData.walletBalance / 100).toLocaleString()}
             </h2>
           </div>
           <p className="text-[11px] text-neutral-500 leading-relaxed">
-            If an escrow transaction collapses or gets rejected, funds cascade instantly right here for secure extraction.
+            Refunds and money from completed sales are kept here. You can withdraw to your bank.
           </p>
           {profileData.walletBalance > 0 && (
             <button
@@ -551,7 +572,7 @@ export default function ProfilePage() {
         <div className="lg:col-span-2 space-y-6">
           
           {/* STUDENT CAMPUS METADATA */}
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-4 shadow-xl">
+          <div id="profile-details" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-4 shadow-xl">
             <h3 className="text-sm font-bold border-b border-neutral-900 pb-3 uppercase tracking-wider font-mono text-xs text-neutral-400">
               Personal Identity Parameters
             </h3>
@@ -612,7 +633,7 @@ export default function ProfilePage() {
           {/* EXTENDED BANK SYSTEM SELECTION */}
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-4 shadow-xl">
             <h3 className="text-sm font-bold border-b border-neutral-900 pb-3 flex items-center gap-2 uppercase tracking-wider font-mono text-xs text-neutral-400">
-              <Landmark size={15} className="text-amber-500" /> Paystack Routing System Destination
+              <Landmark size={15} className="text-amber-500" /> Bank details
             </h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
@@ -653,7 +674,7 @@ export default function ProfilePage() {
             className="w-full sm:w-auto bg-red-700 hover:bg-red-600 disabled:bg-neutral-800 text-white font-bold text-xs px-6 py-3.5 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all shadow-lg"
           >
             <Save size={14} />
-            <span>{updating ? 'Encrypting Connection Logs...' : 'Commit Profile Matrix'}</span>
+            <span>{updating ? 'Saving...' : 'Save changes'}</span>
           </button>
 
         </div>

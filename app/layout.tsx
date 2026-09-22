@@ -1,11 +1,22 @@
 import type { Metadata } from 'next';
+import { Outfit } from 'next/font/google';
 import './globals.css';
 import { CartProvider } from '@/context/CartContext';
+import PwaInstall from './PwaInstall';
 
 export const metadata: Metadata = {
-  title: 'FUHSI Market',
-  description: 'Campus marketplace for FUHSI students',
+  title: { default: 'FuhsiMarket | Campus shopping made simple', template: '%s | FuhsiMarket' },
+  description: 'Buy and sell simply with FUHSI students.',
+  applicationName: 'FuhsiMarket',
+  appleWebApp: { capable: true, title: 'FuhsiMarket', statusBarStyle: 'default' },
+  icons: { icon: '/fuhsimarket-icon.svg', apple: '/fuhsimarket-icon.svg' },
 };
+
+const outfit = Outfit({
+  subsets: ['latin'],
+  variable: '--font-outfit',
+  display: 'swap',
+});
 
 export default function RootLayout({
   children,
@@ -13,11 +24,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className="bg-black text-white antialiased">
+    <html lang="en" className={outfit.variable} suppressHydrationWarning>
+      <body className="bg-[#fffdfa] text-[#251d18] antialiased" suppressHydrationWarning>
         {/* CartProvider keeps cart data available for the buyer side */}
         <CartProvider>
           {children}
+          <PwaInstall />
         </CartProvider>
       </body>
     </html>

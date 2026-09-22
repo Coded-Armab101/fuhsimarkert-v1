@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { formatNaira } from '@/utils/money';
-import { Package, Plus, Trash2, Pencil, Loader2, Image as ImageIcon } from 'lucide-react';
+import { Package, Plus, Trash2, Pencil, Image as ImageIcon } from 'lucide-react';
 
 type Product = {
   id: string;
@@ -61,15 +61,14 @@ export default function SellerProductsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-[70vh] flex items-center justify-center text-xs font-mono text-neutral-400 gap-2">
-        <Loader2 className="animate-spin text-red-500" size={20} />
-        <span>Loading products...</span>
+      <div className="grid grid-cols-2 gap-3 animate-pulse pt-3 sm:grid-cols-3">
+        {[1,2,3,4,5,6].map(item => <div key={item}><div className="h-40 rounded-2xl bg-[#eee4dc]" /><div className="mt-3 h-4 w-3/4 rounded bg-[#eee4dc]" /><div className="mt-2 h-3 w-1/2 rounded bg-[#f4eee9]" /></div>)}
       </div>
     );
   }
 
   return (
-    <div className="max-w-5xl mx-auto py-6 px-4 space-y-6">
+    <div className="seller-secondary max-w-5xl mx-auto py-3 px-1 space-y-5">
       <div className="flex justify-between items-center bg-neutral-950 border border-neutral-800 p-6 rounded-3xl">
         <div>
           <h1 className="text-xl font-bold text-white">Product Inventory</h1>

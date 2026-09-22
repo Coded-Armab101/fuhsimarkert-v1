@@ -9,7 +9,7 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
 
   const buyerNav = [
-    { label: 'Market', href: '/buyer', icon: Home },
+    { label: 'Home', href: '/buyer', icon: Home },
     { label: 'Cart', href: '/buyer/cart', icon: ShoppingCart },
     { label: 'Saved', href: '/buyer/wishlist', icon: Heart },
     { label: 'Orders', href: '/buyer/orders', icon: Clock },
@@ -17,10 +17,10 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
   ];
 
   return (
-    <div className="min-h-screen bg-black text-white relative select-none pb-24">
+    <div className="min-h-screen bg-[#fffdfa] text-[#251d18] relative pb-24">
       <main className="p-4">{children}</main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-50 bg-neutral-950/95 backdrop-blur-xl border-t border-neutral-800 px-2 py-2 flex items-center justify-around safe-area-pb">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-[#eee6de] bg-white/95 px-2 py-2 backdrop-blur-xl flex items-center justify-around safe-area-pb">
         {buyerNav.map((item) => {
           const Icon = item.icon;
           const isActive =
@@ -34,8 +34,8 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
               href={item.href}
               className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all ${
                 isActive
-                  ? 'text-red-500 font-bold scale-105'
-                  : 'text-neutral-500 hover:text-neutral-300'
+                  ? 'bg-[#fff0e9] text-[#d8552e] font-bold'
+                  : 'text-[#8f8279] hover:text-[#443832]'
               }`}
             >
               <Icon size={20} />

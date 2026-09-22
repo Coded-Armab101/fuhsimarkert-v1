@@ -1,120 +1,19 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { Heart, ShoppingCart, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { Heart, Image as ImageIcon, ShoppingCart, Trash2 } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
 import { formatNaira } from '@/utils/money';
+import { useCart } from '@/context/CartContext';
+
+type SavedProduct = { id: string; title: string; price: number; seller_id: string; description?: string | null; image_url?: string | null; stock?: number | null };
+type SavedItem = { id: string; products: SavedProduct | null };
 
 export default function WishlistPage() {
-  const supabase = createClient();
-  const [wishlistItems, setWishlistItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchWishlistItems = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return setLoading(false);
-
-    const { data, error } = await supabase
-      .from('wishlists')
-      .select(`
-        id,
-        products (
-          id,
-          title,
-          price,
-          description
-        )
-      `)
-      .eq('user_id', user.id);
-
-    if (!error && data) setWishlistItems(data);
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    fetchWishlistItems();
-  }, []);
-
-  const handleRemoveWish = async (wishId: string) => {
-    const { error } = await supabase
-      .from('wishlists')
-      .delete()
-      .eq('id', wishId);
-
-    if (!error) {
-      setWishlistItems(prev => prev.filter(item => item.id !== wishId));
-    }
-  };
-
-  const handleMoveToCart = async (wishId: string, productId: string) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    // 1. Move to cart table
-    const { error: cartErr } = await supabase
-      .from('carts')
-      .insert([{ user_id: user.id, product_id: productId }]);
-
-    if (!cartErr || cartErr.code === '23505') {
-      // 2. Clear out of wishlist table on success
-      await handleRemoveWish(wishId);
-      alert('Shifted completely into active shopping configurations!');
-    }
-  };
-
-  if (loading) return <div className="p-6 text-xs font-mono text-neutral-500">Querying secure wishlists...</div>;
-
-  return (
-    <div className="space-y-6">
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
-        <h1 className="text-xl font-black text-white flex items-center gap-2">
-          <Heart className="text-red-500" size={22} /> Your Saved Watchlist
-        </h1>
-        <p className="text-xs text-neutral-400 mt-1">Monitored student items awaiting escrow processing authorization details.</p>
-      </div>
-
-      {wishlistItems.length === 0 ? (
-        <div className="p-12 border border-neutral-800 bg-neutral-950 rounded-2xl text-center text-xs text-neutral-500 font-mono">
-          Your saved metrics track zero assets currently.
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {wishlistItems.map((item) => {
-            const product = item.products;
-            if (!product) return null;
-            return (
-              <div key={item.id} className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 flex flex-col justify-between shadow-md">
-                <div>
-                  <div className="flex justify-between items-start gap-2">
-                    <h3 className="text-sm font-bold text-neutral-200 line-clamp-1">{product.title}</h3>
-                    <span className="text-emerald-400 font-mono font-black text-xs">
-                      ₦{formatNaira(product.price)}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-neutral-500 line-clamp-2 mt-1">{product.description}</p>
-                </div>
-
-                <div className="grid grid-cols-4 gap-2 mt-4 pt-2 border-t border-neutral-900">
-                  <button
-                    onClick={() => handleMoveToCart(item.id, product.id)}
-                    className="col-span-3 bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 text-neutral-200 text-xs font-bold py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                  >
-                    <ShoppingCart size={13} />
-                    <span>Move to Cart</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleRemoveWish(item.id)}
-                    className="bg-neutral-900 border border-neutral-800 hover:bg-neutral-900/40 text-neutral-600 hover:text-red-400 rounded-xl flex items-center justify-center cursor-pointer transition-all"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+  const supabase = createClient(); const { addToCart } = useCart();
+  const [items, setItems] = useState<SavedItem[]>([]); const [loading, setLoading] = useState(true);
+  useEffect(() => { void (async () => { const { data: { user } } = await supabase.auth.getUser(); if (!user) { setLoading(false); return; } const { data } = await supabase.from('wishlists').select('id, products ( id, title, price, seller_id, description, image_url, stock )').eq('user_id', user.id); setItems((data || []) as unknown as SavedItem[]); setLoading(false); })(); }, [supabase]);
+  const remove = async (id: string) => { const { error } = await supabase.from('wishlists').delete().eq('id', id); if (!error) setItems(current => current.filter(item => item.id !== id)); };
+  return <div className="buyer-secondary mx-auto max-w-3xl space-y-4 py-2"><Link href="/buyer" className="inline-flex items-center gap-2 text-xs font-bold text-[#81756d] hover:text-[#d8552e]">← Back to home</Link><header className="rounded-[1.75rem] bg-gradient-to-br from-[#ff9a55] to-[#e85f35] p-6 text-white"><Heart size={22} fill="currentColor" className="text-white/90" /><h1 className="mt-3 text-2xl font-black">Saved items</h1><p className="mt-1 text-sm text-white/80">Keep your favourites here until you are ready.</p></header>{loading ? <div className="grid grid-cols-2 gap-3 animate-pulse sm:grid-cols-3">{[1,2,3,4,5,6].map(item => <div key={item}><div className="aspect-[.9] rounded-[1.35rem] bg-[#eee4dc]" /><div className="mt-3 h-3 w-3/4 rounded bg-[#eee4dc]" /><div className="mt-2 h-3 w-1/2 rounded bg-[#f4eee9]" /></div>)}</div> : items.length === 0 ? <div className="rounded-[1.5rem] bg-white p-10 text-center shadow-sm"><Heart className="mx-auto text-[#ef6b3b]" size={34} /><h2 className="mt-3 font-bold text-[#251d18]">Nothing saved yet</h2><p className="mt-1 text-sm text-[#81756d]">Tap the heart on any product to save it for later.</p><Link href="/buyer" className="mt-5 inline-block rounded-full bg-[#2e2520] px-5 py-3 text-sm font-bold text-white">Explore market</Link></div> : <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3">{items.map(item => { const product = item.products; if (!product) return null; return <article key={item.id}><div className="relative aspect-[.9] overflow-hidden rounded-[1.35rem] bg-[#f3eee8]">{product.image_url ? <img src={product.image_url} alt={product.title} className="h-full w-full object-cover" /> : <ImageIcon className="absolute inset-0 m-auto text-[#c9bfb2]" />}<button onClick={() => remove(item.id)} className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-white/90 text-[#d8552e]" aria-label={`Remove ${product.title} from saved`}><Trash2 size={15}/></button></div><h2 className="mt-2 line-clamp-1 text-sm font-bold text-[#251d18]">{product.title}</h2><p className="mt-0.5 text-sm font-black text-[#ef6b3b]">₦{formatNaira(product.price)}</p><button onClick={() => addToCart(product)} className="mt-2 flex items-center gap-1.5 rounded-full bg-[#fff0e9] px-3 py-2 text-[11px] font-bold text-[#c9552e]"><ShoppingCart size={14}/> Add to cart</button></article>; })}</div>}</div>;
 }

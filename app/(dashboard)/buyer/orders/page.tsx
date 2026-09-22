@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { CreditCard, RefreshCw, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes } from 'lucide-react';
+import Link from 'next/link';
+import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
 import { formatNaira } from '@/utils/money';
 import DeliveryAnnouncement from '../DeliveryAnnouncement';
@@ -50,6 +51,11 @@ const STEP_LABEL: Record<string, string> = {
   ready_for_pickup: 'Ready for Pickup',
   confirmed: 'Received by You',
   completed: 'Completed',
+};
+
+const isOldFinishedOrder = (group: OrderGroup) => {
+  const finished = ['completed', 'confirmed', 'delivered', 'cancelled', 'rejected'].includes(group.status);
+  return finished && Date.now() - new Date(group.created_at).getTime() > 7 * 24 * 60 * 60 * 1000;
 };
 
 export default function OrdersPage() {
@@ -121,7 +127,10 @@ export default function OrdersPage() {
               if (rank(row.status) < rank(existing.status)) existing.status = row.status;
             }
           }
-          setGroups(Array.from(byRef.values()));
+          // Keep the database record for refunds/support, but keep the buyer's
+          // list tidy: completed, cancelled, and rejected orders leave this
+          // screen after seven days.
+          setGroups(Array.from(byRef.values()).filter((group) => !isOldFinishedOrder(group)));
         }
       }
       setLoading(false);
@@ -162,29 +171,30 @@ export default function OrdersPage() {
 
   if (loading) {
     return (
-      <div className="h-[50vh] flex flex-col items-center justify-center text-xs font-mono text-neutral-500 gap-2">
-        <RefreshCw className="animate-spin text-red-500" size={18} />
-        <span>Loading your orders...</span>
+      <div className="space-y-4 animate-pulse pt-3">
+        <div className="h-7 w-28 rounded-full bg-[#eee4dc]" />
+        {[1, 2].map(item => <div key={item} className="rounded-[1.75rem] bg-white p-5 shadow-sm"><div className="h-4 w-20 rounded bg-[#eee4dc]" /><div className="mt-4 h-7 w-40 rounded bg-[#f4eee9]" /><div className="mt-5 h-16 rounded-2xl bg-[#faf6f2]" /></div>)}
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="buyer-secondary space-y-5 py-2">
+      <Link href="/buyer" className="inline-flex items-center gap-2 text-xs font-bold text-[#81756d] hover:text-[#d8552e]">← Back to home</Link>
       <DeliveryAnnouncement />
 
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 shadow-xl">
+      <div className="bg-white border border-[#eee4dc] rounded-[1.75rem] p-6 shadow-sm">
         <h1 className="text-xl font-black text-white flex items-center gap-2">
-          <CreditCard className="text-red-500" /> My Orders & Tracking
+          <CreditCard className="text-red-500" /> Your orders
         </h1>
         <p className="text-xs text-neutral-400 mt-1">
-          Items from different sellers you bought together are packed as one order. Show the Order ID to the delivery person, then confirm once you have everything.
+          Items from different sellers are shown together here. Show the code when your order arrives, then tap “Confirm received” once you have everything.
         </p>
       </div>
 
       {groups.length === 0 ? (
-        <div className="p-12 border border-neutral-800 bg-neutral-950 rounded-2xl text-center text-xs text-neutral-500 font-mono">
-          No orders yet. When you checkout, your combined order tracking appears here.
+        <div className="p-12 border border-[#eee4dc] bg-white rounded-[1.75rem] text-center text-xs text-neutral-500 font-mono">
+          No orders yet. When you buy something, its delivery updates will show here.
         </div>
       ) : (
         <div className="space-y-6">
@@ -193,10 +203,10 @@ export default function OrdersPage() {
             const isDelivered = ['confirmed', 'delivered', 'completed'].includes(group.status);
             const isDisputed = group.status === 'disputed';
             const canConfirm = group.status === 'ready_for_pickup';
-            const isTerminal = group.status === 'completed' || group.status === 'cancelled';
+            const isTerminal = ['completed', 'confirmed', 'delivered', 'cancelled', 'rejected'].includes(group.status);
 
             return (
-              <div key={group.order_ref} className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 max-w-2xl space-y-6 shadow-xl">
+              <div key={group.order_ref} className="bg-white border border-[#eee4dc] rounded-[1.75rem] p-5 max-w-2xl space-y-5 shadow-sm">
                 {/* SUMMARY */}
                 <div className="flex justify-between items-start border-b border-neutral-900 pb-4">
                   <div className="space-y-1">
@@ -207,14 +217,14 @@ export default function OrdersPage() {
                           ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-400'
                           : 'bg-amber-950/40 border-amber-800/60 text-amber-400'
                     }`}>
-                      STATUS: {group.status.replace(/_/g, ' ')}
+                      {group.status === 'rejected' ? 'Order not accepted' : group.status.replace(/_/g, ' ')}
                     </span>
 
                     {/* THE HANDOFF CODE */}
                     <div className="mt-3 flex items-center gap-2">
                       <Boxes size={18} className="text-red-500" />
                       <div>
-                        <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Order ID for delivery</p>
+                        <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Show this code at delivery</p>
                         <p className="text-2xl font-black font-mono text-white tracking-widest">{group.delivery_code}</p>
                       </div>
                     </div>
@@ -238,13 +248,13 @@ export default function OrdersPage() {
 
                 {/* ITEM LIST (all sellers' items in this combined order) */}
                 <div className="space-y-2">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 flex items-center gap-1">
+                    <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 flex items-center gap-1">
                     <Package size={12} /> Items in this order
                   </p>
                   {group.items.map((item) => {
                     const product = item.products?.[0];
                     return (
-                      <div key={item.id} className="flex items-center gap-3 bg-neutral-900/60 border border-neutral-800 rounded-xl p-3">
+                      <div key={item.id} className="flex items-center gap-3 bg-[#faf6f2] border border-[#eee4dc] rounded-2xl p-3">
                         {product?.image_url ? (
                           <img src={product.image_url} alt={product.title || ''} className="w-12 h-12 rounded-lg object-cover" />
                         ) : (
@@ -253,7 +263,7 @@ export default function OrdersPage() {
                           </div>
                         )}
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-neutral-200 truncate">{product?.title || 'Campus Asset Purchase'}</p>
+                          <p className="text-xs font-semibold text-neutral-200 truncate">{product?.title || 'Campus purchase'}</p>
                           <p className="text-[10px] font-mono text-neutral-500">
                             {item.quantity > 1 ? `x${item.quantity} · ` : ''}₦{formatNaira(item.amount_kobo)}
                           </p>
@@ -266,7 +276,7 @@ export default function OrdersPage() {
                 {/* LIVE TRACKING TIMELINE */}
                 {!isDisputed && group.status !== 'cancelled' && (
                   <div className="space-y-3">
-                    <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Live Tracking</p>
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Delivery progress</p>
                     <div className="flex items-center justify-between">
                       {TRACK_STEPS.map((step, idx) => {
                         const done = statusIndex !== -1 && idx <= statusIndex;
@@ -294,7 +304,7 @@ export default function OrdersPage() {
 
                 {/* DELIVERY INFO */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-3">
+                  <div className="bg-[#faf6f2] border border-[#eee4dc] rounded-2xl p-3">
                     <span className="text-[10px] text-neutral-500 uppercase font-mono block">Method</span>
                     <p className="font-semibold text-neutral-200 mt-0.5 flex items-center gap-1">
                       {group.delivery_type === 'delivery' ? <Truck size={12} className="text-red-500" /> : <MapPin size={12} className="text-emerald-500" />}
@@ -304,7 +314,7 @@ export default function OrdersPage() {
                     </p>
                   </div>
 
-                  <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-3 space-y-1">
+                  <div className="bg-[#faf6f2] border border-[#eee4dc] rounded-2xl p-3 space-y-1">
                     <span className="text-[10px] text-neutral-500 uppercase font-mono block">Receiver</span>
                     <p className="font-semibold text-neutral-200 flex items-center gap-1">
                       <User size={12} className="text-neutral-500" /> {group.receiver_name || '—'}
@@ -326,18 +336,18 @@ export default function OrdersPage() {
                     className="w-full bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs py-3.5 rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950/20 active:scale-95 disabled:opacity-60"
                   >
                     {updatingRef === group.order_ref ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
-                    {updatingRef === group.order_ref ? 'Confirming & Releasing to Sellers...' : 'Confirm Received'}
+                    {updatingRef === group.order_ref ? 'Confirming...' : 'Confirm received'}
                   </button>
                 )}
 
                 {isDelivered && (
                   <div className="p-4 bg-emerald-950/20 border border-emerald-900/30 text-emerald-400 text-xs rounded-xl text-center font-medium font-mono">
-                    <CheckCircle2 size={16} className="inline mr-1" /> Received. Escrow released to all sellers.
+                    <CheckCircle2 size={16} className="inline mr-1" /> You confirmed this order. Payment has been released to the seller.
                   </div>
                 )}
                 {isDisputed && (
                   <div className="p-4 bg-red-950/20 border border-red-900/30 text-red-400 text-xs rounded-xl text-center font-medium font-mono">
-                    <AlertTriangle size={16} className="inline mr-1" /> Escrow locked. Deal flagged for dispute arbitration.
+                    <AlertTriangle size={16} className="inline mr-1" /> We are checking this order. Your money is still protected.
                   </div>
                 )}
               </div>

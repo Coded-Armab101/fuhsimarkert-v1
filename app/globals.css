@@ -8,8 +8,26 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
+}
+
+/* Brand palette: black background, white text, #FE7743 as the single accent.
+   The site was built on the `red` scale, so the red family is remapped to an
+   orange scale anchored on the brand color #FE7743 — no component markup or
+   logic changes needed. */
+@theme {
+  --color-red-50: #fff4ed;
+  --color-red-100: #ffe8da;
+  --color-red-200: #ffcfb4;
+  --color-red-300: #ffad85;
+  --color-red-400: #ff9362;
+  --color-red-500: #fe7743;
+  --color-red-600: #ed5f2a;
+  --color-red-700: #c74a1c;
+  --color-red-800: #a13a15;
+  --color-red-900: #7d2d12;
+  --color-red-950: #431505;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,5 +40,47 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
+
+button, a, input { -webkit-tap-highlight-color: transparent; }
+
+/* Shared light treatment for Cart, Orders, and Account. These pages keep their
+   existing secure checkout logic while matching the buyer home screen. */
+.buyer-secondary [class*="bg-neutral-950"] {
+  background-color: #ffffff !important;
+  border-color: #eee4dc !important;
+  box-shadow: 0 8px 24px rgba(65, 42, 29, .05) !important;
+}
+.buyer-secondary [class*="bg-neutral-900"] {
+  background-color: #faf6f2 !important;
+  border-color: #eee4dc !important;
+}
+.buyer-secondary [class*="border-neutral-8"],
+.buyer-secondary [class*="border-neutral-9"] { border-color: #eee4dc !important; }
+.buyer-secondary [class*="bg-neutral-950"] :is(h1, h2, h3, h4),
+.buyer-secondary [class*="bg-neutral-900"] :is(h1, h2, h3, h4) { color: #251d18 !important; }
+.buyer-secondary input, .buyer-secondary select {
+  background: #faf6f2 !important;
+  border-color: #e8ddd4 !important;
+  color: #251d18 !important;
+}
+.buyer-secondary [class*="text-neutral-4"],
+.buyer-secondary [class*="text-neutral-5"],
+.buyer-secondary [class*="text-neutral-6"] { color: #81756d !important; }
+.buyer-secondary { background: #fffdfa; color: #251d18; }
+.buyer-secondary [class*="text-white"]:not(button):not(a) { color: #251d18; }
+.buyer-secondary [class*="bg-red-"], .buyer-secondary [class*="bg-emerald-"] { color: inherit; }
+
+/* Seller screens use the same approachable, light mobile system as the buyer app. */
+.seller-shell [class*="bg-neutral-950"] { background-color: #fff !important; border-color: #eee4dc !important; box-shadow: 0 8px 24px rgba(65,42,29,.05) !important; }
+.seller-shell [class*="bg-neutral-900"] { background-color: #faf6f2 !important; border-color: #eee4dc !important; }
+.seller-shell [class*="border-neutral-8"], .seller-shell [class*="border-neutral-9"] { border-color: #eee4dc !important; }
+.seller-shell [class*="bg-neutral-950"] :is(h1,h2,h3,h4), .seller-shell [class*="bg-neutral-900"] :is(h1,h2,h3,h4) { color: #251d18 !important; }
+.seller-shell input, .seller-shell select, .seller-shell textarea { background:#faf6f2 !important; border-color:#e8ddd4 !important; color:#251d18 !important; }
+.seller-shell [class*="text-white"]:not(button):not(a) { color:#251d18 !important; }
+.seller-shell [class*="text-neutral-2"], .seller-shell [class*="text-neutral-3"], .seller-shell [class*="text-neutral-4"], .seller-shell [class*="text-neutral-5"], .seller-shell [class*="text-neutral-6"] { color:#75685f !important; }
+.seller-shell [class*="text-emerald-"] { color:#17805b !important; }
+.seller-shell [class*="bg-emerald-9"] { background-color:#ecfdf5 !important; }
+.seller-shell [class*="bg-sky-9"] { background-color:#eff6ff !important; }
+.seller-shell [class*="text-white"]:not(button):not(a), .seller-shell [class*="text-neutral-2"], .seller-shell [class*="text-neutral-3"] { color:#251d18 !important; }

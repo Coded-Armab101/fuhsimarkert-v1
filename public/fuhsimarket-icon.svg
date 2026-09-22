@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="FuhsiMarket">
+  <rect width="512" height="512" rx="120" fill="#ef6b3b"/>
+  <path d="M145 172h222l-18 205H163l-18-205Z" fill="#fffdfa"/>
+  <path d="M200 190c0-38 25-62 56-62s56 24 56 62" fill="none" stroke="#ef6b3b" stroke-width="26" stroke-linecap="round"/>
+  <path d="M204 250h104M204 294h72" stroke="#ef6b3b" stroke-width="24" stroke-linecap="round"/>
+</svg>

@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { formatNaira, nairaToKobo } from '@/utils/money';
-import { Wallet, Loader2, Banknote, ArrowDownUp, CheckCircle2, Clock } from 'lucide-react';
+import { Wallet, Loader2, Banknote, ArrowDownUp, CheckCircle2, Clock, Landmark } from 'lucide-react';
 
 type Withdrawal = {
   id: string;
@@ -121,26 +121,25 @@ export default function SellerWalletPage() {
 
   if (loading) {
     return (
-      <div className="h-[50vh] flex flex-col items-center justify-center text-xs font-mono text-neutral-500 gap-2">
-        <Loader2 className="animate-spin text-red-500" size={18} />
-        <span>Loading wallet...</span>
-      </div>
+      <div className="space-y-4 animate-pulse pt-3"><div className="h-28 rounded-[1.75rem] bg-[#eee4dc]" /><div className="h-40 max-w-xl rounded-[1.75rem] bg-[#f4eee9]" /><div className="h-72 max-w-xl rounded-[1.75rem] bg-[#faf6f2]" /></div>
     );
   }
 
+  const pendingKobo = withdrawals.filter((w) => w.status === 'pending' || w.status === 'processing').reduce((sum, w) => sum + w.amount_kobo, 0);
+  const paidKobo = withdrawals.filter((w) => w.status === 'paid').reduce((sum, w) => sum + w.amount_kobo, 0);
+
   return (
-    <div className="space-y-6">
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 shadow-xl">
-        <h1 className="text-xl font-black text-white flex items-center gap-2">
-          <Wallet className="text-red-500" /> My Wallet
-        </h1>
-        <p className="text-xs text-neutral-400 mt-1">
-          Money from completed sales accumulates here. Request a withdrawal to your bank account.
-        </p>
+    <div className="seller-secondary mx-auto max-w-2xl space-y-5 py-2">
+      <button onClick={() => router.push('/seller')} className="text-xs font-bold text-[#81756d] hover:text-[#d8552e]">← Back to seller home</button>
+      <div className="rounded-[2rem] bg-gradient-to-br from-[#2e2520] to-[#544038] p-6 text-white shadow-xl">
+        <div className="flex items-center justify-between"><div><p className="text-xs text-white/65">FuhsiMarket wallet</p><h1 className="mt-1 text-xl font-black">Your money</h1></div><div className="grid h-11 w-11 place-items-center rounded-2xl bg-white/15"><Wallet size={20}/></div></div>
+        <p className="mt-8 text-xs text-white/65">Available to withdraw</p><p className="mt-1 text-4xl font-black tracking-tight">₦{formatNaira(balanceKobo)}</p>
+        <button onClick={() => document.getElementById('withdraw')?.scrollIntoView({behavior:'smooth'})} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#ef6b3b] py-3.5 text-sm font-bold"><Banknote size={16}/>Withdraw money</button>
       </div>
+      <div className="grid grid-cols-2 gap-3"><div className="rounded-[1.5rem] bg-white p-4 shadow-sm"><div className="flex items-center gap-2 text-xs text-[#81756d]"><Clock size={14} className="text-[#ef6b3b]"/>On the way</div><p className="mt-2 text-lg font-black text-[#251d18]">₦{formatNaira(pendingKobo)}</p><p className="mt-1 text-[10px] text-[#81756d]">Withdrawal requests</p></div><div className="rounded-[1.5rem] bg-white p-4 shadow-sm"><div className="flex items-center gap-2 text-xs text-[#81756d]"><CheckCircle2 size={14} className="text-[#17805b]"/>Paid out</div><p className="mt-2 text-lg font-black text-[#251d18]">₦{formatNaira(paidKobo)}</p><p className="mt-1 text-[10px] text-[#81756d]">All-time withdrawals</p></div></div>
 
       {/* BALANCE CARD */}
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 shadow-xl max-w-xl">
+      <div className="hidden">
         <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Available Balance</p>
         <p className="text-4xl font-black text-emerald-400 font-mono mt-1">
           ₦{formatNaira(balanceKobo)}
@@ -151,9 +150,9 @@ export default function SellerWalletPage() {
       </div>
 
       {/* WITHDRAW FORM */}
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 shadow-xl max-w-xl space-y-4">
-        <h2 className="text-base font-bold text-white flex items-center gap-2">
-          <Banknote className="text-red-500" size={16} /> Request Withdrawal
+      <div id="withdraw" className="rounded-[1.75rem] bg-white p-6 shadow-sm space-y-4">
+        <h2 className="text-base font-bold text-[#251d18] flex items-center gap-2">
+          <Landmark className="text-[#ef6b3b]" size={16} /> Send to your bank
         </h2>
 
         {feedback && (
@@ -220,8 +219,8 @@ export default function SellerWalletPage() {
       </div>
 
       {/* HISTORY */}
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 shadow-xl max-w-xl">
-        <h2 className="text-base font-bold text-white flex items-center gap-2 mb-4">
+      <div className="rounded-[1.75rem] bg-white p-6 shadow-sm">
+        <h2 className="text-base font-bold text-[#251d18] flex items-center gap-2 mb-4">
           <ArrowDownUp className="text-red-500" size={16} /> Withdrawal History
         </h2>
 

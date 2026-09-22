@@ -23,6 +23,7 @@ export default function BuyerCartPage() {
     kind: 'success' | 'error' | 'pending';
     message: string;
   } | null>(null);
+  const [checkoutStage, setCheckoutStage] = useState<'items' | 'checkout'>('items');
 
   // Delivery / fulfilment details entered before checkout.
   const [delivery, setDelivery] = useState({
@@ -240,25 +241,22 @@ export default function BuyerCartPage() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto py-6 px-4 space-y-6 pb-28">
-      <button
-        onClick={() => router.back()}
-        className="inline-flex items-center gap-2 text-xs font-mono text-neutral-400 hover:text-white transition-colors cursor-pointer"
-      >
-        <ArrowLeft size={14} /> Back to Market
-      </button>
+    <div className="buyer-secondary max-w-3xl mx-auto py-3 px-1 space-y-5 pb-28">
+      <Link href="/buyer" className="inline-flex items-center gap-2 text-xs font-bold text-[#81756d] hover:text-[#d8552e] transition-colors">
+        <ArrowLeft size={14} /> Back to home
+      </Link>
 
       <div className="bg-neutral-950 border border-neutral-800 p-6 rounded-3xl flex items-center justify-between">
         <div className="space-y-1">
-          <h1 className="text-xl font-bold text-white">Your Shopping Cart</h1>
-          <p className="text-xs text-neutral-400">Review items before placing Escrow order</p>
+          <h1 className="text-xl font-bold text-white">Your cart</h1>
+          <p className="text-xs text-neutral-400">Check your items before you pay.</p>
         </div>
         {cart.length > 0 && (
           <button
             onClick={clearCart}
             className="text-xs font-mono text-neutral-500 hover:text-red-400 transition-colors cursor-pointer"
           >
-            Clear Cart
+            Clear cart
           </button>
         )}
       </div>
@@ -269,18 +267,23 @@ export default function BuyerCartPage() {
           <div className="space-y-1">
             <h3 className="text-sm font-bold text-white">Your cart is empty</h3>
             <p className="text-xs text-neutral-500">
-              Explore items on campus market and add them to your cart.
+              Explore the market and add something you like.
             </p>
           </div>
           <Link
             href="/buyer"
             className="inline-block bg-red-600 hover:bg-red-500 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition-all"
           >
-            Browse Products
+            Explore market
           </Link>
         </div>
       ) : (
         <div className="space-y-4">
+          <div className="flex items-center gap-2 px-1 text-[11px] font-bold">
+            <span className="rounded-full bg-[#ef6b3b] px-2.5 py-1 text-white">1. Items</span>
+            <span className={checkoutStage === 'checkout' ? 'rounded-full bg-[#ef6b3b] px-2.5 py-1 text-white' : 'text-[#9d9188]'}>2. Details</span>
+            <span className={checkoutStage === 'checkout' ? 'rounded-full bg-[#ef6b3b] px-2.5 py-1 text-white' : 'text-[#9d9188]'}>3. Delivery</span>
+          </div>
           <div className="space-y-3">
             {cart.map((item) => (
               <div
@@ -339,11 +342,18 @@ export default function BuyerCartPage() {
             ))}
           </div>
 
+          {checkoutStage === 'items' ? (
+            <button onClick={() => setCheckoutStage('checkout')} className="w-full rounded-2xl bg-[#2e2520] py-4 text-sm font-bold text-white">
+              Continue to your details
+            </button>
+          ) : <>
+          <button onClick={() => setCheckoutStage('items')} className="text-xs font-bold text-[#d8552e]">← Edit items</button>
+
           {/* DELIVERY / FULFILMENT DETAILS */}
           <div className="bg-neutral-950 border border-neutral-800 p-6 rounded-3xl space-y-4">
             <div className="flex items-center gap-2 text-sm font-bold text-white border-b border-neutral-900 pb-3">
               <Truck size={16} className="text-red-500" />
-              Delivery & Receiver Details
+              Delivery details
             </div>
 
             {/* Receiver name */}
@@ -477,9 +487,7 @@ export default function BuyerCartPage() {
 
             <div className="flex items-center gap-2 text-[11px] font-mono text-neutral-400 bg-neutral-900/60 border border-neutral-800 p-3 rounded-xl">
               <ShieldCheck size={16} className="text-emerald-500 flex-shrink-0" />
-              <span>
-                Protected by FUHSI Escrow. Funds are held safely until you confirm delivery.
-              </span>
+              <span>Your payment is safe until you confirm that your order arrived.</span>
             </div>
 
             {/* PAYMENT METHOD */}
@@ -562,12 +570,13 @@ export default function BuyerCartPage() {
                   <span>
                     {walletCoversAll
                       ? `Pay with Wallet (₦${formatNaira(grandTotalKobo)})`
-                      : `Proceed to Escrow Checkout (₦${formatNaira(grandTotalKobo)})`}
+                      : `Continue to payment (₦${formatNaira(grandTotalKobo)})`}
                   </span>
                 </>
               )}
             </button>
           </div>
+          </>}
         </div>
       )}
     </div>

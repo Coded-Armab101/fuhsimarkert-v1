@@ -111,96 +111,111 @@ export default function SignUpPage() {
   };
 
   return (
-    <div className="min-h-screen bg-neutral-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-neutral-950 border border-neutral-800 rounded-2xl p-8 shadow-2xl">
-        
-        <div className="text-center mb-8">
-          <span className="text-2xl font-black tracking-wider text-red-500">FUHSI<span className="text-white">MARKET</span></span>
-          <p className="text-sm text-neutral-400 mt-2">Create your secure student account</p>
+    <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-white px-4 py-12 font-sans text-neutral-900 select-none">
+      {/* glassmorphism backdrop orbs — same world as the onboarding */}
+      <div aria-hidden className="pointer-events-none absolute -right-24 -top-28 h-80 w-80 rounded-full bg-[#fe7743]/25 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -left-28 top-1/3 h-72 w-72 rounded-full bg-[#ffc3a1]/50 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -bottom-20 right-4 h-64 w-64 rounded-full bg-[#fe7743]/20 blur-3xl" />
+
+      <div className="relative z-10 w-full max-w-md">
+        <div className="mb-8 text-center">
+          <span className="text-2xl font-black tracking-tight text-neutral-900">FUHSI<span className="text-[#fe7743]">MARKET</span></span>
+          <p className="mt-2 text-sm font-medium text-neutral-500">Create your secure student account</p>
         </div>
 
-        <form onSubmit={handleSignUp} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2">Full Name</label>
-            <div className="relative">
-              <User className="absolute left-3 top-3.5 text-neutral-500" size={18} />
-              <input 
-                type="text" 
-                placeholder="e.g., Abdulrahman..." 
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                className="w-full bg-neutral-900 border border-neutral-800 text-neutral-200 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:border-red-600 transition-colors"
-              />
+        <div className="rounded-[2rem] bg-white/60 p-7 shadow-2xl shadow-[#fe7743]/20 ring-1 ring-white/70 backdrop-blur-2xl">
+          <form onSubmit={handleSignUp} className="space-y-4">
+            <div>
+              <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-neutral-500">Full Name</label>
+              <div className="relative">
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 text-[#fe7743]" size={18} />
+                <input
+                  type="text"
+                  placeholder="e.g., Abdulrahman..."
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  className="w-full rounded-2xl bg-white/70 py-3.5 pl-11 pr-4 text-sm text-neutral-900 outline-none ring-1 ring-black/10 transition-shadow placeholder:text-neutral-400 focus:bg-white focus:ring-2 focus:ring-[#fe7743]"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-neutral-500">Campus Email Address</label>
+              <div className="relative">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-[#fe7743]" size={18} />
+                <input
+                  type="email"
+                  placeholder="you@student.edu.ng"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full rounded-2xl bg-white/70 py-3.5 pl-11 pr-4 text-sm text-neutral-900 outline-none ring-1 ring-black/10 transition-shadow placeholder:text-neutral-400 focus:bg-white focus:ring-2 focus:ring-[#fe7743]"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-neutral-500">Secure Password</label>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-[#fe7743]" size={18} />
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-2xl bg-white/70 py-3.5 pl-11 pr-4 text-sm text-neutral-900 outline-none ring-1 ring-black/10 transition-shadow placeholder:text-neutral-400 focus:bg-white focus:ring-2 focus:ring-[#fe7743]"
+                />
+              </div>
+            </div>
+
+            {uiStatus.text && (
+              <div className={`flex items-start space-x-2 rounded-2xl p-4 text-sm ${
+                uiStatus.type === 'error'
+                  ? 'bg-[#fe7743]/15 text-neutral-900 ring-1 ring-[#fe7743]/40'
+                  : 'bg-white/70 text-neutral-900 ring-1 ring-black/10'
+              }`}>
+                {uiStatus.type === 'error' ? (
+                  <AlertCircle className="mt-0.5 shrink-0 text-[#fe7743]" size={16} />
+                ) : (
+                  <CheckCircle2 className="mt-0.5 shrink-0 text-[#fe7743]" size={16} />
+                )}
+                <span>{uiStatus.text}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="flex w-full items-center justify-center space-x-2 rounded-full bg-[#fe7743] py-4 text-sm font-bold text-white shadow-lg shadow-[#fe7743]/40 transition-transform hover:brightness-105 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <span>Register Profile</span>}
+            </button>
+          </form>
+
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-black/10" />
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="rounded-full bg-white/70 px-3 font-semibold text-neutral-500">or sign up with</span>
             </div>
           </div>
-
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2">Campus Email Address</label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-3.5 text-neutral-500" size={18} />
-              <input 
-                type="email" 
-                placeholder="you@student.edu.ng" 
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-neutral-900 border border-neutral-800 text-neutral-200 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:border-red-600 transition-colors"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2">Secure Password</label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-3.5 text-neutral-500" size={18} />
-              <input 
-                type="password" 
-                placeholder="••••••••" 
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-neutral-900 border border-neutral-800 text-neutral-200 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:border-red-600 transition-colors"
-              />
-            </div>
-          </div>
-
-          {uiStatus.text && (
-            <div className={`p-4 rounded-xl flex items-start space-x-2 text-sm border ${
-              uiStatus.type === 'error' ? 'bg-red-950/20 text-red-400 border-red-900/50' : 'bg-green-950/20 text-green-400 border-green-900/50'
-            }`}>
-              {uiStatus.type === 'error' ? <AlertCircle className="shrink-0 mt-0.5" size={16} /> : <CheckCircle2 className="shrink-0 mt-0.5" size={16} />}
-              <span>{uiStatus.text}</span>
-            </div>
-          )}
 
           <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full bg-red-700 hover:bg-red-800 disabled:bg-neutral-800 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center space-x-2 transition-all cursor-pointer disabled:cursor-not-allowed"
+            type="button"
+            onClick={handleGoogle}
+            disabled={isGoogle}
+            className="flex w-full items-center justify-center space-x-2 rounded-full bg-white py-4 text-sm font-semibold text-neutral-900 ring-1 ring-black/10 transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <span>Register Profile</span>}
+            {isGoogle ? <Loader2 className="animate-spin" size={18} /> : <GoogleIcon />}
+            <span>{isGoogle ? 'Redirecting to Google…' : 'Continue with Google'}</span>
           </button>
-        </form>
-
-        <div className="relative my-6">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-neutral-800" />
-          </div>
-          <div className="relative flex justify-center text-xs">
-            <span className="bg-neutral-950 px-3 text-neutral-500 font-mono">or sign up with</span>
-          </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleGoogle}
-          disabled={isGoogle}
-          className="w-full bg-neutral-900 hover:bg-neutral-800 disabled:bg-neutral-900 border border-neutral-700 hover:border-neutral-600 text-white font-semibold py-3 px-4 rounded-xl flex items-center justify-center space-x-2 transition-all cursor-pointer disabled:opacity-70"
-        >
-          {isGoogle ? <Loader2 className="animate-spin" size={18} /> : <GoogleIcon />}
-          <span>{isGoogle ? 'Redirecting to Google…' : 'Continue with Google'}</span>
-        </button>
-
-        <p className="text-xs text-center text-neutral-500 mt-6">
-          Already verified? <Link href="/login" className="text-red-500 hover:underline">Log in here</Link>
+        <p className="mt-6 text-center text-xs text-neutral-500">
+          Already verified?{' '}
+          <Link href="/login" className="font-bold text-[#fe7743] hover:underline">
+            Log in here
+          </Link>
         </p>
       </div>
     </div>
