@@ -96,13 +96,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   // Function to clear the cart
   const clearCart = () => setCart([]);
 
-  // Calculate total price (kobo); the badge count is the number of DISTINCT
-  // products in the cart (one per unique product), not the summed quantity.
+  // Calculate total price (kobo) and the total quantity for visible badges.
   const totalAmount = cart.reduce(
     (sum, item) => sum + item.price * item.quantity,
     0
   );
-  const totalItems = cart.length;
+  const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
     <CartContext.Provider

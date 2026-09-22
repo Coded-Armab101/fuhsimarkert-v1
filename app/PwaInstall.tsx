@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Download, X } from 'lucide-react';
+import { createClient } from '@/utils/supabase';
 
 type InstallEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> };
 
@@ -9,12 +10,17 @@ export default function PwaInstall() {
   const [promptEvent, setPromptEvent] = useState<InstallEvent | null>(null);
   const [showIosHelp, setShowIosHelp] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
 
   useEffect(() => {
+    const supabase = createClient();
+    void supabase.auth.getUser().then(({ data }) => setSignedIn(Boolean(data.user)));
     const handler = (event: Event) => { event.preventDefault(); setPromptEvent(event as InstallEvent); };
     window.addEventListener('beforeinstallprompt', handler);
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
+
+  if (signedIn !== false) return null;
 
   if (dismissed || (!promptEvent && !showIosHelp)) return <button onClick={() => setShowIosHelp(true)} className="fixed right-4 top-4 z-[70] rounded-full bg-[#fff0e9] p-2 text-[#d8552e] shadow-sm" aria-label="How to install FuhsiMarket"><Download size={17} /></button>;
   const install = async () => { if (!promptEvent) { setShowIosHelp(true); return; } await promptEvent.prompt(); const choice = await promptEvent.userChoice; if (choice.outcome === 'accepted') setPromptEvent(null); else setDismissed(true); };

@@ -84,3 +84,4 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 .seller-shell [class*="bg-emerald-9"] { background-color:#ecfdf5 !important; }
 .seller-shell [class*="bg-sky-9"] { background-color:#eff6ff !important; }
 .seller-shell [class*="text-white"]:not(button):not(a), .seller-shell [class*="text-neutral-2"], .seller-shell [class*="text-neutral-3"] { color:#251d18 !important; }
+.buyer-secondary input:focus, .buyer-secondary select:focus, .buyer-secondary textarea:focus { outline: 3px solid rgba(239,107,59,.28) !important; outline-offset: 2px; border-color:#ef6b3b !important; }

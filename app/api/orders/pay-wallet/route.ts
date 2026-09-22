@@ -110,6 +110,13 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     console.error('[orders/pay-wallet] error:', err);
-    return NextResponse.json({ error: 'Could not process your wallet payment. Please try again.' }, { status: 500 });
+    const message = err instanceof Error ? err.message : '';
+    if (message.includes('insufficient') || message.includes('balance')) {
+      return NextResponse.json({ error: 'Your wallet balance is not enough for this order.' }, { status: 400 });
+    }
+    if (message.includes('stock')) {
+      return NextResponse.json({ error: 'One item has just sold out or does not have enough stock. Refresh your cart and try again.' }, { status: 409 });
+    }
+    return NextResponse.json({ error: 'We could not complete the wallet payment. Please try again or use card/transfer.' }, { status: 500 });
   }
 }
