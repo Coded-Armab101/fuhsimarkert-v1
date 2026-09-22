@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { Outfit } from 'next/font/google';
 import './globals.css';
 import { CartProvider } from '@/context/CartContext';
 import PwaInstall from './PwaInstall';
@@ -12,19 +11,13 @@ export const metadata: Metadata = {
   icons: { icon: '/fuhsimarket-icon.svg', apple: '/fuhsimarket-icon.svg' },
 };
 
-const outfit = Outfit({
-  subsets: ['latin'],
-  variable: '--font-outfit',
-  display: 'swap',
-});
-
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={outfit.variable} suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <body className="bg-[#fffdfa] text-[#251d18] antialiased" suppressHydrationWarning>
         {/* CartProvider keeps cart data available for the buyer side */}
         <CartProvider>
