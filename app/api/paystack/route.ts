@@ -87,8 +87,12 @@ export async function POST(request: Request) {
       const stock = product.stock === null || product.stock === undefined
         ? null // untracked → unlimited
         : Number(product.stock);
-      const qty = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
-      if (stock !== null && (stock < 1 || qty > stock)) {
+      const rawQty = Number(item.quantity);
+      if (!Number.isSafeInteger(rawQty) || rawQty < 1) {
+        return NextResponse.json({ error: 'Invalid cart quantity.' }, { status: 400 });
+      }
+      const qty = rawQty;
+      if (stock !== null && (!Number.isSafeInteger(stock) || stock < 1 || qty > stock)) {
         return NextResponse.json({
           error: `One of your items is out of stock or exceeds available quantity. Please update your cart.`,
         }, { status: 409 });
@@ -108,8 +112,12 @@ export async function POST(request: Request) {
     // only when the buyer chose doorstep delivery rather than campus pickup.
     const itemsTotalKobo = (cartItems as CartRow[]).reduce((acc, item) => {
       const unit = priceById.get(item.product_id) ?? 0;
-      const qty = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
-      return acc + unit * qty;
+      const qty = Number(item.quantity);
+      if (!Number.isSafeInteger(unit) || unit < 0 || !Number.isSafeInteger(qty) || qty < 1) return Number.NaN;
+      const line = unit * qty;
+      if (!Number.isSafeInteger(line)) return Number.NaN;
+      const next = acc + line;
+      return Number.isSafeInteger(next) ? next : Number.NaN;
     }, 0);
 
     // Platform earning model: goods + the flat delivery fee (platform handles
@@ -119,7 +127,7 @@ export async function POST(request: Request) {
     const trueTotalKobo =
       itemsTotalKobo + (isPaidDelivery ? DELIVERY_FEE_KOBO : 0) + buyerServiceFee;
 
-    if (!Number.isFinite(trueTotalKobo) || trueTotalKobo <= 0) {
+    if (!Number.isSafeInteger(trueTotalKobo) || trueTotalKobo <= 0) {
       console.error('[paystack] invalid financial amount', {
         userId: user.id,
         trueTotalKobo,

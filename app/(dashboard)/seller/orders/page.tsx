@@ -84,19 +84,17 @@ export default function SellerOrdersPage() {
 
   const advanceStatus = async (order: SellerOrder, newStatus: 'packing' | 'ready_for_pickup') => {
     setUpdatingId(order.id);
-    const { error } = await supabase
-      .from('orders')
-      .update({ status: newStatus })
-      .eq('id', order.id)
-      .eq('seller_id', (await supabase.auth.getUser()).data.user?.id || '');
-
-    if (!error) {
-      setOrders((prev) =>
-        prev.map((ord) => (ord.id === order.id ? { ...ord, status: newStatus } : ord))
-      );
+    const response = await fetch('/api/orders/seller-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderId: order.id, status: newStatus }),
+    });
+    if (response.ok) {
+      setOrders((prev) => prev.map((ord) => (ord.id === order.id ? { ...ord, status: newStatus } : ord)));
     } else {
-      console.error('Failed to update order:', error);
-      alert('Could not update the order. Please try again.');
+      const data = await response.json().catch(() => null);
+      console.error('Failed to update order:', data);
+      alert(data?.error || 'Could not update the order. Please try again.');
     }
     setUpdatingId(null);
   };

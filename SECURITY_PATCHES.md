@@ -28,3 +28,18 @@ The existing RLS/profile privilege hardening described in `SECURITY.md` still re
 ## Validation note
 
 `git diff --check` passes. A full TypeScript build could not be completed in the audit container because dependency installation timed out / the available `node_modules` did not contain the required type packages. Run `npm ci`, then `npx tsc --noEmit`, `npm run lint`, and `npm run build` before deployment.
+
+## Additional hardening — 2026-09-23
+
+- Seller order-status changes no longer write directly from the browser. They go through `/api/orders/seller-status`, which authenticates the seller and enforces `in_escrow -> packing -> ready_for_pickup` transitions. Buyer notifications are emitted server-side.
+- Stock decrement is now an atomic Postgres operation (`decrement_product_stock`), preventing concurrent buyers from overselling a tracked product.
+- Seller withdrawals now use transactional Postgres functions: balance deduction + withdrawal creation is atomic, and admin approval/rejection is a locked state transition. This prevents double refunds and stranded wallet funds.
+- Role subscription activation is shared by browser verification and the Paystack webhook. The webhook is now a server-side backstop if the browser closes after payment.
+- Product image URLs are enforced by a database trigger to point at the marketplace Supabase Storage bucket, preventing a seller from bypassing the UI and inserting arbitrary external tracking/hotlink URLs.
+- High-value RLS policies are explicitly hardened for products, orders, wallets, withdrawals and notifications. Orders and wallet/withdrawal mutations are server-side only.
+- Financial quantities/amounts are rejected unless they are safe integers, preventing overflow/precision abuse in payment calculations.
+- Marketplace order references and subscription references have unique database constraints for idempotency.
+
+### Required deployment step
+
+Apply `supabase/migrations/20260923_security_hardening.sql` in the production Supabase SQL Editor before deploying this build. The application code intentionally depends on these database-side security boundaries.

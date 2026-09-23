@@ -392,17 +392,9 @@ the F1-class leak but says nothing about what an authenticated user can read of
 Note the service role key (item 1) bypasses RLS entirely, so the webhook's
 queries must stay correctly scoped by hand.
 
-### M7. Role activation depends on the browser completing the round trip
+### M7. Role activation webhook backstop ✅ FIXED 2026-09-23
 
-Not a new finding — carried over from `PROJECT_HISTORY.md` §2. Activation rides on
-the browser's `onSuccess` calling `/api/subscription/verify`. A tab that dies
-between payment and that call leaves money taken and no role granted. A
-`charge.success` webhook branch for role subscriptions, or a "re-verify pending
-reference" check on page load, would be the backstop.
-
-Related: nothing records the Paystack reference for a role subscription, so the
-same reference could be verified twice (harmless today — the plan is fixed in the
-transaction metadata — but a `subscriptions` table would close it).
+Role subscriptions are now processed by the signed Paystack `charge.success` webhook as a server-side backstop. Browser verification and webhook delivery share an idempotent `subscriptions.reference` ledger, so closing the payment tab no longer leaves a successful payment permanently unactivated, and the same reference cannot activate the role twice.
 
 ---
 

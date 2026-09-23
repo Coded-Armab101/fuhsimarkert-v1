@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { recordOrder } from '@/utils/paystack/recordOrder';
 import { buyerServiceFeeKobo } from '@/utils/pricing';
+import { recordRoleSubscription } from '@/utils/paystack/recordSubscription';
 
 /**
  * Paystack webhook — `charge.success` → escrow orders.
@@ -50,6 +51,8 @@ export async function POST(request: Request) {
       currency?: string;
       metadata?: {
         buyer_id?: string;
+        user_id?: string;
+        plan_type?: string;
         product_ids?: string[];
         delivery_type?: string;
         delivery_fee_kobo?: number;
@@ -77,6 +80,28 @@ export async function POST(request: Request) {
   }
 
   const reference = event.data?.reference;
+
+  // Role subscriptions have no marketplace product payload. Handle them from
+  // the signed webhook as the server-side backstop for a browser that closes
+  // immediately after payment. recordRoleSubscription is idempotent on the
+  // Paystack reference, so webhook + browser verification can safely race.
+  if (event.data?.metadata?.purpose === 'role_subscription') {
+    if (!reference || event.data.currency !== 'NGN' || event.data?.metadata?.currency !== 'NGN') {
+      return NextResponse.json({ received: true }, { status: 200 });
+    }
+    try {
+      await recordRoleSubscription(createAdminClient(), {
+        reference,
+        amount: Number(event.data.amount),
+        currency: event.data.currency,
+        metadata: event.data.metadata,
+      });
+    } catch (err) {
+      console.error('[webhook] failed to record role subscription', { reference, err });
+    }
+    return NextResponse.json({ received: true }, { status: 200 });
+  }
+
   const buyerId = event.data?.metadata?.buyer_id;
   const productIds = event.data?.metadata?.product_ids;
   const deliveryType = event.data?.metadata?.delivery_type === 'delivery' ? 'delivery' : 'pickup';

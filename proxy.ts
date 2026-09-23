@@ -53,12 +53,6 @@ const ROLE_GATES: RoleGate[] = [
     prefix: '/seller',
     persona: 'seller',
     fallback: '/seller/subscribe',
-    /*
-     * No approval redirect: a paid but not-yet-verified seller is allowed onto
-     * /seller, where the seller layout renders a verification onboarding that
-     * blocks the tools until an admin approves them. Redirecting them back to
-     * /buyer/profile would hide that onboarding entirely.
-     */
   },
   { prefix: '/admin-dashboard', persona: '__no_such_persona__', fallback: '/buyer' },
 ];
@@ -210,6 +204,18 @@ export async function proxy(request: NextRequest) {
       fallback.pathname = gate.fallback;
       fallback.search = '';
       return redirectPreservingCookies(fallback, response);
+    }
+
+    // Paying for Seller does not grant Seller Studio access. The only seller
+    // route available before admin approval is the verification/onboarding
+    // screen. This is enforced in proxy in addition to the layout/RLS gates.
+    if (gate.prefix === '/seller' &&
+        profile?.is_approved_seller !== true &&
+        pathname !== '/seller/verification') {
+      const verification = request.nextUrl.clone();
+      verification.pathname = '/seller/verification';
+      verification.search = '';
+      return redirectPreservingCookies(verification, response);
     }
   }
 

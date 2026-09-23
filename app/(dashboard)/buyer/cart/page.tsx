@@ -25,6 +25,17 @@ export default function BuyerCartPage() {
   } | null>(null);
   const [checkoutStage, setCheckoutStage] = useState<'items' | 'checkout'>('items');
 
+  // Product-detail Buy now enters the same secure checkout, skipping the
+  // intermediate cart-review stage. Payment completion still returns to Orders.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('checkout') === '1') {
+      setCheckoutStage('checkout');
+      url.searchParams.delete('checkout');
+      window.history.replaceState(null, '', url.toString());
+    }
+  }, []);
+
   // Delivery / fulfilment details entered before checkout.
   const [delivery, setDelivery] = useState({
     name: '',

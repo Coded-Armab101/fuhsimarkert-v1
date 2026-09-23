@@ -26,8 +26,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Malformed request body.' }, { status: 400 });
     }
 
-    const amount = Math.floor(Number(body?.amountKobo) || 0);
-    if (amount <= 0) {
+    const amount = Number(body?.amountKobo);
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
       return NextResponse.json({ error: 'Enter a valid withdrawal amount.' }, { status: 400 });
     }
     const bankName = String(body?.bankName || '').trim();
@@ -81,54 +81,26 @@ export async function POST(request: Request) {
       }, { status: 409 });
     }
 
-    // Confirm the wallet exists and has enough balance (informational message).
-    const { data: wallet, error: walletError } = await admin
-      .from('wallets')
-      .select('id, balance')
-      .eq('user_id', user.id)
-      .maybeSingle();
-    if (walletError) throw walletError;
-    const balance = wallet ? Number(wallet.balance) : 0;
-
-    // AVAILABLE_KB≥amount is the adversarial read race: two simultaneous
-    // requests (same account, two devices) both passed `balance >= amount`
-    // above. The atomic `WHERE ... AND balance >= amount` below means only the
-    // FIRST request deducts; the second affects zero rows and is rejected, so
-    // a user can never over-withdraw their balance via concurrent requests.
-    if (!wallet) {
-      return NextResponse.json({ error: 'No wallet balance available.' }, { status: 400 });
-    }
-    if (balance < amount) {
-      return NextResponse.json({
-        error: `Insufficient balance. Available: ₦${(balance / 100).toLocaleString()}.`,
-      }, { status: 400 });
-    }
-
-    const { data: deducted, error: deductError } = await admin
-      .from('wallets')
-      .update({ balance: balance - amount })
-      .eq('id', wallet.id)
-      .eq('user_id', user.id)
-      .gte('balance', amount)
-      .select('id')
-      .maybeSingle();
-    if (deductError) throw deductError;
-    if (!deducted) {
-      // Balance was already spent by a concurrent request — reject cleanly.
-      return NextResponse.json({
-        error: 'Your balance changed. Try your withdrawal again.',
-      }, { status: 409 });
-    }
-
-    const { error: insertError } = await admin.from('withdrawals').insert({
-      seller_id: user.id,
-      amount_kobo: amount,
-      bank_name: bankName,
-      account_number: accountNumber,
-      account_name: accountName,
-      status: 'pending',
+    // The balance deduction and withdrawal insert must happen atomically in
+    // Postgres. A JS read -> update -> insert sequence can strand funds if the
+    // insert fails or race another request. The RPC is service-role-only.
+    const { error: withdrawalError } = await admin.rpc('create_seller_withdrawal', {
+      p_seller_id: user.id,
+      p_amount_kobo: amount,
+      p_bank_name: bankName,
+      p_account_number: accountNumber,
+      p_account_name: accountName,
     });
-    if (insertError) throw insertError;
+    if (withdrawalError) {
+      const message = withdrawalError.message || '';
+      if (message.includes('pending withdrawal')) {
+        return NextResponse.json({ error: 'You already have a pending withdrawal request. Wait for it to be settled before requesting another.' }, { status: 409 });
+      }
+      if (message.includes('insufficient')) {
+        return NextResponse.json({ error: 'Your wallet balance is not enough for this withdrawal.' }, { status: 400 });
+      }
+      throw withdrawalError;
+    }
 
     return NextResponse.json({ ok: true, status: 'pending', amount_kobo: amount });
   } catch (err) {

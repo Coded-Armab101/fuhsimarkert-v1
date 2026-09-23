@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { sellerCommissionKobo, buyerServiceFeeKobo } from '@/utils/pricing';
+import { createAdminClient } from '@/utils/supabase/admin';
 
 /**
  * Shared order-creation routine for a successful Paystack payment.
@@ -86,6 +87,9 @@ export async function recordOrder(
   }
 
   const productById = new Map(products.map((p) => [p.id, p]));
+  if (products.some((product) => product.seller_id === input.buyerId)) {
+    throw new Error('seller cannot purchase their own product');
+  }
   const qtyByProduct = new Map<string, number>();
 
   for (const item of input.items) {
@@ -111,7 +115,11 @@ export async function recordOrder(
   }
 
   const expectedGoodsKobo = input.items.reduce(
-    (sum, item) => sum + item.unitPriceKobo * item.quantity,
+    (sum, item) => {
+      const line = item.unitPriceKobo * item.quantity;
+      const next = sum + line;
+      return Number.isSafeInteger(line) && Number.isSafeInteger(next) ? next : Number.NaN;
+    },
     0,
   );
   const expectedBuyerFeeKobo = buyerServiceFeeKobo(expectedGoodsKobo);
@@ -120,7 +128,7 @@ export async function recordOrder(
     Math.floor(Number(input.deliveryFeeKobo) || 0) +
     expectedBuyerFeeKobo;
 
-  if (!Number.isSafeInteger(expectedTotalKobo) || expectedTotalKobo <= 0) {
+  if (!Number.isSafeInteger(expectedGoodsKobo) || expectedGoodsKobo < 0 || !Number.isSafeInteger(expectedTotalKobo) || expectedTotalKobo <= 0) {
     throw new Error('invalid checkout total');
   }
 
@@ -201,6 +209,23 @@ export async function recordOrder(
     .eq('order_ref', input.reference);
   if (createdOrdersError) throw createdOrdersError;
 
+  // Notify each seller only after the paid order rows exist. The unique
+  // (user_id, order_id, type) constraint makes webhook/verify retries safe.
+  if (createdOrders?.length) {
+    const admin = createAdminClient();
+    const notifications = createdOrders.map((order) => ({
+      user_id: order.seller_id,
+      type: 'order_new',
+      title: 'New paid order',
+      message: 'A buyer has paid for your product. Open Sales to prepare the order.',
+      order_id: order.id,
+    }));
+    const { error: notificationError } = await admin
+      .from('notifications')
+      .upsert(notifications, { onConflict: 'user_id,order_id,type', ignoreDuplicates: true });
+    if (notificationError) console.error('[recordOrder] seller notification failed', notificationError);
+  }
+
   // One escrow ledger row per escrowed order, held until the buyer confirms
   // receipt. `webhook_event` and `gateway_ref` are NOT NULL; `gateway_ref` is
   // UNIQUE system-wide, so suffix it with the product id — two products in the
@@ -272,31 +297,20 @@ export async function recordOrder(
     }
   }
 
-  // Mark tracked products sold out only when this purchase consumes the
-  // remaining stock. Unlimited-stock products remain available.
-  for (const product of products) {
-    if (product.stock === null || product.stock === undefined) continue;
-    const quantity = qtyByProduct.get(product.id) ?? 1;
-    if (Number(product.stock) - quantity <= 0) {
-      const { error: soldError } = await supabase
-        .from('products')
-        .update({ is_sold: true })
-        .eq('id', product.id);
-      if (soldError) throw soldError;
-    }
-  }
-
-  // Decrement tracked stock. Row-level decrement keeps this atomic even when
-  // two buyers pay around the same time; products with NULL stock (untracked /
-  // unlimited) are left untouched.
+  // Decrement tracked stock atomically in Postgres. The earlier read is only
+  // an informational validation; the RPC is the authoritative concurrency
+  // boundary and refuses the second buyer when stock was consumed meanwhile.
   for (const product of products) {
     if (product.stock === null || product.stock === undefined) continue;
     const qty = qtyByProduct.get(product.id) ?? 1;
-    const { error: stockError } = await supabase
-      .from('products')
-      .update({ stock: Number(product.stock) - qty })
-      .eq('id', product.id);
+    const { data: remaining, error: stockError } = await supabase.rpc('decrement_product_stock', {
+      p_product_id: product.id,
+      p_quantity: qty,
+    });
     if (stockError) throw stockError;
+    if (remaining === null || remaining === undefined) {
+      throw new Error(`insufficient stock for product ${product.id}`);
+    }
   }
 
   // Only clear what was actually bought, not the whole cart.
