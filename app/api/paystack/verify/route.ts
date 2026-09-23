@@ -3,6 +3,7 @@ import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { recordOrder } from '@/utils/paystack/recordOrder';
 import { buyerServiceFeeKobo } from '@/utils/pricing';
+import { rateLimit, PAYMENT_INIT_LIMIT } from '@/utils/rate-limit';
 
 /**
  * Verify a Paystack transaction by reference.
@@ -20,9 +21,13 @@ import { buyerServiceFeeKobo } from '@/utils/pricing';
  * written by server code, not by end users). The transaction is validated to
  * belong to this buyer before any write is attempted.
  */
-export async function GET(request: Request) {
+export async function POST(request: Request) {
   try {
-    const reference = new URL(request.url).searchParams.get('reference');
+    const requestBody = await request.json().catch(() => null);
+    const reference = typeof requestBody?.reference === 'string' ? requestBody.reference.trim() : '';
+    if (reference.length > 200) {
+      return NextResponse.json({ error: 'Invalid transaction reference.' }, { status: 400 });
+    }
     if (!reference) {
       return NextResponse.json({ error: 'Missing transaction reference.' }, { status: 400 });
     }
@@ -32,6 +37,11 @@ export async function GET(request: Request) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized system access request.' }, { status: 401 });
+    }
+
+    const limit = rateLimit({ key: `payment-verify:${user.id}`, ...PAYMENT_INIT_LIMIT });
+    if (!limit.ok) {
+      return NextResponse.json({ error: 'Too many payment verification attempts. Please wait.' }, { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } });
     }
 
     const paystackReply = await fetch(
@@ -48,14 +58,19 @@ export async function GET(request: Request) {
     }
 
     const transaction = body.data;
-    if (transaction.metadata?.buyer_id !== user.id) {
+    if (transaction.reference !== reference || transaction.metadata?.buyer_id !== user.id) {
       return NextResponse.json({ error: 'Transaction does not belong to this account.' }, { status: 403 });
     }
 
     if (transaction.status === 'success') {
-      const metadata = typeof transaction.metadata === 'string'
-        ? JSON.parse(transaction.metadata || '{}')
-        : transaction.metadata || {};
+      let metadata: Record<string, any>;
+      try {
+        metadata = typeof transaction.metadata === 'string'
+          ? JSON.parse(transaction.metadata || '{}')
+          : transaction.metadata || {};
+      } catch {
+        return NextResponse.json({ error: 'Invalid payment metadata.' }, { status: 400 });
+      }
       const productIds = Array.isArray(metadata.product_ids) ? metadata.product_ids : [];
       const items = Array.isArray(metadata.checkout_items) ? metadata.checkout_items.map((item: any) => ({
         productId: item?.product_id,

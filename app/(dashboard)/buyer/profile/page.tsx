@@ -60,6 +60,12 @@ export default function ProfilePage() {
 
   // State for Role Selection Modal
   const [showRoleModal, setShowRoleModal] = useState(false);
+  const [showKycModal, setShowKycModal] = useState(false);
+  const [kycType, setKycType] = useState<'student_id' | 'nin'>('student_id');
+  const [kycFile, setKycFile] = useState<File | null>(null);
+  const [kycSubmitting, setKycSubmitting] = useState(false);
+  const [kycReady, setKycReady] = useState(false);
+  const [kycTypeSaved, setKycTypeSaved] = useState<'student_id' | 'nin' | null>(null);
 
   // Unified Form & Profile State
   const [profileData, setProfileData] = useState({
@@ -115,6 +121,8 @@ export default function ProfilePage() {
           rejectReason: profile?.verification_reject_reason || null,
           submittedAt: profile?.verification_submitted_at || null,
         });
+        setKycReady(Boolean(profile?.student_id_url));
+        setKycTypeSaved(profile?.verification_id_type === 'nin' ? 'nin' : profile?.student_id_url ? 'student_id' : null);
 
         setProfileData({
           fullName: profile?.full_name || '',
@@ -249,8 +257,8 @@ export default function ProfilePage() {
       e.preventDefault();
       if (!userAuth?.id) return;
 
-      if (!idFile) {
-        alert('Please take a photo of your student ID card.');
+      if (!idFile && !kycReady) {
+        alert('Please submit either your student ID or NIN document first.');
         return;
       }
       if (!recordingBlob) {
@@ -261,8 +269,12 @@ export default function ProfilePage() {
       setSubmittingVerification(true);
       try {
         // 1. Upload the ID image to the private bucket (owner-scoped).
-        const idRes = await uploadStudentId(supabase, userAuth.id, idFile);
-        if (!idRes.ok) throw new Error(idRes.error);
+        let idPath = '';
+        if (idFile) {
+          const idRes = await uploadStudentId(supabase, userAuth.id, idFile);
+          if (!idRes.ok) throw new Error(idRes.error);
+          idPath = idRes.path;
+        }
 
         // 2. Turn the in-app recording into a file and upload it.
         const videoFile = new File([recordingBlob], `verification_${Date.now()}.webm`, {
@@ -275,7 +287,8 @@ export default function ProfilePage() {
         const { error } = await supabase
           .from('profiles')
           .update({
-            student_id_url: idRes.path,
+            ...(idPath ? { student_id_url: idPath } : {}),
+            verification_id_type: kycTypeSaved || 'student_id',
             verification_video_url: videoRes.path,
             verification_status: 'pending',
             verification_submitted_at: new Date().toISOString(),
@@ -300,6 +313,41 @@ export default function ProfilePage() {
         setSubmittingVerification(false);
       }
     };
+
+  const beginSellerOnboarding = () => {
+    setShowRoleModal(false);
+    if (kycReady) {
+      void handleRolePayment('seller');
+    } else {
+      setShowKycModal(true);
+    }
+  };
+
+  const handleKycSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userAuth?.id || !kycFile) return;
+    setKycSubmitting(true);
+    try {
+      const result = await uploadStudentId(supabase, userAuth.id, kycFile);
+      if (!result.ok) throw new Error(result.error);
+      const { error } = await supabase.from('profiles').update({
+        student_id_url: result.path,
+        verification_id_type: kycType,
+        updated_at: new Date().toISOString(),
+      }).eq('id', userAuth.id);
+      if (error) throw error;
+      setKycReady(true);
+      setKycTypeSaved(kycType);
+      setKycFile(null);
+      setShowKycModal(false);
+      void handleRolePayment('seller');
+    } catch (err: unknown) {
+      console.error('KYC submission failed:', err);
+      alert(err instanceof Error ? err.message : 'Could not submit your KYC document.');
+    } finally {
+      setKycSubmitting(false);
+    }
+  };
 
   const handleRolePayment = async (planType: RolePlan) => {
 
@@ -345,7 +393,7 @@ export default function ProfilePage() {
           setShowRoleModal(false);
           // Head to the seller area: the seller layout shows the verification
           // onboarding there, which blocks the tools until an admin approves.
-          window.location.href = '/seller';
+          window.location.href = '/seller/verification';
         } catch (verifyErr: unknown) {
           console.error('Subscription verification failed:', verifyErr);
           alert(
@@ -690,6 +738,19 @@ export default function ProfilePage() {
 
       </form>
 
+      {showKycModal && (
+        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <form onSubmit={handleKycSubmit} className="bg-neutral-950 border border-neutral-800 rounded-3xl max-w-md w-full p-6 sm:p-8 space-y-5 shadow-2xl relative">
+            <button type="button" onClick={() => setShowKycModal(false)} disabled={kycSubmitting} className="absolute top-5 right-5 text-neutral-400 hover:text-white p-1 rounded-lg bg-neutral-900 border border-neutral-800"><X size={18}/></button>
+            <div><div className="inline-flex items-center gap-2 rounded-full bg-amber-950/50 border border-amber-800/60 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-400"><ShieldCheck size={13}/> Seller KYC</div><h2 className="mt-3 text-xl font-black text-white">Verify your identity first</h2><p className="mt-1 text-xs leading-5 text-neutral-400">Submit either your student ID or NIN document. The file stays in the private verification bucket.</p></div>
+            <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setKycType('student_id')} className={`rounded-xl border px-3 py-3 text-xs font-bold ${kycType === 'student_id' ? 'border-red-500 bg-red-950/40 text-white' : 'border-neutral-800 bg-neutral-900 text-neutral-400'}`}>Student ID</button><button type="button" onClick={() => setKycType('nin')} className={`rounded-xl border px-3 py-3 text-xs font-bold ${kycType === 'nin' ? 'border-red-500 bg-red-950/40 text-white' : 'border-neutral-800 bg-neutral-900 text-neutral-400'}`}>NIN document</button></div>
+            <label className="block cursor-pointer rounded-2xl border border-dashed border-neutral-700 bg-neutral-900/70 p-5 text-center"><UploadCloud className="mx-auto text-amber-500" size={25}/><p className="mt-2 text-xs font-bold text-white">Upload {kycType === 'nin' ? 'NIN' : 'student ID'} document</p><p className="mt-1 text-[10px] text-neutral-500">JPG / PNG / WEBP · max 1MB</p><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="hidden" onChange={(e) => setKycFile(e.target.files?.[0] || null)}/><span className="mt-3 block text-[11px] text-neutral-400">{kycFile ? `✓ ${kycFile.name}` : 'Tap to choose a document'}</span></label>
+            <p className="rounded-xl border border-amber-900/50 bg-amber-950/30 p-3 text-[10px] leading-5 text-amber-200/80">Do not enter your NIN into a public profile field or send it through chat. Use this private upload only.</p>
+            <button disabled={kycSubmitting || !kycFile} className="w-full rounded-xl bg-red-600 py-3 text-xs font-bold text-white disabled:opacity-50">{kycSubmitting ? 'Submitting KYC…' : 'Submit KYC and continue to payment'}</button>
+          </form>
+        </div>
+      )}
+
       {/* 🚀 ROLE SELECTION MODAL */}
       {showRoleModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -749,7 +810,7 @@ export default function ProfilePage() {
 
                 <div className="pt-2">
                   <button
-                    onClick={() => handleRolePayment('seller')}
+                    onClick={beginSellerOnboarding}
                     disabled={paymentLoading === 'seller'}
                     className="w-full bg-red-600 hover:bg-red-500 disabled:bg-neutral-800 text-white font-bold text-xs py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                   >

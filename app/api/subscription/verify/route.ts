@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { ROLE_PLANS, isRolePlan, PLAN_DURATION_DAYS } from '@/utils/plans';
+import { rateLimit, PAYMENT_INIT_LIMIT } from '@/utils/rate-limit';
 
 /**
  * Confirms a role subscription payment and activates the role.
@@ -27,8 +28,13 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const reference = typeof body?.reference === 'string' ? body.reference.trim() : '';
 
-    if (!reference) {
+    if (!reference || reference.length > 200) {
       return NextResponse.json({ error: 'Missing transaction reference.' }, { status: 400 });
+    }
+
+    const limit = rateLimit({ key: `subscription-verify:${user.id}`, ...PAYMENT_INIT_LIMIT });
+    if (!limit.ok) {
+      return NextResponse.json({ error: 'Too many payment verification attempts. Please wait.' }, { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } });
     }
 
     if (!process.env.PAYSTACK_SECRET_KEY) {
@@ -52,7 +58,7 @@ export async function POST(request: Request) {
     const paystackData = await paystackResponse.json();
     const transaction = paystackData?.data;
 
-    if (!paystackResponse.ok || transaction?.status !== 'success') {
+    if (!paystackResponse.ok || transaction?.status !== 'success' || transaction?.reference !== reference || transaction?.currency !== 'NGN') {
       console.error('Paystack verification failed:', paystackData);
       return NextResponse.json(
         { error: 'Paystack could not confirm this payment as successful.' },
@@ -61,10 +67,14 @@ export async function POST(request: Request) {
     }
 
     // Paystack sometimes returns metadata as a JSON string.
-    const metadata =
-      typeof transaction.metadata === 'string'
+    let metadata: Record<string, any>;
+    try {
+      metadata = typeof transaction.metadata === 'string'
         ? JSON.parse(transaction.metadata || '{}')
         : transaction.metadata || {};
+    } catch {
+      return NextResponse.json({ error: 'Invalid payment metadata.' }, { status: 400 });
+    }
 
     if (metadata.user_id !== user.id) {
       return NextResponse.json(
@@ -89,7 +99,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (Number(transaction.amount) < ROLE_PLANS[planType].amount) {
+    if (!Number.isSafeInteger(Number(transaction.amount)) || Number(transaction.amount) !== ROLE_PLANS[planType].amount) {
       return NextResponse.json(
         { error: 'Amount paid is below the price of this plan.' },
         { status: 400 }

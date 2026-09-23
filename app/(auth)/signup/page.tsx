@@ -81,8 +81,8 @@ export default function SignUpPage() {
       setPassword('');
 
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'An error occurred during account registration.';
-      setUiStatus({ type: 'error', text: message });
+      console.error('Signup failed:', err);
+      setUiStatus({ type: 'error', text: 'Could not create the account. Check the details and try again.' });
     } finally {
       setIsSubmitting(false);
     }

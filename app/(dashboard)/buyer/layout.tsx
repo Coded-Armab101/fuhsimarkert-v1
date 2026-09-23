@@ -11,7 +11,24 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const { totalItems } = useCart();
   const [savedCount, setSavedCount] = useState(0);
-  useEffect(() => { const supabase = createClient(); void (async () => { const { data: { user } } = await supabase.auth.getUser(); if (!user) return; const { count } = await supabase.from('wishlists').select('*', { count: 'exact', head: true }).eq('user_id', user.id); setSavedCount(count || 0); })(); }, []);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  useEffect(() => {
+    const supabase = createClient();
+    const load = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { count } = await supabase.from('wishlists').select('*', { count: 'exact', head: true }).eq('user_id', user.id);
+      setSavedCount(count || 0);
+      try {
+        const res = await fetch('/api/notifications', { cache: 'no-store' });
+        const data = await res.json();
+        setUnreadNotifications((data.notifications || []).filter((n: { read_at: string | null }) => !n.read_at).length);
+      } catch {}
+    };
+    void load();
+    const timer = window.setInterval(() => void load(), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const buyerNav = [
     { label: 'Home', href: '/buyer', icon: Home },
@@ -44,7 +61,7 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
               }`}
             >
               <Icon size={20} />
-              {((item.href === '/buyer/cart' && totalItems > 0) || (item.href === '/buyer/wishlist' && savedCount > 0)) && <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[#ef6b3b] px-1 text-[9px] font-black text-white">{item.href === '/buyer/cart' ? totalItems : savedCount}</span>}
+              {((item.href === '/buyer/cart' && totalItems > 0) || (item.href === '/buyer/wishlist' && savedCount > 0) || (item.href === '/buyer/orders' && unreadNotifications > 0)) && <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[#ef6b3b] px-1 text-[9px] font-black text-white">{item.href === '/buyer/cart' ? totalItems : item.href === '/buyer/wishlist' ? savedCount : unreadNotifications > 9 ? '9+' : unreadNotifications}</span>}
               <span className="text-[10px] font-mono mt-1">{item.label}</span>
             </Link>
           );

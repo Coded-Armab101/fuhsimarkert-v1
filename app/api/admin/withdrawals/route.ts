@@ -102,54 +102,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Forbidden.' }, { status: 403 });
     }
 
-    // Load the withdrawal and guard against double-processing.
-    const { data: w, error: loadError } = await admin
-      .from('withdrawals')
-      .select('id, seller_id, amount_kobo, status')
-      .eq('id', withdrawalId)
-      .maybeSingle();
-    if (loadError) throw loadError;
-    if (!w) {
-      return NextResponse.json({ error: 'Withdrawal not found.' }, { status: 404 });
-    }
-    if (w.status !== 'pending') {
-      return NextResponse.json({ error: 'This withdrawal was already processed.' }, { status: 409 });
+    // The state transition and (for rejection) wallet refund happen in one
+    // database transaction. This prevents two admin tabs from both refunding
+    // the same pending withdrawal.
+    const { data: processed, error: processError } = await admin.rpc('process_withdrawal', {
+      p_withdrawal_id: withdrawalId,
+      p_action: action,
+    });
+    if (processError) throw processError;
+    if (processed !== true) {
+      return NextResponse.json({ error: 'This withdrawal was already processed or no longer exists.' }, { status: 409 });
     }
 
-    if (action === 'reject') {
-      // Refund the previously-deducted amount back to the seller's wallet.
-      const { data: wallet } = await admin
-        .from('wallets')
-        .select('id, balance')
-        .eq('user_id', w.seller_id)
-        .maybeSingle();
-      if (wallet) {
-        const refunded = (Number(wallet.balance) || 0) + Number(w.amount_kobo);
-        const { error: updWallet } = await admin
-          .from('wallets')
-          .update({ balance: refunded })
-          .eq('id', wallet.id)
-          .eq('user_id', w.seller_id);
-        if (updWallet) throw updWallet;
-      }
-
-      const { error: upd } = await admin
-        .from('withdrawals')
-        .update({ status: 'rejected', processed_at: new Date().toISOString() })
-        .eq('id', w.id);
-      if (upd) throw upd;
-
-      return NextResponse.json({ ok: true, action: 'rejected', refunded: Number(w.amount_kobo) });
-    }
-
-    // Approve → mark paid. Amount already deducted from seller at request time.
-    const { error: updPaid } = await admin
-      .from('withdrawals')
-      .update({ status: 'paid', processed_at: new Date().toISOString() })
-      .eq('id', w.id);
-    if (updPaid) throw updPaid;
-
-    return NextResponse.json({ ok: true, action: 'approved' });
+    return NextResponse.json({ ok: true, action: action === 'reject' ? 'rejected' : 'approved' });
   } catch (err) {
     console.error('[admin/withdrawals] error:', err);
     return NextResponse.json({ error: 'Could not process the withdrawal.' }, { status: 500 });

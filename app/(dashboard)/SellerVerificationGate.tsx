@@ -21,6 +21,8 @@ export type SellerGateProfile = {
   verification_status?: string | null;
   verification_submitted_at?: string | null;
   verification_reject_reason?: string | null;
+  student_id_url?: string | null;
+  verification_id_type?: 'student_id' | 'nin' | null;
 };
 
 export default function SellerVerificationGate({
@@ -37,6 +39,7 @@ export default function SellerVerificationGate({
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [refreshLoading, setRefreshLoading] = useState(false);
+  const hasKycDocument = Boolean(profile.student_id_url);
 
   const [status, setStatus] = useState<string | null>(profile.verification_status ?? null);
   const [submittedAt, setSubmittedAt] = useState<string | null>(
@@ -70,8 +73,8 @@ export default function SellerVerificationGate({
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    if (!idFile) {
-      alert('Please take a photo of your student ID card.');
+    if (!idFile && !hasKycDocument) {
+      alert('Please submit either your student ID or NIN document.');
       return;
     }
     if (!recordingBlob) {
@@ -81,8 +84,12 @@ export default function SellerVerificationGate({
 
     setSubmitting(true);
     try {
-      const idRes = await uploadStudentId(supabase, user.id, idFile);
-      if (!idRes.ok) throw new Error(idRes.error);
+      let idPath = profile.student_id_url || '';
+      if (idFile) {
+        const idRes = await uploadStudentId(supabase, user.id, idFile);
+        if (!idRes.ok) throw new Error(idRes.error);
+        idPath = idRes.path;
+      }
 
       const videoFile = new File([recordingBlob], `verification_${Date.now()}.webm`, {
         type: recordingBlob.type || 'video/webm',
@@ -93,7 +100,8 @@ export default function SellerVerificationGate({
       const { error } = await supabase
         .from('profiles')
         .update({
-          student_id_url: idRes.path,
+          student_id_url: idPath,
+          verification_id_type: profile.verification_id_type || 'student_id',
           verification_video_url: videoRes.path,
           verification_status: 'pending',
           verification_submitted_at: new Date().toISOString(),

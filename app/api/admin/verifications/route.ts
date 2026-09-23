@@ -48,6 +48,7 @@ async function deleteVerificationFiles(admin: ReturnType<typeof createAdminClien
 
 type VerificationDoc = {
   student_id_url?: string | null;
+  verification_id_type?: 'student_id' | 'nin' | null;
   verification_video_url?: string | null;
 };
 
@@ -86,7 +87,7 @@ export async function GET() {
     const { data, error } = await admin
       .from('profiles')
       .select(
-        'id, full_name, is_approved_seller, verification_status, verification_submitted_at, verification_reviewed_at, verification_reject_reason, student_id_url, verification_video_url'
+        'id, full_name, is_approved_seller, verification_status, verification_submitted_at, verification_reviewed_at, verification_reject_reason, student_id_url, verification_id_type, verification_video_url'
       )
       .in('verification_status', ['pending', 'rejected'])
       .order('verification_submitted_at', { ascending: true, nullsFirst: false });
@@ -101,6 +102,7 @@ export async function GET() {
         status: s.verification_status,
         rejectReason: s.verification_reject_reason,
         isApproved: s.is_approved_seller === true,
+        idType: s.verification_id_type || null,
         urls: await signUrls(admin, {
           student_id_url: s.student_id_url,
           verification_video_url: s.verification_video_url,
