@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes, Bell } from 'lucide-react';
+import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
 import { formatNaira } from '@/utils/money';
 import DeliveryAnnouncement from '../DeliveryAnnouncement';
@@ -59,31 +59,6 @@ const isOldFinishedOrder = (group: OrderGroup) => {
 };
 
 export default function OrdersPage() {
-  const [notifications, setNotifications] = useState<Array<{ id: string; type: string; title: string; message: string; order_id: string | null; read_at: string | null; created_at: string }>>([]);
-  const [showNotifications, setShowNotifications] = useState(false);
-
-  const loadNotifications = async () => {
-    try {
-      const res = await fetch('/api/notifications', { cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json();
-      setNotifications(data.notifications || []);
-    } catch {}
-  };
-
-  useEffect(() => {
-    void loadNotifications();
-    const timer = window.setInterval(() => void loadNotifications(), 30000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const unreadNotifications = notifications.filter((n) => !n.read_at).length;
-
-  const markNotificationRead = async (id: string) => {
-    await fetch('/api/notifications', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => undefined);
-    setNotifications((items) => items.map((n) => n.id === id ? { ...n, read_at: new Date().toISOString() } : n));
-  };
-
   const supabase = createClient();
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<OrderGroup[]>([]);
@@ -209,10 +184,6 @@ export default function OrdersPage() {
       <DeliveryAnnouncement />
 
       <div className="bg-white border border-[#eee4dc] rounded-[1.75rem] p-6 shadow-sm">
-<div className="relative ml-auto">
-  <button onClick={() => setShowNotifications((v) => !v)} aria-label="Order notifications" className="relative grid h-10 w-10 place-items-center rounded-full bg-[#fff0e9] text-[#d8552e]"><Bell size={18}/>{unreadNotifications > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-[#ef6b3b] px-1 text-[9px] font-black text-white">{unreadNotifications > 9 ? '9+' : unreadNotifications}</span>}</button>
-  {showNotifications && <div className="absolute right-0 top-12 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-[#eee4dc] bg-white p-2 shadow-2xl"><div className="px-3 py-2 text-xs font-black">Order notifications</div>{notifications.length === 0 ? <p className="px-3 py-5 text-center text-[11px] text-[#81756d]">No notifications yet.</p> : notifications.slice(0, 8).map((n) => <button key={n.id} onClick={() => void markNotificationRead(n.id)} className={`block w-full rounded-xl px-3 py-2 text-left hover:bg-[#faf6f2] ${n.read_at ? 'opacity-60' : ''}`}><p className="text-[11px] font-bold">{n.title}</p><p className="mt-0.5 text-[10px] leading-4 text-[#81756d]">{n.message}</p></button>)}</div>}
-</div>
 <h1 className="text-xl font-black text-[#251d18] flex items-center gap-2">
           <CreditCard className="text-[#ef6b3b]" /> Your orders
         </h1>

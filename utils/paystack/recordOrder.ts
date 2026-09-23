@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { sellerCommissionKobo, buyerServiceFeeKobo } from '@/utils/pricing';
-import { createAdminClient } from '@/utils/supabase/admin';
 
 /**
  * Shared order-creation routine for a successful Paystack payment.
@@ -139,12 +138,7 @@ export async function recordOrder(
   // have both been validated. This prevents a malformed/replayed payment from
   // consuming wallet funds before validation fails.
   if (walletKobo > 0) {
-    // Wallet mutations must always use the service-role client here. The
-    // authenticated browser client must not be allowed to invoke debit_wallet
-    // with an arbitrary user id/amount. The API has already authenticated the
-    // buyer before recordOrder is called.
-    const walletAdmin = createAdminClient();
-    const { data: ok, error: debitError } = await walletAdmin.rpc('debit_wallet', {
+    const { data: ok, error: debitError } = await supabase.rpc('debit_wallet', {
       p_user_id: input.buyerId,
       p_order_ref: input.reference,
       p_amount_kobo: walletKobo,
@@ -206,24 +200,6 @@ export async function recordOrder(
     .select('id, seller_id, product_id, amount_kobo')
     .eq('order_ref', input.reference);
   if (createdOrdersError) throw createdOrdersError;
-
-  // Notify every seller involved in the paid order. The unique notification
-  // index makes webhook + browser verification retries harmless.
-  if (createdOrders && createdOrders.length > 0) {
-    const sellerNotifications = createdOrders.map((order) => ({
-      user_id: order.seller_id,
-      type: 'order_new',
-      title: 'New paid order',
-      message: 'A buyer has paid for your product. Open Seller Orders to prepare it.',
-      order_id: order.id,
-    }));
-    const { error: sellerNotificationError } = await supabase
-      .from('notifications')
-      .upsert(sellerNotifications, { onConflict: 'user_id,order_id,type', ignoreDuplicates: true });
-    if (sellerNotificationError) {
-      console.error('[recordOrder] seller notification insert failed', sellerNotificationError);
-    }
-  }
 
   // One escrow ledger row per escrowed order, held until the buyer confirms
   // receipt. `webhook_event` and `gateway_ref` are NOT NULL; `gateway_ref` is
@@ -296,22 +272,31 @@ export async function recordOrder(
     }
   }
 
-  // Stock fulfillment is atomic and idempotent in Postgres. This is important
-  // because Paystack verification and the webhook can arrive concurrently; the
-  // same payment must never decrement stock twice.
+  // Mark tracked products sold out only when this purchase consumes the
+  // remaining stock. Unlimited-stock products remain available.
+  for (const product of products) {
+    if (product.stock === null || product.stock === undefined) continue;
+    const quantity = qtyByProduct.get(product.id) ?? 1;
+    if (Number(product.stock) - quantity <= 0) {
+      const { error: soldError } = await supabase
+        .from('products')
+        .update({ is_sold: true })
+        .eq('id', product.id);
+      if (soldError) throw soldError;
+    }
+  }
+
+  // Decrement tracked stock. Row-level decrement keeps this atomic even when
+  // two buyers pay around the same time; products with NULL stock (untracked /
+  // unlimited) are left untouched.
   for (const product of products) {
     if (product.stock === null || product.stock === undefined) continue;
     const qty = qtyByProduct.get(product.id) ?? 1;
-    const { data: fulfilled, error: stockError } = await supabase.rpc(
-      'fulfill_marketplace_item',
-      {
-        p_order_ref: input.reference,
-        p_product_id: product.id,
-        p_quantity: qty,
-      },
-    );
+    const { error: stockError } = await supabase
+      .from('products')
+      .update({ stock: Number(product.stock) - qty })
+      .eq('id', product.id);
     if (stockError) throw stockError;
-    if (fulfilled !== true) throw new Error(`could not fulfill product ${product.id}`);
   }
 
   // Only clear what was actually bought, not the whole cart.

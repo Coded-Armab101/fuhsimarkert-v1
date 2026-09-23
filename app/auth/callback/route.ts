@@ -19,14 +19,7 @@ import {
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get('code');
-  const requestedNext = searchParams.get('next') ?? '/buyer';
-  // Only allow same-origin relative paths. Never feed an arbitrary absolute URL
-  // into NextResponse.redirect after authentication (open-redirect/phishing risk).
-  const next = requestedNext.startsWith('/') &&
-    !requestedNext.startsWith('//') &&
-    !requestedNext.includes('\\')
-    ? requestedNext
-    : '/buyer';
+  const next = searchParams.get('next') ?? '/buyer';
 
   if (!code) {
     return NextResponse.redirect(new URL('/login?error=oauth_missing_code', request.nextUrl.origin));

@@ -11,24 +11,9 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const { totalItems } = useCart();
   const [savedCount, setSavedCount] = useState(0);
-  const [unreadNotifications, setUnreadNotifications] = useState(0);
-  useEffect(() => {
-    const supabase = createClient();
-    const load = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { count } = await supabase.from('wishlists').select('*', { count: 'exact', head: true }).eq('user_id', user.id);
-      setSavedCount(count || 0);
-      try {
-        const res = await fetch('/api/notifications', { cache: 'no-store' });
-        const data = await res.json();
-        setUnreadNotifications((data.notifications || []).filter((n: { read_at: string | null }) => !n.read_at).length);
-      } catch {}
-    };
-    void load();
-    const timer = window.setInterval(() => void load(), 30000);
-    return () => window.clearInterval(timer);
-  }, []);
+  const [orderUnread, setOrderUnread] = useState(0);
+  useEffect(() => { const key = 'fuhsi_order_notifications_buyer'; const read = JSON.parse(localStorage.getItem(key) || '{}') as Record<string,string>; const supabase = createClient(); const load = async () => { const { data:{user} } = await supabase.auth.getUser(); if (!user) return; const { data } = await supabase.from('orders').select('id,status').eq('buyer_id', user.id).order('created_at',{ascending:false}).limit(30); const rows=(data||[]) as {id:string;status:string}[]; setOrderUnread(rows.filter(o => o.id in read && read[o.id] !== o.status).length); }; void load(); const t=window.setInterval(load,30000); return()=>window.clearInterval(t); }, []);
+  useEffect(() => { const supabase = createClient(); void (async () => { const { data: { user } } = await supabase.auth.getUser(); if (!user) return; const { count } = await supabase.from('wishlists').select('*', { count: 'exact', head: true }).eq('user_id', user.id); setSavedCount(count || 0); })(); }, []);
 
   const buyerNav = [
     { label: 'Home', href: '/buyer', icon: Home },
@@ -61,7 +46,7 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
               }`}
             >
               <Icon size={20} />
-              {((item.href === '/buyer/cart' && totalItems > 0) || (item.href === '/buyer/wishlist' && savedCount > 0) || (item.href === '/buyer/orders' && unreadNotifications > 0)) && <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[#ef6b3b] px-1 text-[9px] font-black text-white">{item.href === '/buyer/cart' ? totalItems : item.href === '/buyer/wishlist' ? savedCount : unreadNotifications > 9 ? '9+' : unreadNotifications}</span>}
+              {((item.href === '/buyer/cart' && totalItems > 0) || (item.href === '/buyer/wishlist' && savedCount > 0) || (item.href === '/buyer/orders' && orderUnread > 0)) && <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[#ef6b3b] px-1 text-[9px] font-black text-white">{item.href === '/buyer/cart' ? totalItems : item.href === '/buyer/wishlist' ? savedCount : orderUnread}</span>}
               <span className="text-[10px] font-mono mt-1">{item.label}</span>
             </Link>
           );

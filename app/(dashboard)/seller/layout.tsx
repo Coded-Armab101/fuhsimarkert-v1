@@ -3,7 +3,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Package, ShoppingBag, Settings, LogOut, Wallet, ArrowLeftRight, Bell } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Settings, LogOut, Wallet, ArrowLeftRight } from 'lucide-react';
+import OrderNotificationBell from '@/components/OrderNotificationBell';
 import { createClient } from '@/utils/supabase';
 import { useRouter } from 'next/navigation';
 import SellerVerificationGate, { type SellerGateProfile } from '../SellerVerificationGate';
@@ -15,7 +16,6 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
 
   const [gateProfile, setGateProfile] = useState<SellerGateProfile | null>(null);
   const [gateLoading, setGateLoading] = useState(true);
-  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   const refreshGate = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -23,7 +23,7 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
     const { data } = await supabase
       .from('profiles')
       .select(
-        'full_name, is_admin, is_approved_seller, verification_status, verification_submitted_at, verification_reject_reason, student_id_url, verification_id_type'
+        'full_name, is_admin, is_approved_seller, verification_status, verification_submitted_at, verification_reject_reason'
       )
       .eq('id', user.id)
       .maybeSingle();
@@ -34,21 +34,6 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
   useEffect(() => {
     void refreshGate();
   }, [refreshGate]);
-
-  useEffect(() => {
-    if (!gateProfile?.is_approved_seller && !gateProfile?.is_admin) return;
-    let cancelled = false;
-    const loadNotifications = async () => {
-      try {
-        const res = await fetch('/api/notifications', { cache: 'no-store' });
-        const data = await res.json();
-        if (!cancelled) setUnreadNotifications((data.notifications || []).filter((n: { read_at: string | null }) => !n.read_at).length);
-      } catch { /* notification UI must not block Seller Studio */ }
-    };
-    void loadNotifications();
-    const timer = window.setInterval(loadNotifications, 30000);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [gateProfile?.is_approved_seller, gateProfile?.is_admin]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -90,16 +75,7 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {approved && (
-            <button
-              onClick={() => router.push('/seller/orders')}
-              className="relative grid h-9 w-9 place-items-center rounded-full bg-[#fff0e9] text-[#d8552e] hover:bg-[#ffe2d2]"
-              aria-label="Seller order notifications"
-            >
-              <Bell size={16} />
-              {unreadNotifications > 0 && <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[#ef6b3b] px-1 text-[9px] font-black text-white">{unreadNotifications > 9 ? '9+' : unreadNotifications}</span>}
-            </button>
-          )}
+          {approved && <OrderNotificationBell role="seller" />}
           <button
             onClick={() => router.push('/buyer/profile')}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#fff0e9] text-xs font-bold text-[#b94a29] hover:bg-[#ffe2d2] transition-colors cursor-pointer"

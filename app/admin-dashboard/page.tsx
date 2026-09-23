@@ -48,7 +48,6 @@ type SellerVerification = {
   status: 'pending' | 'rejected' | null;
   rejectReason: string | null;
   isApproved: boolean;
-  idType?: 'student_id' | 'nin' | null;
   urls: { student_id_url: string | null; verification_video_url: string | null };
 };
 

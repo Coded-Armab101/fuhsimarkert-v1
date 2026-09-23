@@ -15,6 +15,7 @@ export interface CartItem {
 interface CartContextType {
   cart: CartItem[];
   addToCart: (product: any) => void;
+  addToCartOnce: (product: any) => void;
   /** Decrement one unit; removes the line entirely at quantity 1. */
   decreaseQuantity: (productId: string) => void;
   removeFromCart: (productId: string) => void;
@@ -72,6 +73,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  // Add a product line without increasing quantity if it is already present.
+  // Product-detail and wishlist CTAs use this to avoid accidental duplicate taps.
+  const addToCartOnce = (product: any) => {
+    setCart((prev) => {
+      if (prev.some((item) => item.id === product.id)) return prev;
+      return [...prev, { id: product.id, title: product.title, price: Number(product.price), image_url: product.image_url, seller_id: product.seller_id, quantity: 1 }];
+    });
+  };
+
   // Function to remove an item from the cart
   const removeFromCart = (productId: string) => {
     setCart((prev) => prev.filter((item) => item.id !== productId));
@@ -108,6 +118,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       value={{
         cart,
         addToCart,
+        addToCartOnce,
         decreaseQuantity,
         removeFromCart,
         clearCart,

@@ -28,9 +28,6 @@ export async function POST(request: Request) {
     const matricNumber = String(delivery.matric || '').trim();
     const deliveryAddress = deliveryType === 'delivery' ? String(delivery.address || '').trim() : null;
     const isPaidDelivery = deliveryType === 'delivery';
-    if (receiverName.length > 120 || receiverPhone.length > 32 || matricNumber.length > 64 || deliveryAddress !== null && deliveryAddress.length > 300) {
-      return NextResponse.json({ error: 'Delivery details are too long.' }, { status: 400 });
-    }
 
     // 1. Establish secure, authenticated server-side session context
     const supabase = await createClient();
@@ -63,17 +60,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Shopping cart ledger is empty.' }, { status: 400 });
     }
 
-    const normalizedCart = (cartItems as CartRow[]).map((item) => ({
-      product_id: String(item.product_id),
-      quantity: Number(item.quantity),
-    }));
-    if (normalizedCart.length > 100 || normalizedCart.some((item) => !item.product_id || !Number.isSafeInteger(item.quantity) || item.quantity < 1)) {
-      return NextResponse.json({ error: 'Invalid cart contents.' }, { status: 400 });
-    }
-    const productIds = normalizedCart.map((item) => item.product_id);
-    if (new Set(productIds).size !== productIds.length) {
-      return NextResponse.json({ error: 'Duplicate cart items are not allowed.' }, { status: 400 });
-    }
+    const productIds = (cartItems as CartRow[]).map((item) => item.product_id);
 
     // 2.b. Prices come from the database, never from the client. Fetch the
     //       authoritative unit price AND availability/stock for each product
@@ -83,7 +70,7 @@ export async function POST(request: Request) {
       .select('id, price, stock')
       .in('id', productIds);
 
-    if (productsError || !products || products.length !== productIds.length) {
+    if (productsError || !products) {
       console.error('[paystack] products query failed', { userId: user.id, productsError: productsError?.message });
       return NextResponse.json({ error: 'Internal system pricing error.' }, { status: 500 });
     }
@@ -108,14 +95,9 @@ export async function POST(request: Request) {
       }
     }
 
-    const priceById = new Map<string, number>();
-    for (const product of products) {
-      const price = Number(product.price);
-      if (!Number.isSafeInteger(price) || price < 0) {
-        return NextResponse.json({ error: 'Invalid product price.' }, { status: 500 });
-      }
-      priceById.set(product.id, price);
-    }
+    const priceById = new Map(
+      (products ?? []).map((p) => [p.id, Number(p.price) || 0]),
+    );
 
     // 3. Compute absolute pricing metrics in Kobo on the server side.
     // products.price is stored as bigint (kobo, see utils/money.ts), which
@@ -137,8 +119,7 @@ export async function POST(request: Request) {
     const trueTotalKobo =
       itemsTotalKobo + (isPaidDelivery ? DELIVERY_FEE_KOBO : 0) + buyerServiceFee;
 
-    if (!Number.isSafeInteger(itemsTotalKobo) || !Number.isSafeInteger(buyerServiceFee) ||
-        !Number.isSafeInteger(trueTotalKobo) || trueTotalKobo <= 0) {
+    if (!Number.isFinite(trueTotalKobo) || trueTotalKobo <= 0) {
       console.error('[paystack] invalid financial amount', {
         userId: user.id,
         trueTotalKobo,

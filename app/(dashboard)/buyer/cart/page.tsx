@@ -25,18 +25,6 @@ export default function BuyerCartPage() {
   } | null>(null);
   const [checkoutStage, setCheckoutStage] = useState<'items' | 'checkout'>('items');
 
-  // A product-detail "Buy now" action lands here with checkout=1.
-  // Keep the cart page as the single secure checkout implementation, but skip
-  // the intermediate cart-review screen for that direct purchase flow.
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    if (url.searchParams.get('checkout') === '1') {
-      setCheckoutStage('checkout');
-      url.searchParams.delete('checkout');
-      window.history.replaceState(null, '', url.toString());
-    }
-  }, []);
-
   // Delivery / fulfilment details entered before checkout.
   const [delivery, setDelivery] = useState({
     name: '',
@@ -99,11 +87,7 @@ export default function BuyerCartPage() {
 
     (async () => {
       try {
-        const res = await fetch('/api/paystack/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reference }),
-        });
+        const res = await fetch(`/api/paystack/verify?reference=${encodeURIComponent(reference)}`);
         const data = await res.json();
 
         if (res.ok && data.status === 'success') {

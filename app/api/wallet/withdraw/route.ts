@@ -3,7 +3,6 @@ import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { cookies } from 'next/headers';
 import { SESSION_NONCE_COOKIE, nonceValid } from '@/utils/single-session';
-import { rateLimit } from '@/utils/rate-limit';
 
 /**
  * Seller requests a withdrawal from their wallet balance.
@@ -27,15 +26,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Malformed request body.' }, { status: 400 });
     }
 
-    const rawAmount = Number(body?.amountKobo);
-    const amount = Math.floor(rawAmount);
-    if (!Number.isSafeInteger(rawAmount) || amount <= 0 || amount > 100_000_000_00) {
+    const amount = Math.floor(Number(body?.amountKobo) || 0);
+    if (amount <= 0) {
       return NextResponse.json({ error: 'Enter a valid withdrawal amount.' }, { status: 400 });
     }
     const bankName = String(body?.bankName || '').trim();
     const accountNumber = String(body?.accountNumber || '').trim();
     const accountName = String(body?.accountName || '').trim();
-    if (!bankName || !accountNumber || !accountName || bankName.length > 120 || accountName.length > 120 || !/^\d{10}$/.test(accountNumber)) {
+    if (!bankName || !accountNumber || !accountName) {
       return NextResponse.json({
         error: 'Bank name, account number and account name are required.',
       }, { status: 400 });
@@ -45,11 +43,6 @@ export async function POST(request: Request) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized system access request.' }, { status: 401 });
-    }
-
-    const limit = rateLimit({ key: `withdraw:${user.id}`, limit: 3, windowMs: 10 * 60 * 1000 });
-    if (!limit.ok) {
-      return NextResponse.json({ error: 'Too many withdrawal attempts. Please wait.' }, { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } });
     }
 
     // Single-session guard: a request may only move money if its httpOnly nonce

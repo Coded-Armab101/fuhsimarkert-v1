@@ -31,16 +31,15 @@ export default async function SellerSubscribePage() {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('user_persona, is_seller, seller_active, subscription_expires_at, is_approved_seller')
+    .select('user_persona, is_seller, seller_active, subscription_expires_at')
     .eq('id', user.id)
     .maybeSingle();
 
   const expiresAt = subscriptionExpiry(profile);
 
-  // Already paid. Approved sellers can enter Studio; unapproved sellers must
-  // complete/await KYC review and must never be sent into the dashboard.
+  // Already paid — nothing to sell them.
   if (hasActiveRole(profile, 'seller')) {
-    redirect(profile?.is_approved_seller === true ? '/seller' : '/seller/verification');
+    redirect('/seller');
   }
 
   const hasLapsed = hasLapsedRole(profile);
