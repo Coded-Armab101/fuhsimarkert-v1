@@ -15,7 +15,7 @@ const isAvailable = (p: Product) => p.stock === null || p.stock === undefined ||
 const stockLimit = (p: Product) => p.stock === null || p.stock === undefined ? Infinity : Number(p.stock) || 0;
 
 function ProductTile({ product, saved, onSave, onOpen, compact = false }: { product: Product; saved: boolean; onSave: () => void; onOpen: () => void; compact?: boolean; }) {
-  const { addToCart, decreaseQuantity, getQuantity } = useCart();
+  const { addToCart, addToCartOnce, decreaseQuantity, getQuantity } = useCart();
   const quantity = getQuantity(product.id); const unavailable = !isAvailable(product);
   return <article className={compact ? 'w-[46%] min-w-[150px] sm:w-[190px]' : 'min-w-0'}>
     <div className="relative aspect-[.86] overflow-hidden rounded-[1.35rem] bg-[#f3eee8]">

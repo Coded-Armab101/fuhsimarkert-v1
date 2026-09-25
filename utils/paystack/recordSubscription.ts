@@ -69,7 +69,7 @@ export async function recordRoleSubscription(
       .select('user_id, plan_type, expires_at')
       .eq('reference', reference)
       .maybeSingle();
-    if (raced?.user_id === userId) {
+    if (raced && raced.user_id === userId) {
       return { userId, planType: raced.plan_type as keyof typeof ROLE_PLANS, expiresAt: raced.expires_at, alreadyRecorded: true };
     }
     throw ledgerError;
