@@ -17,8 +17,10 @@ interface CartContextType {
   addToCart: (item: CartItem) => void;
   removeFromCart: (id: string) => void;
   removeItems: (ids: string[]) => void;
+  decreaseQuantity: (id: string) => void;
   clearCart: () => void;
   updateQuantity: (id: string, quantity: number) => void;
+  totalAmount: number;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -57,14 +59,9 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
     saveCart(cart.filter((item) => item.id !== id));
   };
 
-  // Removes a list of specific purchased product IDs from the cart
   const removeItems = (ids: string[]) => {
     const updated = cart.filter((item) => !ids.includes(item.id));
     saveCart(updated);
-  };
-
-  const clearCart = () => {
-    saveCart([]);
   };
 
   const updateQuantity = (id: string, quantity: number) => {
@@ -78,6 +75,23 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
     saveCart(updated);
   };
 
+  const decreaseQuantity = (id: string) => {
+    const item = cart.find((i) => i.id === id);
+    if (item) {
+      updateQuantity(id, item.quantity - 1);
+    }
+  };
+
+  const clearCart = () => {
+    saveCart([]);
+  };
+
+  // Calculate total price of all items in cart
+  const totalAmount = cart.reduce(
+    (sum, item) => sum + item.price * item.quantity,
+    0
+  );
+
   return (
     <CartContext.Provider
       value={{
@@ -85,8 +99,10 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
         addToCart,
         removeFromCart,
         removeItems,
+        decreaseQuantity,
         clearCart,
         updateQuantity,
+        totalAmount,
       }}
     >
       {children}
