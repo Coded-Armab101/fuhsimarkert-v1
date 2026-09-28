@@ -1,17 +1,113 @@
-'use client';
+// app/(dashboard)/seller/settings/page.tsx
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Building2, CheckCircle2, Save, Store, User, Wallet } from 'lucide-react';
-import { createClient } from '@/utils/supabase';
+import { useState } from "react";
+import { createClient } from "@/utils/supabase/client";
 
-export default function SellerSettingsPage() {
-  const router = useRouter(); const supabase = createClient();
-  const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [notice, setNotice] = useState('');
-  const [fullName, setFullName] = useState(''); const [email, setEmail] = useState(''); const [bankName, setBankName] = useState(''); const [accountNumber, setAccountNumber] = useState(''); const [accountName, setAccountName] = useState('');
-  useEffect(() => { void (async () => { const { data: { user } } = await supabase.auth.getUser(); if (!user) { router.push('/login?redirect=/seller/settings'); return; } setEmail(user.email || ''); const { data } = await supabase.from('profiles').select('full_name, bank_name, account_number, account_name').eq('id', user.id).maybeSingle(); setFullName(data?.full_name || ''); setBankName(data?.bank_name || ''); setAccountNumber(data?.account_number || ''); setAccountName(data?.account_name || data?.full_name || ''); setLoading(false); })(); }, [router, supabase]);
-  const save = async (e: React.FormEvent) => { e.preventDefault(); if (accountNumber && !/^\d{10}$/.test(accountNumber)) { setNotice('Your account number should have 10 digits.'); return; } setSaving(true); const { data: { user } } = await supabase.auth.getUser(); if (user) { const { error } = await supabase.from('profiles').upsert({ id: user.id, full_name: fullName.trim(), bank_name: bankName.trim(), account_number: accountNumber.trim(), account_name: accountName.trim(), updated_at: new Date().toISOString() }); setNotice(error ? 'Could not save your changes. Try again.' : 'Your profile has been updated.'); } setSaving(false); };
-  if (loading) return <div className="space-y-4 animate-pulse pt-3"><div className="mx-auto h-20 w-20 rounded-full bg-[#eee4dc]" /><div className="h-40 rounded-[2rem] bg-[#f4eee9]" /><div className="h-72 rounded-[2rem] bg-[#faf6f2]" /></div>;
-  const initial = (fullName || 'S').slice(0, 1).toUpperCase();
-  return <div className="seller-secondary mx-auto max-w-3xl space-y-5 py-2 pb-28"><button onClick={() => router.push('/seller')} className="text-xs font-bold text-[#81756d] hover:text-[#d8552e]">← Back to seller home</button><header className="rounded-[2rem] bg-white p-6 text-center shadow-sm"><div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-gradient-to-br from-[#ffc0a0] to-[#ef6b3b] text-3xl font-black text-white">{initial}</div><p className="mt-4 text-[10px] font-bold uppercase tracking-[.2em] text-[#8f8279]">Seller profile</p><h1 className="mt-1 text-xl font-black text-[#251d18]">{fullName || 'Your seller account'}</h1><p className="mt-1 text-xs text-[#81756d]">{email}</p></header><section className="rounded-[1.75rem] bg-white p-3 shadow-sm"><button onClick={() => document.getElementById('personal')?.scrollIntoView({behavior:'smooth'})} className="flex w-full items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-sm font-bold"><span className="flex items-center gap-3"><User size={17} className="text-[#d8552e]"/>Personal details</span>→</button><button onClick={() => document.getElementById('bank')?.scrollIntoView({behavior:'smooth'})} className="mt-2 flex w-full items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-sm font-bold"><span className="flex items-center gap-3"><Building2 size={17} className="text-[#d8552e]"/>Payout account</span>→</button><button onClick={() => router.push('/seller/wallet')} className="mt-2 flex w-full items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-sm font-bold"><span className="flex items-center gap-3"><Wallet size={17} className="text-[#d8552e]"/>Wallet</span>→</button><button onClick={() => router.push('/buyer')} className="mt-2 flex w-full items-center justify-between rounded-2xl bg-[#fff0e9] px-4 py-4 text-sm font-bold text-[#b94a29]"><span className="flex items-center gap-3"><Store size={17}/>Go to buyer market</span>→</button></section>{notice && <p className="flex items-center gap-2 rounded-2xl bg-[#ecfdf5] p-4 text-xs font-medium text-[#17805b]"><CheckCircle2 size={16}/>{notice}</p>}<form onSubmit={save} className="space-y-5"><section id="personal" className="rounded-[1.75rem] bg-white p-6 shadow-sm"><h2 className="flex items-center gap-2 text-sm font-black"><User size={17} className="text-[#d8552e]"/>Personal details</h2><label className="mt-5 block text-xs font-bold text-[#675a52]">Full name<input value={fullName} onChange={e=>setFullName(e.target.value)} required className="mt-2 w-full rounded-xl border border-[#e8ddd4] bg-[#faf6f2] px-4 py-3 text-sm outline-none focus:border-[#ef6b3b]"/></label><label className="mt-4 block text-xs font-bold text-[#675a52]">Email<input value={email} disabled className="mt-2 w-full rounded-xl border border-[#eee4dc] bg-[#f4eee9] px-4 py-3 text-sm text-[#81756d]"/></label></section><section id="bank" className="rounded-[1.75rem] bg-white p-6 shadow-sm"><h2 className="flex items-center gap-2 text-sm font-black"><Building2 size={17} className="text-[#d8552e]"/>Payout account</h2><p className="mt-1 text-xs text-[#81756d]">This is where your approved withdrawals are sent.</p><div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-xs font-bold text-[#675a52]">Bank name<input value={bankName} onChange={e=>setBankName(e.target.value)} placeholder="e.g. GTBank" className="mt-2 w-full rounded-xl border border-[#e8ddd4] bg-[#faf6f2] px-4 py-3 text-sm outline-none focus:border-[#ef6b3b]"/></label><label className="text-xs font-bold text-[#675a52]">Account number<input value={accountNumber} maxLength={10} onChange={e=>setAccountNumber(e.target.value.replace(/\D/g,''))} placeholder="10 digits" className="mt-2 w-full rounded-xl border border-[#e8ddd4] bg-[#faf6f2] px-4 py-3 text-sm outline-none focus:border-[#ef6b3b]"/></label></div><label className="mt-4 block text-xs font-bold text-[#675a52]">Account name<input value={accountName} onChange={e=>setAccountName(e.target.value)} placeholder="Name on the bank account" className="mt-2 w-full rounded-xl border border-[#e8ddd4] bg-[#faf6f2] px-4 py-3 text-sm outline-none focus:border-[#ef6b3b]"/></label></section><button disabled={saving} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#ef6b3b] py-4 text-sm font-bold text-white disabled:opacity-60"><Save size={16}/>{saving ? 'Saving...' : 'Save changes'}</button></form></div>;
+export default function SettingsPage() {
+  const supabase = createClient();
+
+  const [passwordForm, setPasswordForm] = useState({
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const handlePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMessage(null);
+
+    if (passwordForm.newPassword.length < 6) {
+      setMessage({ type: "error", text: "Password must be at least 6 characters long." });
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setMessage({ type: "error", text: "Passwords do not match." });
+      return;
+    }
+
+    setLoading(true);
+
+    const { error } = await supabase.auth.updateUser({
+      password: passwordForm.newPassword,
+    });
+
+    setLoading(false);
+
+    if (error) {
+      setMessage({ type: "error", text: error.message });
+    } else {
+      setMessage({ type: "success", text: "Password updated successfully!" });
+      setPasswordForm({ newPassword: "", confirmPassword: "" });
+    }
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto p-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700">
+      <h1 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">Account Settings</h1>
+
+      {/* Password Reset Section */}
+      <section className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+        <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-4">
+          Change Password
+        </h2>
+
+        {message && (
+          <div
+            className={`p-3 rounded-md mb-4 text-sm ${
+              message.type === "success"
+                ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
+            }`}
+          >
+            {message.text}
+          </div>
+        )}
+
+        <form onSubmit={handlePasswordReset} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              New Password
+            </label>
+            <input
+              type="password"
+              required
+              value={passwordForm.newPassword}
+              onChange={(e) =>
+                setPasswordForm({ ...passwordForm, newPassword: e.target.value })
+              }
+              className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-900 dark:border-gray-600 dark:text-white"
+              placeholder="••••••••"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Confirm New Password
+            </label>
+            <input
+              type="password"
+              required
+              value={passwordForm.confirmPassword}
+              onChange={(e) =>
+                setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })
+              }
+              className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-900 dark:border-gray-600 dark:text-white"
+              placeholder="••••••••"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg disabled:opacity-50 transition"
+          >
+            {loading ? "Updating..." : "Update Password"}
+          </button>
+        </form>
+      </section>
+    </div>
+  );
 }
