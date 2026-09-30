@@ -109,14 +109,17 @@ export async function POST(request: Request) {
       wallet_kobo: totalKobo,
     });
   } catch (err) {
-    console.error('[orders/pay-wallet] error:', err);
-    const message = err instanceof Error ? err.message : '';
+    console.error('[orders/pay-wallet] error details:', err);
+    const message = err instanceof Error ? err.message : String(err || '');
+    if (message.includes('own product')) {
+      return NextResponse.json({ error: 'You cannot purchase your own product.' }, { status: 400 });
+    }
     if (message.includes('insufficient') || message.includes('balance')) {
       return NextResponse.json({ error: 'Your wallet balance is not enough for this order.' }, { status: 400 });
     }
     if (message.includes('stock')) {
       return NextResponse.json({ error: 'One item has just sold out or does not have enough stock. Refresh your cart and try again.' }, { status: 409 });
     }
-    return NextResponse.json({ error: 'We could not complete the wallet payment. Please try again or use card/transfer.' }, { status: 500 });
+    return NextResponse.json({ error: message || 'We could not complete the wallet payment. Please try again or use card/transfer.' }, { status: 500 });
   }
 }
