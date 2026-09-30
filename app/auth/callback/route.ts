@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { createClient } from '@/utils/supabase/server';
 import {
   SESSION_NONCE_COOKIE,
@@ -35,15 +36,21 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // The exchange just wrote the session cookies. Mint the single-session nonce
-  // here — one request, one DB write — and carry the httpOnly cookie on the
-  // redirect, so the protected page's navigation never has to mint it lazily
-  // (which caused sign-out races under concurrent proxy requests).
+  // The exchange just wrote the session cookies into cookieStore. Copy all
+  // cookieStore cookies onto the redirect response so that the browser receives
+  // the Supabase auth tokens (sb-*-auth-token) alongside the single-session nonce.
+  const cookieStore = await cookies();
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   const redirect = NextResponse.redirect(new URL(next, request.nextUrl.origin));
+
+  for (const cookie of cookieStore.getAll()) {
+    redirect.cookies.set(cookie.name, cookie.value, cookie);
+  }
+
   if (user) {
     const nonce = await rotateSessionNonce(supabase, user.id);
     redirect.cookies.set(SESSION_NONCE_COOKIE, nonce, {

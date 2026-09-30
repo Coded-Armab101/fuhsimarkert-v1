@@ -38,6 +38,41 @@ $$;
 revoke execute on function public.decrement_product_stock(uuid, integer) from public, anon, authenticated;
 grant execute on function public.decrement_product_stock(uuid, integer) to service_role;
 
+-- 1b) Atomic wallet debit for wallet payments/purchases.
+create or replace function public.debit_wallet(
+  p_user_id uuid,
+  p_order_ref text,
+  p_amount_kobo bigint
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  updated_rows integer;
+begin
+  if p_amount_kobo is null or p_amount_kobo <= 0 then
+    raise exception 'invalid debit amount';
+  end if;
+
+  update public.wallets
+     set balance = balance - p_amount_kobo
+   where user_id = p_user_id
+     and balance >= p_amount_kobo;
+
+  get diagnostics updated_rows = row_count;
+  if updated_rows = 0 then
+    return false;
+  end if;
+
+  return true;
+end;
+$$;
+
+revoke execute on function public.debit_wallet(uuid, text, bigint) from public, anon, authenticated;
+grant execute on function public.debit_wallet(uuid, text, bigint) to service_role;
+
 -- 2) Atomic seller withdrawal creation. The balance deduction and withdrawal
 -- row are one database transaction, so a failed insert cannot strand funds.
 create or replace function public.create_seller_withdrawal(
