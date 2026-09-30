@@ -165,16 +165,19 @@ export async function POST(request: Request) {
     }
 
     // 4. Dispatch a hidden credentialed request to Paystack's API engine
-const paystackResponse = await fetch('https://api.paystack.co/transaction/initialize', {
-  method: 'POST',
-  headers: {
-    Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    email: user.email,
-    amount: paystackAmountKobo,
-    callback_url: `${process.env.NEXT_PUBLIC_SITE_URL}/buyer/cart`,
+    const origin = request.headers.get('origin') || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+    const callbackUrl = `${origin.replace(/\/$/, '')}/buyer/cart`;
+
+    const paystackResponse = await fetch('https://api.paystack.co/transaction/initialize', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: user.email,
+        amount: paystackAmountKobo,
+        callback_url: callbackUrl,
     // ⚡ CRITICAL CRITERIA: This metadata structure maps the transaction assets
     metadata: {
       buyer_id: user.id,
