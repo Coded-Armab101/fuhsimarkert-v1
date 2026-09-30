@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
+import { useCart } from '@/context/CartContext';
 import { formatNaira } from '@/utils/money';
 import DeliveryAnnouncement from '../DeliveryAnnouncement';
 
@@ -60,9 +61,43 @@ const isOldFinishedOrder = (group: OrderGroup) => {
 
 export default function OrdersPage() {
   const supabase = createClient();
+  const { clearCart } = useCart();
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<OrderGroup[]>([]);
   const [updatingRef, setUpdatingRef] = useState<string | null>(null);
+  const [paymentNotice, setPaymentNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const reference = url.searchParams.get('reference') || url.searchParams.get('trxref');
+    if (!reference) return;
+
+    url.searchParams.delete('reference');
+    url.searchParams.delete('trxref');
+    window.history.replaceState(null, '', url.toString());
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/paystack/verify?reference=${encodeURIComponent(reference)}`);
+        const data = await res.json();
+
+        if (res.ok && data.status === 'success') {
+          clearCart();
+          setPaymentNotice({
+            kind: 'success',
+            message: 'Payment confirmed! Your order has been placed into escrow.',
+          });
+        } else if (res.ok && (data.status === 'failed' || data.status === 'abandoned')) {
+          setPaymentNotice({
+            kind: 'error',
+            message: 'Payment was cancelled or failed.',
+          });
+        }
+      } catch {
+        /* ignore network error */
+      }
+    })();
+  }, [clearCart]);
 
   useEffect(() => {
     const fetchBuyerOrders = async () => {
@@ -127,6 +162,16 @@ export default function OrdersPage() {
               if (rank(row.status) < rank(existing.status)) existing.status = row.status;
             }
           }
+          // Mark all current order statuses as seen by the buyer so the notification badge clears
+          try {
+            const key = 'fuhsi_order_notifications_buyer';
+            const read = JSON.parse(localStorage.getItem(key) || '{}') as Record<string, string>;
+            for (const row of rows) {
+              read[row.id] = row.status;
+            }
+            localStorage.setItem(key, JSON.stringify(read));
+          } catch { /* ignore storage errors */ }
+
           // Keep the database record for refunds/support, but keep the buyer's
           // list tidy: completed, cancelled, and rejected orders leave this
           // screen after seven days.
@@ -182,6 +227,20 @@ export default function OrdersPage() {
     <div className="buyer-secondary space-y-5 py-2">
       <Link href="/buyer" className="inline-flex items-center gap-2 text-xs font-bold text-[#81756d] hover:text-[#d8552e]">← Back to home</Link>
       <DeliveryAnnouncement />
+
+      {paymentNotice && (
+        <div
+          role="status"
+          className={`rounded-2xl border p-4 flex items-center gap-3 text-xs font-mono ${
+            paymentNotice.kind === 'success'
+              ? 'bg-[#e8f7ef] border-[#cdeeda] text-[#0f6b4a]'
+              : 'bg-[#fff0e9] border-[#ffd9c4] text-[#b04a27]'
+          }`}
+        >
+          <CheckCircle2 size={18} className="flex-shrink-0" />
+          <span>{paymentNotice.message}</span>
+        </div>
+      )}
 
       <div className="bg-white border border-[#eee4dc] rounded-[1.75rem] p-6 shadow-sm">
 <h1 className="text-xl font-black text-[#251d18] flex items-center gap-2">

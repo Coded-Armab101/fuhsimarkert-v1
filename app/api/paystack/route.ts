@@ -166,7 +166,7 @@ export async function POST(request: Request) {
 
     // 4. Dispatch a hidden credentialed request to Paystack's API engine
     const origin = request.headers.get('origin') || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
-    const callbackUrl = `${origin.replace(/\/$/, '')}/buyer/cart`;
+    const callbackUrl = `${origin.replace(/\/$/, '')}/buyer/orders`;
 
     const paystackResponse = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
