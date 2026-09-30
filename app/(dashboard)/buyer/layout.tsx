@@ -12,7 +12,26 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
   const { totalItems } = useCart();
   const [savedCount, setSavedCount] = useState(0);
   const [orderUnread, setOrderUnread] = useState(0);
-  useEffect(() => { const key = 'fuhsi_order_notifications_buyer'; const read = JSON.parse(localStorage.getItem(key) || '{}') as Record<string,string>; const supabase = createClient(); const load = async () => { const { data:{user} } = await supabase.auth.getUser(); if (!user) return; const { data } = await supabase.from('orders').select('id,status').eq('buyer_id', user.id).order('created_at',{ascending:false}).limit(30); const rows=(data||[]) as {id:string;status:string}[]; setOrderUnread(rows.filter(o => o.id in read && read[o.id] !== o.status).length); }; void load(); const t=window.setInterval(load,30000); return()=>window.clearInterval(t); }, []);
+  useEffect(() => {
+    const key = 'fuhsi_order_notifications_buyer';
+    const read = JSON.parse(localStorage.getItem(key) || '{}') as Record<string, string>;
+    const supabase = createClient();
+    const load = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from('orders')
+        .select('id, status')
+        .eq('buyer_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      const rows = (data || []) as { id: string; status: string }[];
+      setOrderUnread(rows.filter((o) => !(o.id in read) || read[o.id] !== o.status).length);
+    };
+    void load();
+    const t = window.setInterval(load, 15000);
+    return () => window.clearInterval(t);
+  }, []);
   useEffect(() => { const supabase = createClient(); void (async () => { const { data: { user } } = await supabase.auth.getUser(); if (!user) return; const { count } = await supabase.from('wishlists').select('*', { count: 'exact', head: true }).eq('user_id', user.id); setSavedCount(count || 0); })(); }, []);
 
   const buyerNav = [
