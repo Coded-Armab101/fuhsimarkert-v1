@@ -103,12 +103,13 @@ export default function OrdersPage() {
     const fetchBuyerOrders = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('orders')
           .select(`
             id,
             buyer_id,
             seller_id,
+            product_id,
             amount_kobo,
             delivery_fee_kobo,
             platform_fee_kobo,
@@ -123,14 +124,66 @@ export default function OrdersPage() {
             delivery_address,
             meetup_location,
             created_at,
-            products ( id, title, image_url )
+            products:product_id ( id, title, image_url )
           `)
           .eq('buyer_id', user.id)
           .order('created_at', { ascending: false });
 
+        if (error) {
+          const fallbackRes = await supabase
+            .from('orders')
+            .select(`
+              id,
+              buyer_id,
+              seller_id,
+              product_id,
+              amount_kobo,
+              delivery_fee_kobo,
+              platform_fee_kobo,
+              quantity,
+              status,
+              order_ref,
+              delivery_code,
+              delivery_type,
+              receiver_name,
+              receiver_phone,
+              matric_number,
+              delivery_address,
+              meetup_location,
+              created_at
+            `)
+            .eq('buyer_id', user.id)
+            .order('created_at', { ascending: false });
+
+          if (!fallbackRes.error && fallbackRes.data) {
+            data = fallbackRes.data as any;
+            error = null;
+          }
+        }
+
         if (!error && data) {
-          // Group all rows that share an order_ref into one "combined order".
-          const rows = data as BuyerOrderRow[];
+          const rows = data as (BuyerOrderRow & { product_id?: string })[];
+
+          const missingProductIds = rows
+            .filter((r) => (!r.products || r.products.length === 0) && r.product_id)
+            .map((r) => r.product_id as string);
+
+          if (missingProductIds.length > 0) {
+            const { data: fetchedProducts } = await supabase
+              .from('products')
+              .select('id, title, image_url')
+              .in('id', missingProductIds);
+
+            if (fetchedProducts) {
+              const productMap = new Map(fetchedProducts.map((p) => [p.id, p]));
+              for (const row of rows) {
+                if ((!row.products || row.products.length === 0) && row.product_id) {
+                  const p = productMap.get(row.product_id);
+                  if (p) row.products = [p];
+                }
+              }
+            }
+          }
           const byRef = new Map<string, OrderGroup>();
           for (const row of rows) {
             const ref = row.order_ref || row.id;
