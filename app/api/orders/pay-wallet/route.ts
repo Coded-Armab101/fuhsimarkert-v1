@@ -66,6 +66,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid financial amount calculation.' }, { status: 400 });
     }
 
+    const admin = createAdminClient();
+
+    let { data: wallet } = await supabase
+      .from('wallets')
+      .select('balance')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (!wallet) {
+      await admin.from('wallets').upsert({ user_id: user.id, balance: 0 }, { onConflict: 'user_id' });
+      wallet = { balance: 0 };
+    }
+
+    const currentBalanceKobo = Number(wallet.balance) || 0;
+    if (currentBalanceKobo < totalKobo) {
+      const { formatNaira } = await import('@/utils/money');
+      return NextResponse.json({
+        error: `Insufficient wallet balance. Your balance is ₦${formatNaira(currentBalanceKobo)}, but this order total is ₦${formatNaira(totalKobo)}. Add funds or pay via card/transfer.`,
+      }, { status: 400 });
+    }
+
     // Fresh wallet reference: unique, so the idempotent wallet debit runs once.
     const walletRef = `WAL-${crypto.createHash('sha256').update(JSON.stringify({
       userId: user.id,
@@ -82,7 +103,6 @@ export async function POST(request: Request) {
       deliveryAddress,
     })).digest('hex').slice(0, 32)}`;
 
-    const admin = createAdminClient();
     await recordOrder(admin, {
       buyerId: user.id,
       reference: walletRef,
@@ -109,14 +129,17 @@ export async function POST(request: Request) {
       wallet_kobo: totalKobo,
     });
   } catch (err) {
-    console.error('[orders/pay-wallet] error:', err);
-    const message = err instanceof Error ? err.message : '';
+    console.error('[orders/pay-wallet] error details:', err);
+    const message = err instanceof Error ? err.message : String(err || '');
+    if (message.includes('own product')) {
+      return NextResponse.json({ error: 'You cannot purchase your own product.' }, { status: 400 });
+    }
     if (message.includes('insufficient') || message.includes('balance')) {
       return NextResponse.json({ error: 'Your wallet balance is not enough for this order.' }, { status: 400 });
     }
     if (message.includes('stock')) {
       return NextResponse.json({ error: 'One item has just sold out or does not have enough stock. Refresh your cart and try again.' }, { status: 409 });
     }
-    return NextResponse.json({ error: 'We could not complete the wallet payment. Please try again or use card/transfer.' }, { status: 500 });
+    return NextResponse.json({ error: message || 'We could not complete the wallet payment. Please try again or use card/transfer.' }, { status: 500 });
   }
 }
