@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { User, Wallet, Landmark, Save, PlusCircle, Cake, Store, X, CheckCircle, Zap, LayoutDashboard, Loader2, LogOut, IdCard, UploadCloud, ShieldCheck } from 'lucide-react';
+import { User, Wallet, Landmark, Save, PlusCircle, Cake, Store, X, CheckCircle, Zap, LayoutDashboard, Loader2, LogOut, IdCard, UploadCloud, ShieldCheck, Lock } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
 import { useCart } from '@/context/CartContext';
 import { ROLE_PLANS, type RolePlan } from '@/utils/plans';
@@ -61,6 +61,14 @@ export default function ProfilePage() {
   // State for Role Selection Modal
   const [showRoleModal, setShowRoleModal] = useState(false);
 
+  // Password Change State
+  const [passwordForm, setPasswordForm] = useState({
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   // Unified Form & Profile State
   const [profileData, setProfileData] = useState({
     fullName: '',
@@ -71,6 +79,36 @@ export default function ProfilePage() {
     accountNumber: '',
     walletBalance: 0
   });
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordMessage(null);
+
+    if (passwordForm.newPassword.length < 6) {
+      setPasswordMessage({ type: 'error', text: 'Password must be at least 6 characters long.' });
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordMessage({ type: 'error', text: 'Passwords do not match.' });
+      return;
+    }
+
+    setPasswordLoading(true);
+
+    const { error } = await supabase.auth.updateUser({
+      password: passwordForm.newPassword,
+    });
+
+    setPasswordLoading(false);
+
+    if (error) {
+      setPasswordMessage({ type: 'error', text: error.message });
+    } else {
+      setPasswordMessage({ type: 'success', text: 'Password updated successfully!' });
+      setPasswordForm({ newPassword: '', confirmPassword: '' });
+    }
+  };
     
   useEffect(() => {
   let isMounted = true;
@@ -451,6 +489,7 @@ export default function ProfilePage() {
       <section className="grid gap-2 rounded-[1.75rem] bg-white p-3 shadow-sm">
         <button onClick={() => document.getElementById('profile-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><User size={17} className="text-[#d8552e]" />Manage profile</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
         <button onClick={() => document.getElementById('wallet-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Wallet size={17} className="text-[#d8552e]" />Wallet and bank</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
+        <button onClick={() => document.getElementById('security-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Lock size={17} className="text-[#d8552e]" />Security & Change Password</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
         <button onClick={() => isSeller ? document.getElementById('seller-details')?.scrollIntoView({ behavior: 'smooth' }) : setShowRoleModal(true)} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Store size={17} className="text-[#d8552e]" />Selling on FuhsiMarket</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
       </section>
 
@@ -685,6 +724,62 @@ export default function ProfilePage() {
             <Save size={14} />
             <span>{updating ? 'Saving...' : 'Save changes'}</span>
           </button>
+
+          {/* SECURITY & PASSWORD CHANGE */}
+          <div id="security-details" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-4 shadow-xl">
+            <h3 className="text-sm font-bold border-b border-neutral-900 pb-3 flex items-center gap-2 uppercase tracking-wider font-mono text-xs text-neutral-400">
+              <Lock size={15} className="text-amber-500" /> Security & Change Password
+            </h3>
+
+            {passwordMessage && (
+              <div
+                className={`p-3 rounded-xl text-xs font-mono border ${
+                  passwordMessage.type === 'success'
+                    ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-400'
+                    : 'bg-red-950/40 border-red-800/60 text-red-400'
+                }`}
+              >
+                {passwordMessage.text}
+              </div>
+            )}
+
+            <form onSubmit={handlePasswordChange} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-neutral-400">New Password</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="••••••••"
+                    value={passwordForm.newPassword}
+                    onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-red-500 font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-neutral-400">Confirm New Password</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="••••••••"
+                    value={passwordForm.confirmPassword}
+                    onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-red-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={passwordLoading}
+                className="bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs px-5 py-3 rounded-xl flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {passwordLoading && <Loader2 size={14} className="animate-spin" />}
+                <span>{passwordLoading ? 'Updating...' : 'Update Password'}</span>
+              </button>
+            </form>
+          </div>
 
         </div>
 
