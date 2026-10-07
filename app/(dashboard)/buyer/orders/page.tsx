@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes } from 'lucide-react';
+import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes, ChevronDown, ChevronUp } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
 import { useCart } from '@/context/CartContext';
 import { formatNaira } from '@/utils/money';
@@ -66,6 +66,19 @@ export default function OrdersPage() {
   const [groups, setGroups] = useState<OrderGroup[]>([]);
   const [updatingRef, setUpdatingRef] = useState<string | null>(null);
   const [paymentNotice, setPaymentNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
+  const [expandedRefs, setExpandedRefs] = useState<Record<string, boolean>>({});
+
+  const toggleExpand = (ref: string) => {
+    setExpandedRefs((prev) => ({
+      ...prev,
+      [ref]: prev[ref] === undefined ? false : !prev[ref],
+    }));
+  };
+
+  const isExpanded = (ref: string, idx: number) => {
+    if (expandedRefs[ref] !== undefined) return expandedRefs[ref];
+    return idx === 0;
+  };
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -309,39 +322,51 @@ export default function OrdersPage() {
           No orders yet. When you buy something, its delivery updates will show here.
         </div>
       ) : (
-        <div className="space-y-6">
-          {groups.map((group) => {
+        <div className="space-y-4 max-w-2xl">
+          {groups.map((group, groupIdx) => {
             const statusIndex = TRACK_STEPS.indexOf(group.status);
             const isDelivered = ['confirmed', 'delivered', 'completed'].includes(group.status);
             const isDisputed = group.status === 'disputed';
             const canConfirm = group.status === 'ready_for_pickup';
             const isTerminal = ['completed', 'confirmed', 'delivered', 'cancelled', 'rejected'].includes(group.status);
+            const open = isExpanded(group.order_ref, groupIdx);
 
             return (
-              <div key={group.order_ref} className="bg-white border border-[#eee4dc] rounded-[1.75rem] p-5 max-w-2xl space-y-5 shadow-sm">
-                {/* SUMMARY */}
-                <div className="flex justify-between items-start border-b border-[#f0e9e2] pb-4">
+              <div key={group.order_ref} className="bg-white border border-[#eee4dc] rounded-[1.75rem] p-5 space-y-4 shadow-sm transition-all">
+                {/* SUMMARY BAR */}
+                <div className="flex justify-between items-start">
                   <div className="space-y-1">
-                    <span className={`text-[10px] font-mono px-2.5 py-1 rounded border uppercase tracking-wider font-bold ${
-                      isDisputed
-                        ? 'bg-[#fff0e9] border-[#ffd9c4] text-[#b04a27]'
-                        : isTerminal
-                          ? 'bg-[#e8f7ef] border-[#cdeeda] text-[#17805b]'
-                          : 'bg-[#fff7e8] border-[#f2e0b8] text-[#8a650f]'
-                    }`}>
-                      {group.status === 'rejected' ? 'Order not accepted' : group.status.replace(/_/g, ' ')}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-mono px-2.5 py-1 rounded border uppercase tracking-wider font-bold ${
+                        isDisputed
+                          ? 'bg-[#fff0e9] border-[#ffd9c4] text-[#b04a27]'
+                          : isTerminal
+                            ? 'bg-[#e8f7ef] border-[#cdeeda] text-[#17805b]'
+                            : 'bg-[#fff7e8] border-[#f2e0b8] text-[#8a650f]'
+                      }`}>
+                        {group.status === 'rejected' ? 'Order not accepted' : group.status.replace(/_/g, ' ')}
+                      </span>
+
+                      <button
+                        onClick={() => toggleExpand(group.order_ref)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#faf6f2] hover:bg-[#fff0e9] text-[11px] font-bold text-[#d8552e] border border-[#eee4dc] transition-all cursor-pointer"
+                        aria-label={open ? 'Collapse order details' : 'Expand order details'}
+                      >
+                        <span>{open ? 'Hide' : 'Details'}</span>
+                        {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                      </button>
+                    </div>
 
                     {/* THE HANDOFF CODE */}
-                    <div className="mt-3 flex items-center gap-2">
+                    <div className="mt-2 flex items-center gap-2">
                       <Boxes size={18} className="text-[#ef6b3b]" />
                       <div>
-                        <p className="text-[10px] font-mono uppercase tracking-wider text-[#81756d]">Show this code at delivery</p>
-                        <p className="text-2xl font-black font-mono text-[#251d18] tracking-widest">{group.delivery_code}</p>
+                        <p className="text-[10px] font-mono uppercase tracking-wider text-[#81756d]">Code for delivery</p>
+                        <p className="text-xl sm:text-2xl font-black font-mono text-[#251d18] tracking-widest">{group.delivery_code}</p>
                       </div>
                     </div>
 
-                    <p className="text-[10px] font-mono text-[#9d9188] mt-1">
+                    <p className="text-[10px] font-mono text-[#9d9188] mt-0.5">
                       {group.items.length} item{group.items.length === 1 ? '' : 's'} · {group.order_ref?.slice(0, 8)}
                     </p>
                   </div>
@@ -358,7 +383,10 @@ export default function OrdersPage() {
                   </div>
                 </div>
 
-                {/* ITEM LIST (all sellers' items in this combined order) */}
+                {/* EXPANDABLE DROPDOWN DETAILS */}
+                {open && (
+                  <div className="space-y-4 pt-3 border-t border-[#f0e9e2] animate-in fade-in duration-200">
+                    {/* ITEM LIST (all sellers' items in this combined order) */}
                 <div className="space-y-2">
                     <p className="text-[10px] font-mono uppercase tracking-wider text-[#81756d] flex items-center gap-1">
                     <Package size={12} /> Items in this order
@@ -460,6 +488,8 @@ export default function OrdersPage() {
                 {isDisputed && (
                   <div className="p-4 bg-[#fff0e9] border border-[#ffd9c4] text-[#b04a27] text-xs rounded-xl text-center font-medium font-mono">
                     <AlertTriangle size={16} className="inline mr-1" /> We are checking this order. Your money is still protected.
+                  </div>
+                )}
                   </div>
                 )}
               </div>

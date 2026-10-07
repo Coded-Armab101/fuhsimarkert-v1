@@ -52,6 +52,32 @@ export async function GET(request: NextRequest) {
   }
 
   if (user) {
+    // Auto-create default buyer profile for first-time Google sign-ups/logins
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('id, user_persona')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (!existingProfile) {
+      const fullName =
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        user.email?.split('@')[0] ||
+        'Campus Student';
+
+      await supabase.from('profiles').upsert(
+        {
+          id: user.id,
+          full_name: fullName,
+          user_persona: 'buyer',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' },
+      );
+    }
+
     const nonce = await rotateSessionNonce(supabase, user.id);
     redirect.cookies.set(SESSION_NONCE_COOKIE, nonce, {
       httpOnly: true,

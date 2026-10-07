@@ -44,6 +44,14 @@ export async function recordRoleSubscription(
 
   if (existing) {
     if (existing.user_id !== userId) throw new Error('subscription reference belongs to another account');
+    await admin.from('profiles').update({
+      user_persona: planType,
+      is_seller: true,
+      seller_active: true,
+      subscription_expires_at: existing.expires_at,
+      updated_at: new Date().toISOString(),
+    }).eq('id', userId);
+
     return {
       userId,
       planType: existing.plan_type as keyof typeof ROLE_PLANS,
@@ -70,6 +78,13 @@ export async function recordRoleSubscription(
       .eq('reference', reference)
       .maybeSingle();
     if (raced && raced.user_id === userId) {
+      await admin.from('profiles').update({
+        user_persona: planType,
+        is_seller: true,
+        seller_active: true,
+        subscription_expires_at: raced.expires_at,
+        updated_at: new Date().toISOString(),
+      }).eq('id', userId);
       return { userId, planType: raced.plan_type as keyof typeof ROLE_PLANS, expiresAt: raced.expires_at, alreadyRecorded: true };
     }
     throw ledgerError;
