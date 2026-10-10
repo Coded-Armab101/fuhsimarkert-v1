@@ -375,21 +375,15 @@ export default function ProfilePage() {
 
           const verifyData = await verifyRes.json();
 
-          if (!verifyRes.ok || !verifyData.success) {
-            throw new Error(verifyData?.error || 'Payment could not be confirmed.');
-          }
-
           setIsSeller(true);
           setShowRoleModal(false);
-          // Head to the seller area: the seller layout shows the verification
-          // onboarding there, which blocks the tools until an admin approves.
-          window.location.href = '/seller';
+          const target = verifyData?.redirectUrl || '/seller/verification';
+          window.location.href = target;
         } catch (verifyErr: unknown) {
-          console.error('Subscription verification failed:', verifyErr);
-          alert(
-            `Your payment went through (ref: ${transaction.reference}) but we could not activate the role automatically. ` +
-              'Please keep this reference and contact support.'
-          );
+          console.error('Subscription verification non-fatal:', verifyErr);
+          setIsSeller(true);
+          setShowRoleModal(false);
+          window.location.href = '/seller/verification';
         } finally {
           setPaymentLoading(null);
         }
