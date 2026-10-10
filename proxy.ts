@@ -106,6 +106,13 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Forward OAuth code landing on root / to /auth/callback
+  if (pathname === '/' && request.nextUrl.searchParams.has('code')) {
+    const callback = request.nextUrl.clone();
+    callback.pathname = '/auth/callback';
+    return redirectPreservingCookies(callback, response);
+  }
+
   const needsAuth = AUTH_REQUIRED.some((prefix) => isUnder(pathname, prefix));
 
   if (!user) {
@@ -119,7 +126,7 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
-  if (GUEST_ONLY.includes(pathname)) {
+  if (GUEST_ONLY.includes(pathname) || pathname === '/') {
     const home = request.nextUrl.clone();
     home.pathname = '/buyer';
     home.search = '';
