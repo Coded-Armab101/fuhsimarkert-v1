@@ -349,10 +349,10 @@ export default function OrdersPage() {
 
                       <button
                         onClick={() => toggleExpand(group.order_ref)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#faf6f2] hover:bg-[#fff0e9] text-[11px] font-bold text-[#d8552e] border border-[#eee4dc] transition-all cursor-pointer"
-                        aria-label={open ? 'Collapse order details' : 'Expand order details'}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#faf6f2] hover:bg-[#fff0e9] text-[11px] font-bold text-[#d8552e] border border-[#eee4dc] transition-all cursor-pointer"
+                        aria-label={open ? 'Hide order details' : 'Show order details'}
                       >
-                        <span>{open ? 'Hide' : 'Details'}</span>
+                        <span>{open ? 'Hide order details' : 'Order details'}</span>
                         {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                       </button>
                     </div>
