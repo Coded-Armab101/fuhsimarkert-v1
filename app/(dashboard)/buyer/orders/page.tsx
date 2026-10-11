@@ -330,6 +330,10 @@ export default function OrdersPage() {
             const canConfirm = group.status === 'ready_for_pickup';
             const isTerminal = ['completed', 'confirmed', 'delivered', 'cancelled', 'rejected'].includes(group.status);
             const open = isExpanded(group.order_ref, groupIdx);
+            const productNames = group.items
+              .map((item) => item.products?.[0]?.title)
+              .filter(Boolean)
+              .join(', ') || 'Campus purchase';
 
             return (
               <div key={group.order_ref} className="bg-white border border-[#eee4dc] rounded-[1.75rem] p-5 space-y-4 shadow-sm transition-all">
@@ -357,8 +361,13 @@ export default function OrdersPage() {
                       </button>
                     </div>
 
+                    {/* PRODUCT NAME */}
+                    <p className="text-xs font-bold text-[#251d18] truncate max-w-xs sm:max-w-md pt-1">
+                      {productNames}
+                    </p>
+
                     {/* THE HANDOFF CODE */}
-                    <div className="mt-2 flex items-center gap-2">
+                    <div className="mt-1 flex items-center gap-2">
                       <Boxes size={18} className="text-[#ef6b3b]" />
                       <div>
                         <p className="text-[10px] font-mono uppercase tracking-wider text-[#81756d]">Code for delivery</p>
@@ -367,7 +376,7 @@ export default function OrdersPage() {
                     </div>
 
                     <p className="text-[10px] font-mono text-[#9d9188] mt-0.5">
-                      {group.items.length} item{group.items.length === 1 ? '' : 's'} · {group.order_ref?.slice(0, 8)}
+                      {group.items.length} item{group.items.length === 1 ? '' : 's'} · Order ID: {group.order_ref?.slice(0, 8)}
                     </p>
                   </div>
 
