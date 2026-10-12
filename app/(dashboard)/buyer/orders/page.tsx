@@ -26,8 +26,15 @@ type BuyerOrderRow = {
   delivery_address?: string | null;
   meetup_location?: string | null;
   created_at: string;
-  products?: { id: string; title: string; image_url?: string | null }[] | null;
+  products?: { id: string; title: string; image_url?: string | null }[] | { id: string; title: string; image_url?: string | null } | null;
 };
+
+function getOrderProduct(products: any): { id?: string; title?: string; image_url?: string | null } | null {
+  if (!products) return null;
+  if (Array.isArray(products)) return products[0] || null;
+  if (typeof products === 'object') return products;
+  return null;
+}
 
 type OrderGroup = {
   order_ref: string;
@@ -71,13 +78,12 @@ export default function OrdersPage() {
   const toggleExpand = (ref: string) => {
     setExpandedRefs((prev) => ({
       ...prev,
-      [ref]: prev[ref] === undefined ? false : !prev[ref],
+      [ref]: !prev[ref],
     }));
   };
 
-  const isExpanded = (ref: string, idx: number) => {
-    if (expandedRefs[ref] !== undefined) return expandedRefs[ref];
-    return idx === 0;
+  const isExpanded = (ref: string) => {
+    return expandedRefs[ref] === true;
   };
 
   useEffect(() => {
@@ -178,7 +184,7 @@ export default function OrdersPage() {
           const rows = data as (BuyerOrderRow & { product_id?: string })[];
 
           const missingProductIds = rows
-            .filter((r) => (!r.products || r.products.length === 0) && r.product_id)
+            .filter((r) => !getOrderProduct(r.products) && r.product_id)
             .map((r) => r.product_id as string);
 
           if (missingProductIds.length > 0) {
@@ -190,7 +196,7 @@ export default function OrdersPage() {
             if (fetchedProducts) {
               const productMap = new Map(fetchedProducts.map((p) => [p.id, p]));
               for (const row of rows) {
-                if ((!row.products || row.products.length === 0) && row.product_id) {
+                if (!getOrderProduct(row.products) && row.product_id) {
                   const p = productMap.get(row.product_id);
                   if (p) row.products = [p];
                 }
@@ -329,9 +335,9 @@ export default function OrdersPage() {
             const isDisputed = group.status === 'disputed';
             const canConfirm = group.status === 'ready_for_pickup';
             const isTerminal = ['completed', 'confirmed', 'delivered', 'cancelled', 'rejected'].includes(group.status);
-            const open = isExpanded(group.order_ref, groupIdx);
+            const open = isExpanded(group.order_ref);
             const productNames = group.items
-              .map((item) => item.products?.[0]?.title)
+              .map((item) => getOrderProduct(item.products)?.title)
               .filter(Boolean)
               .join(', ') || 'Campus purchase';
 
@@ -401,7 +407,7 @@ export default function OrdersPage() {
                     <Package size={12} /> Items in this order
                   </p>
                   {group.items.map((item) => {
-                    const product = item.products?.[0];
+                    const product = getOrderProduct(item.products);
                     return (
                       <div key={item.id} className="flex items-center gap-3 bg-[#faf6f2] border border-[#eee4dc] rounded-2xl p-3">
                         {product?.image_url ? (

@@ -21,8 +21,15 @@ type SellerOrder = {
   delivery_address?: string | null;
   meetup_location: string;
   created_at: string;
-  products?: { id: string; title: string; image_url?: string | null }[] | null;
+  products?: { id: string; title: string; image_url?: string | null }[] | { id: string; title: string; image_url?: string | null } | null;
 };
+
+function getOrderProduct(products: any): { id?: string; title?: string; image_url?: string | null } | null {
+  if (!products) return null;
+  if (Array.isArray(products)) return products[0] || null;
+  if (typeof products === 'object') return products;
+  return null;
+}
 
 export default function SellerOrdersPage() {
   const router = useRouter();
@@ -100,7 +107,7 @@ export default function SellerOrdersPage() {
         if (!error && data) {
           const rows = data as (SellerOrder & { product_id?: string })[];
           const missingProductIds = rows
-            .filter((r) => (!r.products || r.products.length === 0) && r.product_id)
+            .filter((r) => !getOrderProduct(r.products) && r.product_id)
             .map((r) => r.product_id as string);
 
           if (missingProductIds.length > 0) {
@@ -112,7 +119,7 @@ export default function SellerOrdersPage() {
             if (fetchedProducts) {
               const productMap = new Map(fetchedProducts.map((p) => [p.id, p]));
               for (const row of rows) {
-                if ((!row.products || row.products.length === 0) && row.product_id) {
+                if (!getOrderProduct(row.products) && row.product_id) {
                   const p = productMap.get(row.product_id);
                   if (p) row.products = [p];
                 }
@@ -196,7 +203,7 @@ export default function SellerOrdersPage() {
       ) : (
         <div className="space-y-4">
           {orders.map((order) => {
-            const product = order.products?.[0];
+            const product = getOrderProduct(order.products);
             const canPack = order.status === 'in_escrow';
             const canReady = order.status === 'packing';
             const fulfilled = order.status === 'ready_for_pickup' || order.status === 'confirmed' || order.status === 'delivered' || order.status === 'completed';
