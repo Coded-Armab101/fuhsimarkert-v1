@@ -1,3 +1,5 @@
+
+```typescript
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
@@ -6,34 +8,43 @@ import { recordRoleSubscription } from '@/utils/paystack/recordSubscription';
 /**
  * Confirms a role subscription payment and activates the role.
  *
- * Called from the Paystack Inline `onSuccess` callback. The transaction is
- * re-checked against Paystack's API with the secret key, so a fabricated
- * reference cannot unlock a role. The plan is read from the transaction's
- * metadata, which was written server side during /api/subscription/initialize.
+ * Verifies the transaction directly with Paystack before recording
+ * and activating the subscription.
  */
 export async function POST(request: Request) {
   try {
     const supabase = await createClient();
-    const admin = createAdminClient();
+
     const {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser();
 
     if (authError || !user) {
-      return NextResponse.json({ error: 'You must be signed in to subscribe.' }, { status: 401 });
+      return NextResponse.json(
+        { error: 'You must be signed in to subscribe.' },
+        { status: 401 }
+      );
     }
 
     const body = await request.json().catch(() => ({}));
-    const reference = typeof body?.reference === 'string' ? body.reference.trim() : '';
+    const reference =
+      typeof body?.reference === 'string'
+        ? body.reference.trim()
+        : '';
 
     if (!reference) {
-      return NextResponse.json({ error: 'Missing transaction reference.' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Missing transaction reference.' },
+        { status: 400 }
+      );
     }
 
-    if (!process.env.PAYSTACK_SECRET_KEY) {
+    const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
+
+    if (!paystackSecret) {
       return NextResponse.json(
-        { error: 'Payments are not configured on the server (missing PAYSTACK_SECRET_KEY).' },
+        { error: 'Payments are not configured on the server.' },
         { status: 500 }
       );
     }
@@ -42,7 +53,7 @@ export async function POST(request: Request) {
       `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
       {
         headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          Authorization: `Bearer ${paystackSecret}`,
           'Content-Type': 'application/json',
         },
         cache: 'no-store',
@@ -52,39 +63,101 @@ export async function POST(request: Request) {
     const paystackData = await paystackResponse.json();
     const transaction = paystackData?.data;
 
-    if (!paystackResponse.ok || transaction?.status !== 'success') {
-      console.error('Paystack verification failed:', paystackData);
+    if (
+      !paystackResponse.ok ||
+      paystackData?.status !== true ||
+      transaction?.status !== 'success'
+    ) {
+      console.error(
+        '[subscription/verify] Paystack verification failed:',
+        paystackData
+      );
+
       return NextResponse.json(
         { error: 'Paystack could not confirm this payment as successful.' },
         { status: 400 }
       );
     }
 
-    // Paystack sometimes returns metadata as a JSON string.
-    const metadata =
-      typeof transaction.metadata === 'string'
-        ? JSON.parse(transaction.metadata || '{}')
-        : transaction.metadata || {};
+    // Parse transaction metadata safely.
+    let metadata: Record<string, unknown>;
 
-    const userId = metadata.user_id || user.id;
+    try {
+      const parsedMetadata =
+        typeof transaction.metadata === 'string'
+          ? JSON.parse(transaction.metadata || '{}')
+          : transaction.metadata || {};
 
-    if (userId !== user.id) {
+      if (
+        typeof parsedMetadata !== 'object' ||
+        parsedMetadata === null ||
+        Array.isArray(parsedMetadata)
+      ) {
+        throw new Error('Invalid metadata structure');
+      }
+
+      metadata = parsedMetadata as Record<string, unknown>;
+    } catch {
       return NextResponse.json(
-        { error: 'This payment belongs to a different account.' },
+        { error: 'Invalid payment metadata.' },
+        { status: 400 }
+      );
+    }
+
+    // Require explicit ownership; never default a missing user_id to
+    // the currently signed-in user.
+    if (
+      typeof metadata.user_id !== 'string' ||
+      metadata.user_id !== user.id
+    ) {
+      return NextResponse.json(
+        { error: 'This payment does not belong to your account.' },
         { status: 403 }
       );
     }
 
+    if (metadata.purpose !== 'role_subscription') {
+      return NextResponse.json(
+        { error: 'This payment is not a valid role subscription.' },
+        { status: 400 }
+      );
+    }
+
+    if (metadata.plan_type !== 'seller') {
+      return NextResponse.json(
+        { error: 'Invalid subscription plan.' },
+        { status: 400 }
+      );
+    }
+
+    // Paystack amounts are expressed in the currency's smallest unit.
+    // Confirm this value matches the price configured during initialization.
+    const expectedAmount = 150000;
+
+    if (
+      transaction.currency !== 'NGN' ||
+      Number(transaction.amount) !== expectedAmount
+    ) {
+      return NextResponse.json(
+        { error: 'The payment amount or currency is incorrect.' },
+        { status: 400 }
+      );
+    }
+
+    // Create the privileged client only after authenticating the user
+    // and validating the transaction.
+    const admin = createAdminClient();
+
     const result = await recordRoleSubscription(admin, {
       reference,
-      amount: Number(transaction.amount) || 150000,
-      currency: transaction.currency || 'NGN',
+      amount: Number(transaction.amount),
+      currency: transaction.currency,
       metadata: {
+        ...metadata,
         purpose: 'role_subscription',
         user_id: user.id,
         plan_type: 'seller',
         currency: 'NGN',
-        ...metadata,
       },
     });
 
@@ -95,7 +168,15 @@ export async function POST(request: Request) {
       redirectUrl: '/seller/verification',
     });
   } catch (err) {
-    console.error('Subscription verification error:', err);
-    return NextResponse.json({ error: 'Could not verify this payment.' }, { status: 500 });
+    console.error(
+      '[subscription/verify] Subscription verification error:',
+      err
+    );
+
+    return NextResponse.json(
+      { error: 'Could not verify or activate this subscription.' },
+      { status: 500 }
+    );
   }
 }
+```

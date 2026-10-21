@@ -44,108 +44,13 @@ type Product = {
   created_at: string;
   stock?: number | null;
 };
+const isAvailable = (p: Product) =>
+  p.stock === null || p.stock === undefined || p.stock > 0;
 
-const isAvailable = (p: Product) => p.stock === null || p.stock === undefined || p.stock > 0;
-const stockLimit = (p: Product) => (p.stock === null || p.stock === undefined ? Infinity : Number(p.stock) || 0);
-
-const DEFAULT_CAMPUS_PRODUCTS: Product[] = [
-  {
-    id: 'demo-1',
-    title: 'Anker Power Bank 20,000mAh PowerCore Fast Charge',
-    description: 'Essential for lecture days and hostel power outages. Dual USB output, fast charging.',
-    price: 18500,
-    category: 'Tech & Gadgets',
-    hostel_location: 'Medical Hostel B',
-    seller_id: 'demo-seller',
-    created_at: new Date().toISOString(),
-    stock: 5,
-    image_url: 'https://images.unsplash.com/photo-1609592424109-dd9892f1b177?w=600&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'demo-2',
-    title: 'Medical Physiology Textbook (14th Edition, Guyton & Hall)',
-    description: 'Clean medical textbook with no highlights or missing pages. Perfect for 200/300L med students.',
-    price: 12000,
-    category: 'Books',
-    hostel_location: 'Block A, Male Hostel',
-    seller_id: 'demo-seller',
-    created_at: new Date(Date.now() - 3600000).toISOString(),
-    stock: 2,
-    image_url: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'demo-3',
-    title: 'Rechargeable Mini Desk Fan with LED Light',
-    description: 'Quiet 3-speed brushless motor, 4000mAh battery lasts up to 8 hours on low.',
-    price: 8500,
-    category: 'Campus Essentials',
-    hostel_location: 'Female Hostel C',
-    seller_id: 'demo-seller',
-    created_at: new Date(Date.now() - 7200000).toISOString(),
-    stock: 8,
-    image_url: 'https://images.unsplash.com/photo-1618941723628-e2743388762d?w=600&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'demo-4',
-    title: 'Nike Air Force 1 Low White (Size 43)',
-    description: 'Lightly worn campus sneakers, clean soles and original box included.',
-    price: 24000,
-    category: 'Fashion',
-    hostel_location: 'New Extension Hostel',
-    seller_id: 'demo-seller',
-    created_at: new Date(Date.now() - 10800000).toISOString(),
-    stock: 1,
-    image_url: 'https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?w=600&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'demo-5',
-    title: '1.5L Electric Cooking Kettle / Boiling Pot',
-    description: 'Stainless steel interior, fast boiling, auto shutoff. Perfect for instant noodles and tea.',
-    price: 9500,
-    category: 'Campus Essentials',
-    hostel_location: 'Postgraduate Hall',
-    seller_id: 'demo-seller',
-    created_at: new Date(Date.now() - 14400000).toISOString(),
-    stock: 4,
-    image_url: 'https://images.unsplash.com/photo-1594212699903-ec8a3eca50f6?w=600&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'demo-6',
-    title: 'Crunchy Homemade Chocolate Cookies (Box of 12)',
-    description: 'Freshly baked daily on campus. Rich chocolate chips and butter crunch.',
-    price: 3500,
-    category: 'Food & Snacks',
-    hostel_location: 'Campus Cafeteria Area',
-    seller_id: 'demo-seller',
-    created_at: new Date(Date.now() - 18000000).toISOString(),
-    stock: 15,
-    image_url: 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=600&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'demo-7',
-    title: 'Apple AirPods Pro 2nd Gen (Active Noise Cancellation)',
-    description: 'Clean wireless earbuds with MagSafe charging case and spare silicone tips.',
-    price: 45000,
-    category: 'Tech & Gadgets',
-    hostel_location: 'Block D, Male Hostel',
-    seller_id: 'demo-seller',
-    created_at: new Date(Date.now() - 21600000).toISOString(),
-    stock: 2,
-    image_url: 'https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?w=600&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'demo-8',
-    title: 'Ergonomic Mesh Study Chair with Lumbar Support',
-    description: 'Comfy height-adjustable chair for long night reading sessions.',
-    price: 16000,
-    category: 'Campus Essentials',
-    hostel_location: 'Staff Quarters Gate',
-    seller_id: 'demo-seller',
-    created_at: new Date(Date.now() - 25200000).toISOString(),
-    stock: 3,
-    image_url: 'https://images.unsplash.com/photo-1580481072645-022f9a6d1270?w=600&auto=format&fit=crop&q=80',
-  },
-];
+const stockLimit = (p: Product) =>
+  p.stock === null || p.stock === undefined
+    ? Infinity
+    : Number(p.stock) || 0;
 
 function ProductCard({
   product,
@@ -317,36 +222,51 @@ export default function JumiaLandingPage() {
   useEffect(() => {
     const fetchProducts = async () => {
       setLoading(true);
-      try {
-        let query = supabase
-          .from('products')
-          .select('*')
-          .or('is_available.eq.true,is_available.is.null')
-          .order('created_at', { ascending: false });
 
-        if (search.trim()) {
-          query = query.ilike('title', `%${search.trim()}%`);
-        }
+  try {
+    let query = supabase
+      .from('products')
+      .select('*')
+      .eq('is_available', true)
+      .order('created_at', { ascending: false });
 
-        const { data, error } = await query;
+    if (search.trim()) {
+      query = query.ilike('title', `%${search.trim()}%`);
+    }
 
-        if (error || !data || data.length === 0) {
-          const matchedFallback = search.trim()
-            ? DEFAULT_CAMPUS_PRODUCTS.filter((p) =>
-                p.title.toLowerCase().includes(search.trim().toLowerCase())
-              )
-            : DEFAULT_CAMPUS_PRODUCTS;
-          setProducts(matchedFallback);
-        } else {
-          setProducts(data as Product[]);
-        }
-      } catch (err) {
-        console.error('Failed to fetch landing products:', err);
-        setProducts(DEFAULT_CAMPUS_PRODUCTS);
-      } finally {
-        setLoading(false);
-      }
-    };
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Failed to fetch landing products:', error);
+
+      // Use demo products only when the database request fails.
+      const matchedFallback = search.trim()
+        ? DEFAULT_CAMPUS_PRODUCTS.filter((p) =>
+            p.title.toLowerCase().includes(search.trim().toLowerCase())
+          )
+        : DEFAULT_CAMPUS_PRODUCTS;
+
+      setProducts(matchedFallback);
+      return;
+    }
+
+    // An empty database result should remain empty rather than
+    // presenting demo products as real marketplace listings.
+    setProducts((data as Product[]) || []);
+  } catch (err) {
+    console.error('Failed to fetch landing products:', err);
+
+    const matchedFallback = search.trim()
+      ? DEFAULT_CAMPUS_PRODUCTS.filter((p) =>
+          p.title.toLowerCase().includes(search.trim().toLowerCase())
+        )
+      : DEFAULT_CAMPUS_PRODUCTS;
+
+    setProducts(matchedFallback);
+  } finally {
+    setLoading(false);
+  }
+};
 
     const timer = setTimeout(fetchProducts, 250);
     return () => clearTimeout(timer);
