@@ -58,9 +58,9 @@ export async function GET(request: Request) {
         : transaction.metadata || {};
       const productIds = Array.isArray(metadata.product_ids) ? metadata.product_ids : [];
       const items = Array.isArray(metadata.checkout_items) ? metadata.checkout_items.map((item: any) => ({
-        productId: item?.product_id,
+        productId: item?.product_id ?? item?.productId,
         quantity: Number(item?.quantity),
-        unitPriceKobo: Number(item?.unit_price_kobo),
+        unitPriceKobo: Number(item?.unit_price_kobo ?? item?.unitPriceKobo),
       })) : [];
       const expectedTotalKobo = Number(metadata.expected_total_kobo);
       const walletKobo = Number(metadata.wallet_kobo) > 0 ? Number(metadata.wallet_kobo) : 0;

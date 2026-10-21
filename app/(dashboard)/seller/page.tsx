@@ -3,12 +3,13 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
-import { Store, PackagePlus, ShoppingBag, TrendingUp } from 'lucide-react';
+import { Store, PackagePlus, ShoppingBag, TrendingUp, Clock } from 'lucide-react';
 import { formatNaira } from '@/utils/money';
 
 type Profile = {
   full_name?: string | null;
   is_seller?: boolean | null;
+  subscription_expires_at?: string | null;
 };
 
 export default function SellerPage() {
@@ -119,13 +120,45 @@ export default function SellerPage() {
           <div className="text-2xl font-black text-[#251d18]">{productCount}</div>
         </div>
 
-        <div className="bg-white border border-[#eee4dc] p-5 rounded-2xl space-y-2 shadow-sm">
-          <div className="flex justify-between items-center text-[#81756d] text-xs">
-            <span>Subscription</span>
-            <Store size={16} className="text-[#17805b]" />
-          </div>
-          <div className="text-sm font-bold text-[#17805b] uppercase">ACTIVE</div>
-        </div>
+        {(() => {
+          const expiresAtDate = profile?.subscription_expires_at
+            ? new Date(profile.subscription_expires_at)
+            : null;
+          const isValidDate = expiresAtDate && !Number.isNaN(expiresAtDate.getTime());
+          const daysLeft = isValidDate
+            ? Math.ceil((expiresAtDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+            : null;
+          const isExpiringSoon = daysLeft !== null && daysLeft <= 7;
+          const formattedExpiry = isValidDate
+            ? expiresAtDate.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })
+            : null;
+
+          return (
+            <div className="bg-white border border-[#eee4dc] p-5 rounded-2xl space-y-2 shadow-sm">
+              <div className="flex justify-between items-center text-[#81756d] text-xs">
+                <span>Subscription</span>
+                <Clock size={16} className={isExpiringSoon ? 'text-amber-500' : 'text-[#17805b]'} />
+              </div>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`text-xs font-mono font-bold px-2.5 py-0.5 rounded uppercase ${
+                    isExpiringSoon
+                      ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                      : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                  }`}
+                >
+                  {isExpiringSoon ? 'Expiring Soon' : 'Active'}
+                </span>
+              </div>
+              {formattedExpiry && (
+                <p className="text-[10px] text-[#81756d] font-mono mt-1">
+                  Expires on <strong className="text-[#251d18]">{formattedExpiry}</strong>
+                  {daysLeft !== null && ` (${daysLeft} day${daysLeft === 1 ? '' : 's'} left)`}
+                </p>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

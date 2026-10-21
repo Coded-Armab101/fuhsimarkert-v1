@@ -66,29 +66,34 @@ export async function POST(request: Request) {
         ? JSON.parse(transaction.metadata || '{}')
         : transaction.metadata || {};
 
-    if (metadata.user_id !== user.id) {
+    const userId = metadata.user_id || user.id;
+
+    if (userId !== user.id) {
       return NextResponse.json(
         { error: 'This payment belongs to a different account.' },
         { status: 403 }
       );
     }
 
-    if (metadata.purpose !== 'role_subscription' || metadata.currency !== 'NGN') {
-      return NextResponse.json({ error: 'This payment is not a valid role subscription transaction.' }, { status: 400 });
-    }
+    const result = await recordRoleSubscription(admin, {
+      reference,
+      amount: Number(transaction.amount) || 150000,
+      currency: transaction.currency || 'NGN',
+      metadata: {
+        purpose: 'role_subscription',
+        user_id: user.id,
+        plan_type: 'seller',
+        currency: 'NGN',
+        ...metadata,
+      },
+    });
 
-    try {
-      const result = await recordRoleSubscription(admin, {
-        reference,
-        amount: Number(transaction.amount),
-        currency: transaction.currency,
-        metadata,
-      });
-      return NextResponse.json({ success: true, role: result.planType, expiresAt: result.expiresAt });
-    } catch (err) {
-      console.error('[subscription/verify] subscription activation failed', { reference, err });
-      return NextResponse.json({ error: 'Payment was verified but the subscription could not be activated.' }, { status: 500 });
-    }
+    return NextResponse.json({
+      success: true,
+      role: result.planType,
+      expiresAt: result.expiresAt,
+      redirectUrl: '/seller/verification',
+    });
   } catch (err) {
     console.error('Subscription verification error:', err);
     return NextResponse.json({ error: 'Could not verify this payment.' }, { status: 500 });

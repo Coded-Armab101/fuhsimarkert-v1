@@ -2,8 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes } from 'lucide-react';
+import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes, ChevronDown, ChevronUp } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
+import { useCart } from '@/context/CartContext';
 import { formatNaira } from '@/utils/money';
 import DeliveryAnnouncement from '../DeliveryAnnouncement';
 
@@ -25,8 +26,15 @@ type BuyerOrderRow = {
   delivery_address?: string | null;
   meetup_location?: string | null;
   created_at: string;
-  products?: { id: string; title: string; image_url?: string | null }[] | null;
+  products?: { id: string; title: string; image_url?: string | null }[] | { id: string; title: string; image_url?: string | null } | null;
 };
+
+function getOrderProduct(products: any): { id?: string; title?: string; image_url?: string | null } | null {
+  if (!products) return null;
+  if (Array.isArray(products)) return products[0] || null;
+  if (typeof products === 'object') return products;
+  return null;
+}
 
 type OrderGroup = {
   order_ref: string;
@@ -60,20 +68,67 @@ const isOldFinishedOrder = (group: OrderGroup) => {
 
 export default function OrdersPage() {
   const supabase = createClient();
+  const { clearCart } = useCart();
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<OrderGroup[]>([]);
   const [updatingRef, setUpdatingRef] = useState<string | null>(null);
+  const [paymentNotice, setPaymentNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
+  const [expandedRefs, setExpandedRefs] = useState<Record<string, boolean>>({});
+
+  const toggleExpand = (ref: string) => {
+    setExpandedRefs((prev) => ({
+      ...prev,
+      [ref]: !prev[ref],
+    }));
+  };
+
+  const isExpanded = (ref: string) => {
+    return expandedRefs[ref] === true;
+  };
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const reference = url.searchParams.get('reference') || url.searchParams.get('trxref');
+    if (!reference) return;
+
+    url.searchParams.delete('reference');
+    url.searchParams.delete('trxref');
+    window.history.replaceState(null, '', url.toString());
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/paystack/verify?reference=${encodeURIComponent(reference)}`);
+        const data = await res.json();
+
+        if (res.ok && data.status === 'success') {
+          clearCart();
+          setPaymentNotice({
+            kind: 'success',
+            message: 'Payment confirmed! Your order has been placed into escrow.',
+          });
+        } else if (res.ok && (data.status === 'failed' || data.status === 'abandoned')) {
+          setPaymentNotice({
+            kind: 'error',
+            message: 'Payment was cancelled or failed.',
+          });
+        }
+      } catch {
+        /* ignore network error */
+      }
+    })();
+  }, [clearCart]);
 
   useEffect(() => {
     const fetchBuyerOrders = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('orders')
           .select(`
             id,
             buyer_id,
             seller_id,
+            product_id,
             amount_kobo,
             delivery_fee_kobo,
             platform_fee_kobo,
@@ -88,14 +143,66 @@ export default function OrdersPage() {
             delivery_address,
             meetup_location,
             created_at,
-            products ( id, title, image_url )
+            products:product_id ( id, title, image_url )
           `)
           .eq('buyer_id', user.id)
           .order('created_at', { ascending: false });
 
+        if (error) {
+          const fallbackRes = await supabase
+            .from('orders')
+            .select(`
+              id,
+              buyer_id,
+              seller_id,
+              product_id,
+              amount_kobo,
+              delivery_fee_kobo,
+              platform_fee_kobo,
+              quantity,
+              status,
+              order_ref,
+              delivery_code,
+              delivery_type,
+              receiver_name,
+              receiver_phone,
+              matric_number,
+              delivery_address,
+              meetup_location,
+              created_at
+            `)
+            .eq('buyer_id', user.id)
+            .order('created_at', { ascending: false });
+
+          if (!fallbackRes.error && fallbackRes.data) {
+            data = fallbackRes.data as any;
+            error = null;
+          }
+        }
+
         if (!error && data) {
-          // Group all rows that share an order_ref into one "combined order".
-          const rows = data as BuyerOrderRow[];
+          const rows = data as (BuyerOrderRow & { product_id?: string })[];
+
+          const missingProductIds = rows
+            .filter((r) => !getOrderProduct(r.products) && r.product_id)
+            .map((r) => r.product_id as string);
+
+          if (missingProductIds.length > 0) {
+            const { data: fetchedProducts } = await supabase
+              .from('products')
+              .select('id, title, image_url')
+              .in('id', missingProductIds);
+
+            if (fetchedProducts) {
+              const productMap = new Map(fetchedProducts.map((p) => [p.id, p]));
+              for (const row of rows) {
+                if (!getOrderProduct(row.products) && row.product_id) {
+                  const p = productMap.get(row.product_id);
+                  if (p) row.products = [p];
+                }
+              }
+            }
+          }
           const byRef = new Map<string, OrderGroup>();
           for (const row of rows) {
             const ref = row.order_ref || row.id;
@@ -127,6 +234,16 @@ export default function OrdersPage() {
               if (rank(row.status) < rank(existing.status)) existing.status = row.status;
             }
           }
+          // Mark all current order statuses as seen by the buyer so the notification badge clears
+          try {
+            const key = 'fuhsi_order_notifications_buyer';
+            const read = JSON.parse(localStorage.getItem(key) || '{}') as Record<string, string>;
+            for (const row of rows) {
+              read[row.id] = row.status;
+            }
+            localStorage.setItem(key, JSON.stringify(read));
+          } catch { /* ignore storage errors */ }
+
           // Keep the database record for refunds/support, but keep the buyer's
           // list tidy: completed, cancelled, and rejected orders leave this
           // screen after seven days.
@@ -183,6 +300,20 @@ export default function OrdersPage() {
       <Link href="/buyer" className="inline-flex items-center gap-2 text-xs font-bold text-[#81756d] hover:text-[#d8552e]">← Back to home</Link>
       <DeliveryAnnouncement />
 
+      {paymentNotice && (
+        <div
+          role="status"
+          className={`rounded-2xl border p-4 flex items-center gap-3 text-xs font-mono ${
+            paymentNotice.kind === 'success'
+              ? 'bg-[#e8f7ef] border-[#cdeeda] text-[#0f6b4a]'
+              : 'bg-[#fff0e9] border-[#ffd9c4] text-[#b04a27]'
+          }`}
+        >
+          <CheckCircle2 size={18} className="flex-shrink-0" />
+          <span>{paymentNotice.message}</span>
+        </div>
+      )}
+
       <div className="bg-white border border-[#eee4dc] rounded-[1.75rem] p-6 shadow-sm">
 <h1 className="text-xl font-black text-[#251d18] flex items-center gap-2">
           <CreditCard className="text-[#ef6b3b]" /> Your orders
@@ -197,40 +328,61 @@ export default function OrdersPage() {
           No orders yet. When you buy something, its delivery updates will show here.
         </div>
       ) : (
-        <div className="space-y-6">
-          {groups.map((group) => {
+        <div className="space-y-4 max-w-2xl">
+          {groups.map((group, groupIdx) => {
             const statusIndex = TRACK_STEPS.indexOf(group.status);
             const isDelivered = ['confirmed', 'delivered', 'completed'].includes(group.status);
             const isDisputed = group.status === 'disputed';
             const canConfirm = group.status === 'ready_for_pickup';
             const isTerminal = ['completed', 'confirmed', 'delivered', 'cancelled', 'rejected'].includes(group.status);
+            const open = isExpanded(group.order_ref);
+            const productNames = group.items
+              .map((item) => getOrderProduct(item.products)?.title)
+              .filter(Boolean)
+              .join(', ') || 'Campus purchase';
 
             return (
-              <div key={group.order_ref} className="bg-white border border-[#eee4dc] rounded-[1.75rem] p-5 max-w-2xl space-y-5 shadow-sm">
-                {/* SUMMARY */}
-                <div className="flex justify-between items-start border-b border-[#f0e9e2] pb-4">
+              <div key={group.order_ref} className="bg-white border border-[#eee4dc] rounded-[1.75rem] p-5 space-y-4 shadow-sm transition-all">
+                {/* SUMMARY BAR */}
+                <div className="flex justify-between items-start">
                   <div className="space-y-1">
-                    <span className={`text-[10px] font-mono px-2.5 py-1 rounded border uppercase tracking-wider font-bold ${
-                      isDisputed
-                        ? 'bg-[#fff0e9] border-[#ffd9c4] text-[#b04a27]'
-                        : isTerminal
-                          ? 'bg-[#e8f7ef] border-[#cdeeda] text-[#17805b]'
-                          : 'bg-[#fff7e8] border-[#f2e0b8] text-[#8a650f]'
-                    }`}>
-                      {group.status === 'rejected' ? 'Order not accepted' : group.status.replace(/_/g, ' ')}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-mono px-2.5 py-1 rounded border uppercase tracking-wider font-bold ${
+                        isDisputed
+                          ? 'bg-[#fff0e9] border-[#ffd9c4] text-[#b04a27]'
+                          : isTerminal
+                            ? 'bg-[#e8f7ef] border-[#cdeeda] text-[#17805b]'
+                            : 'bg-[#fff7e8] border-[#f2e0b8] text-[#8a650f]'
+                      }`}>
+                        {group.status === 'rejected' ? 'Order not accepted' : group.status.replace(/_/g, ' ')}
+                      </span>
+
+                      <button
+                        onClick={() => toggleExpand(group.order_ref)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#faf6f2] hover:bg-[#fff0e9] text-[11px] font-bold text-[#d8552e] border border-[#eee4dc] transition-all cursor-pointer"
+                        aria-label={open ? 'Hide order details' : 'Show order details'}
+                      >
+                        <span>{open ? 'Hide order details' : 'Order details'}</span>
+                        {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                      </button>
+                    </div>
+
+                    {/* PRODUCT NAME */}
+                    <p className="text-xs font-bold text-[#251d18] truncate max-w-xs sm:max-w-md pt-1">
+                      {productNames}
+                    </p>
 
                     {/* THE HANDOFF CODE */}
-                    <div className="mt-3 flex items-center gap-2">
+                    <div className="mt-1 flex items-center gap-2">
                       <Boxes size={18} className="text-[#ef6b3b]" />
                       <div>
-                        <p className="text-[10px] font-mono uppercase tracking-wider text-[#81756d]">Show this code at delivery</p>
-                        <p className="text-2xl font-black font-mono text-[#251d18] tracking-widest">{group.delivery_code}</p>
+                        <p className="text-[10px] font-mono uppercase tracking-wider text-[#81756d]">Code for delivery</p>
+                        <p className="text-xl sm:text-2xl font-black font-mono text-[#251d18] tracking-widest">{group.delivery_code}</p>
                       </div>
                     </div>
 
-                    <p className="text-[10px] font-mono text-[#9d9188] mt-1">
-                      {group.items.length} item{group.items.length === 1 ? '' : 's'} · {group.order_ref?.slice(0, 8)}
+                    <p className="text-[10px] font-mono text-[#9d9188] mt-0.5">
+                      {group.items.length} item{group.items.length === 1 ? '' : 's'} · Order ID: {group.order_ref?.slice(0, 8)}
                     </p>
                   </div>
 
@@ -246,13 +398,16 @@ export default function OrdersPage() {
                   </div>
                 </div>
 
-                {/* ITEM LIST (all sellers' items in this combined order) */}
+                {/* EXPANDABLE DROPDOWN DETAILS */}
+                {open && (
+                  <div className="space-y-4 pt-3 border-t border-[#f0e9e2] animate-in fade-in duration-200">
+                    {/* ITEM LIST (all sellers' items in this combined order) */}
                 <div className="space-y-2">
                     <p className="text-[10px] font-mono uppercase tracking-wider text-[#81756d] flex items-center gap-1">
                     <Package size={12} /> Items in this order
                   </p>
                   {group.items.map((item) => {
-                    const product = item.products?.[0];
+                    const product = getOrderProduct(item.products);
                     return (
                       <div key={item.id} className="flex items-center gap-3 bg-[#faf6f2] border border-[#eee4dc] rounded-2xl p-3">
                         {product?.image_url ? (
@@ -348,6 +503,8 @@ export default function OrdersPage() {
                 {isDisputed && (
                   <div className="p-4 bg-[#fff0e9] border border-[#ffd9c4] text-[#b04a27] text-xs rounded-xl text-center font-medium font-mono">
                     <AlertTriangle size={16} className="inline mr-1" /> We are checking this order. Your money is still protected.
+                  </div>
+                )}
                   </div>
                 )}
               </div>
