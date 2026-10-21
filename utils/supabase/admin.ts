@@ -1,39 +1,47 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 /**
- * Supabase client authenticated with the **service role key**.
+ * Supabase admin client authenticated with the service role key.
  *
- * This client BYPASSES Row Level Security entirely. It exists for one reason:
- * server-to-server callers that carry no user session, i.e. the Paystack
- * webhook. A webhook POST has no cookies, so the cookie-based client in
- * `./server.ts` runs as `anon` and — correctly — cannot write anything.
+ * Server-side only. This client bypasses Row Level Security (RLS).
+ * Use it only for trusted server-side operations, such as Paystack
+ * webhook processing and verified subscription activation.
  *
- * Rules:
- *  - Never import this file from a Client Component or anything reachable from
- *    one. The guard below is a tripwire, not a substitute for care.
- *  - Never expose the key as `NEXT_PUBLIC_*`.
- *  - Scope every query yourself. RLS will not save you here.
+ * Never expose SUPABASE_SERVICE_ROLE_KEY to client-side code.
+ * Explicitly scope database queries because RLS does not protect
+ * operations performed with this key.
  */
 
 if (typeof window !== 'undefined') {
   throw new Error(
-    'utils/supabase/admin.ts was imported into client code. This would leak the ' +
-      'service role key to the browser. Import utils/supabase.ts instead.',
+    'utils/supabase/admin.ts was imported into client code. ' +
+      'This would expose the service role key to the browser. ' +
+      'Import utils/supabase.ts instead.',
   );
 }
 
 export function createAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!serviceRoleKey && typeof window === 'undefined' && process.env.NODE_ENV === 'production') {
-    console.warn('[SUPABASE_SERVICE_ROLE_KEY] Missing service role key for admin client.');
+  if (!url) {
+    throw new Error(
+      'Missing NEXT_PUBLIC_SUPABASE_URL environment variable.',
+    );
   }
 
-  return createSupabaseClient(url, serviceRoleKey || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder', {
+  if (!serviceRoleKey) {
+    throw new Error(
+      'Missing SUPABASE_SERVICE_ROLE_KEY environment variable. ' +
+        'The Supabase admin client cannot be initialized safely.',
+    );
+  }
+
+  return createSupabaseClient(url, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
   });
 }
+

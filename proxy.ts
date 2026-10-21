@@ -126,7 +126,7 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
-  if (GUEST_ONLY.includes(pathname)) {
+  if (GUEST_ONLY.includes(pathname) || pathname === '/') {
     const home = request.nextUrl.clone();
     home.pathname = '/buyer';
     home.search = '';
