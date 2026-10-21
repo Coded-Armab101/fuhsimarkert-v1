@@ -44,9 +44,13 @@ type Product = {
   created_at: string;
   stock?: number | null;
 };
+const isAvailable = (p: Product) =>
+  p.stock === null || p.stock === undefined || p.stock > 0;
 
-const isAvailable = (p: Product) => p.stock === null || p.stock === undefined || p.stock > 0;
-const stockLimit = (p: Product) => (p.stock === null || p.stock === undefined ? Infinity : Number(p.stock) || 0);
+const stockLimit = (p: Product) =>
+  p.stock === null || p.stock === undefined
+    ? Infinity
+    : Number(p.stock) || 0;
 
 function ProductCard({
   product,
@@ -218,16 +222,51 @@ export default function JumiaLandingPage() {
   useEffect(() => {
     const fetchProducts = async () => {
       setLoading(true);
-      let query = supabase.from('products').select('*').eq('is_available', true).order('created_at', { ascending: false });
 
-      if (search.trim()) {
-        query = query.ilike('title', `%${search.trim()}%`);
-      }
+  try {
+    let query = supabase
+      .from('products')
+      .select('*')
+      .eq('is_available', true)
+      .order('created_at', { ascending: false });
 
-      const { data } = await query;
-      setProducts((data as Product[]) || []);
-      setLoading(false);
-    };
+    if (search.trim()) {
+      query = query.ilike('title', `%${search.trim()}%`);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Failed to fetch landing products:', error);
+
+      // Use demo products only when the database request fails.
+      const matchedFallback = search.trim()
+        ? DEFAULT_CAMPUS_PRODUCTS.filter((p) =>
+            p.title.toLowerCase().includes(search.trim().toLowerCase())
+          )
+        : DEFAULT_CAMPUS_PRODUCTS;
+
+      setProducts(matchedFallback);
+      return;
+    }
+
+    // An empty database result should remain empty rather than
+    // presenting demo products as real marketplace listings.
+    setProducts((data as Product[]) || []);
+  } catch (err) {
+    console.error('Failed to fetch landing products:', err);
+
+    const matchedFallback = search.trim()
+      ? DEFAULT_CAMPUS_PRODUCTS.filter((p) =>
+          p.title.toLowerCase().includes(search.trim().toLowerCase())
+        )
+      : DEFAULT_CAMPUS_PRODUCTS;
+
+    setProducts(matchedFallback);
+  } finally {
+    setLoading(false);
+  }
+};
 
     const timer = setTimeout(fetchProducts, 250);
     return () => clearTimeout(timer);

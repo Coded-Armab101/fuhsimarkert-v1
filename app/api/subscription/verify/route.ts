@@ -1,4 +1,5 @@
 
+```typescript
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
@@ -7,14 +8,12 @@ import { recordRoleSubscription } from '@/utils/paystack/recordSubscription';
 /**
  * Confirms a role subscription payment and activates the role.
  *
- * Called from the Paystack Inline onSuccess callback.
- * The transaction is verified directly against Paystack before
- * the subscription is recorded and activated.
+ * Verifies the transaction directly with Paystack before recording
+ * and activating the subscription.
  */
 export async function POST(request: Request) {
   try {
     const supabase = await createClient();
-    const admin = createAdminClient();
 
     const {
       data: { user },
@@ -41,12 +40,11 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!process.env.PAYSTACK_SECRET_KEY) {
+    const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
+
+    if (!paystackSecret) {
       return NextResponse.json(
-        {
-          error:
-            'Payments are not configured on the server (missing PAYSTACK_SECRET_KEY).',
-        },
+        { error: 'Payments are not configured on the server.' },
         { status: 500 }
       );
     }
@@ -55,7 +53,7 @@ export async function POST(request: Request) {
       `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
       {
         headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          Authorization: `Bearer ${paystackSecret}`,
           'Content-Type': 'application/json',
         },
         cache: 'no-store',
@@ -76,22 +74,29 @@ export async function POST(request: Request) {
       );
 
       return NextResponse.json(
-        {
-          error:
-            'Paystack could not confirm this payment as successful.',
-        },
+        { error: 'Paystack could not confirm this payment as successful.' },
         { status: 400 }
       );
     }
 
-    // Paystack may return metadata as a JSON string.
-    let metadata: Record<string, any>;
+    // Parse transaction metadata safely.
+    let metadata: Record<string, unknown>;
 
     try {
-      metadata =
+      const parsedMetadata =
         typeof transaction.metadata === 'string'
           ? JSON.parse(transaction.metadata || '{}')
           : transaction.metadata || {};
+
+      if (
+        typeof parsedMetadata !== 'object' ||
+        parsedMetadata === null ||
+        Array.isArray(parsedMetadata)
+      ) {
+        throw new Error('Invalid metadata structure');
+      }
+
+      metadata = parsedMetadata as Record<string, unknown>;
     } catch {
       return NextResponse.json(
         { error: 'Invalid payment metadata.' },
@@ -99,16 +104,18 @@ export async function POST(request: Request) {
       );
     }
 
-    const userId = metadata.user_id;
-
-    if (!userId || userId !== user.id) {
+    // Require explicit ownership; never default a missing user_id to
+    // the currently signed-in user.
+    if (
+      typeof metadata.user_id !== 'string' ||
+      metadata.user_id !== user.id
+    ) {
       return NextResponse.json(
         { error: 'This payment does not belong to your account.' },
         { status: 403 }
       );
     }
 
-    // Verify the payment is for the expected subscription.
     if (metadata.purpose !== 'role_subscription') {
       return NextResponse.json(
         { error: 'This payment is not a valid role subscription.' },
@@ -123,8 +130,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // Never activate a subscription using an assumed amount.
-    // Paystack reports transaction.amount in the smallest currency unit.
+    // Paystack amounts are expressed in the currency's smallest unit.
+    // Confirm this value matches the price configured during initialization.
     const expectedAmount = 150000;
 
     if (
@@ -137,9 +144,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // Record the verified payment and activate the subscription.
-    // If this fails, return an error instead of granting access
-    // without a confirmed subscription record.
+    // Create the privileged client only after authenticating the user
+    // and validating the transaction.
+    const admin = createAdminClient();
+
     const result = await recordRoleSubscription(admin, {
       reference,
       amount: Number(transaction.amount),
@@ -171,4 +179,4 @@ export async function POST(request: Request) {
     );
   }
 }
-
+```

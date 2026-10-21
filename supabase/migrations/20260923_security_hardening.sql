@@ -221,9 +221,9 @@ begin
   end loop;
 end $$;
 
-create policy products_select_authenticated on public.products
-  for select to authenticated
-  using (is_available = true or seller_id = auth.uid());
+create policy products_select_public on public.products
+  for select to public
+  using (is_available = true or is_available is null or (auth.role() = 'authenticated' and seller_id = auth.uid()));
 create policy products_insert_owner on public.products
   for insert to authenticated
   with check (
