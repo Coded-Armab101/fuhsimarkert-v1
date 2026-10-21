@@ -44,6 +44,14 @@ export async function recordRoleSubscription(
 
   if (existing) {
     if (existing.user_id !== userId) throw new Error('subscription reference belongs to another account');
+    await admin.from('profiles').update({
+      user_persona: planType,
+      is_seller: true,
+      seller_active: true,
+      subscription_expires_at: existing.expires_at,
+      updated_at: new Date().toISOString(),
+    }).eq('id', userId);
+
     return {
       userId,
       planType: existing.plan_type as keyof typeof ROLE_PLANS,
@@ -70,10 +78,26 @@ export async function recordRoleSubscription(
       .eq('reference', reference)
       .maybeSingle();
     if (raced && raced.user_id === userId) {
+      await admin.from('profiles').update({
+        user_persona: planType,
+        is_seller: true,
+        seller_active: true,
+        subscription_expires_at: raced.expires_at,
+        updated_at: new Date().toISOString(),
+      }).eq('id', userId);
       return { userId, planType: raced.plan_type as keyof typeof ROLE_PLANS, expiresAt: raced.expires_at, alreadyRecorded: true };
     }
     throw ledgerError;
   }
+
+  const { data: existingProfile } = await admin
+    .from('profiles')
+    .select('is_approved_seller, verification_status')
+    .eq('id', userId)
+    .maybeSingle();
+
+  const isApproved = existingProfile?.is_approved_seller === true;
+  const verStatus = existingProfile?.verification_status || 'pending';
 
   const { error: profileError } = await admin.from('profiles').upsert({
     id: userId,
@@ -81,11 +105,27 @@ export async function recordRoleSubscription(
     is_seller: true,
     seller_active: true,
     subscription_expires_at: expiresAt,
-    is_approved_seller: false,
-    verification_status: 'pending',
+    is_approved_seller: isApproved,
+    verification_status: verStatus,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'id' });
-  if (profileError) throw profileError;
+
+  if (profileError) {
+    const { error: updateError } = await admin
+      .from('profiles')
+      .update({
+        user_persona: planType,
+        is_seller: true,
+        seller_active: true,
+        subscription_expires_at: expiresAt,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (updateError) {
+      console.error('[recordRoleSubscription] profile update error:', updateError);
+    }
+  }
 
   return { userId, planType, expiresAt, alreadyRecorded: false };
 }

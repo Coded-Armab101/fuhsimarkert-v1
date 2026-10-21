@@ -38,6 +38,66 @@ $$;
 revoke execute on function public.decrement_product_stock(uuid, integer) from public, anon, authenticated;
 grant execute on function public.decrement_product_stock(uuid, integer) to service_role;
 
+-- 1b) Atomic wallet debit for wallet payments/purchases.
+-- 1b) Atomic wallet debit for wallet payments/purchases. Auto-provisions wallet row if absent.
+create or replace function public.debit_wallet(
+  p_user_id uuid,
+  p_order_ref text,
+  p_amount_kobo bigint
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  updated_rows integer;
+begin
+  if p_amount_kobo is null or p_amount_kobo <= 0 then
+    raise exception 'invalid debit amount';
+  end if;
+
+  insert into public.wallets (user_id, balance)
+  values (p_user_id, 0)
+  on conflict (user_id) do nothing;
+
+  update public.wallets
+     set balance = balance - p_amount_kobo
+   where user_id = p_user_id
+     and balance >= p_amount_kobo;
+
+  get diagnostics updated_rows = row_count;
+  if updated_rows = 0 then
+    return false;
+  end if;
+
+  return true;
+end;
+$$;
+
+revoke execute on function public.debit_wallet(uuid, text, bigint) from public, anon, authenticated;
+grant execute on function public.debit_wallet(uuid, text, bigint) to service_role;
+
+-- 1c) Auto-create wallet row whenever a user profile is created.
+create or replace function public.ensure_user_wallet()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.wallets (user_id, balance)
+  values (new.id, 0)
+  on conflict (user_id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists ensure_user_wallet on public.profiles;
+create trigger ensure_user_wallet
+after insert on public.profiles
+for each row execute function public.ensure_user_wallet();
+
 -- 2) Atomic seller withdrawal creation. The balance deduction and withdrawal
 -- row are one database transaction, so a failed insert cannot strand funds.
 create or replace function public.create_seller_withdrawal(
@@ -161,9 +221,9 @@ begin
   end loop;
 end $$;
 
-create policy products_select_authenticated on public.products
-  for select to authenticated
-  using (is_available = true or seller_id = auth.uid());
+create policy products_select_public on public.products
+  for select to public
+  using (is_available = true or is_available is null or (auth.role() = 'authenticated' and seller_id = auth.uid()));
 create policy products_insert_owner on public.products
   for insert to authenticated
   with check (

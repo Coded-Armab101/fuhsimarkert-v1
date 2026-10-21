@@ -21,8 +21,15 @@ type SellerOrder = {
   delivery_address?: string | null;
   meetup_location: string;
   created_at: string;
-  products?: { id: string; title: string; image_url?: string | null }[] | null;
+  products?: { id: string; title: string; image_url?: string | null }[] | { id: string; title: string; image_url?: string | null } | null;
 };
+
+function getOrderProduct(products: any): { id?: string; title?: string; image_url?: string | null } | null {
+  if (!products) return null;
+  if (Array.isArray(products)) return products[0] || null;
+  if (typeof products === 'object') return products;
+  return null;
+}
 
 export default function SellerOrdersPage() {
   const router = useRouter();
@@ -41,10 +48,11 @@ export default function SellerOrdersPage() {
           return;
         }
 
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('orders')
           .select(`
             id,
+            product_id,
             amount_kobo,
             delivery_fee_kobo,
             quantity,
@@ -58,7 +66,7 @@ export default function SellerOrdersPage() {
             delivery_address,
             meetup_location,
             created_at,
-            products (
+            products:product_id (
               id,
               title,
               image_url
@@ -68,9 +76,59 @@ export default function SellerOrdersPage() {
           .order('created_at', { ascending: false });
 
         if (error) {
+          const fallbackRes = await supabase
+            .from('orders')
+            .select(`
+              id,
+              product_id,
+              amount_kobo,
+              delivery_fee_kobo,
+              quantity,
+              status,
+              order_ref,
+              delivery_code,
+              delivery_type,
+              receiver_name,
+              receiver_phone,
+              matric_number,
+              delivery_address,
+              meetup_location,
+              created_at
+            `)
+            .eq('seller_id', user.id)
+            .order('created_at', { ascending: false });
+
+          if (!fallbackRes.error && fallbackRes.data) {
+            data = fallbackRes.data as any;
+            error = null;
+          }
+        }
+
+        if (!error && data) {
+          const rows = data as (SellerOrder & { product_id?: string })[];
+          const missingProductIds = rows
+            .filter((r) => !getOrderProduct(r.products) && r.product_id)
+            .map((r) => r.product_id as string);
+
+          if (missingProductIds.length > 0) {
+            const { data: fetchedProducts } = await supabase
+              .from('products')
+              .select('id, title, image_url')
+              .in('id', missingProductIds);
+
+            if (fetchedProducts) {
+              const productMap = new Map(fetchedProducts.map((p) => [p.id, p]));
+              for (const row of rows) {
+                if (!getOrderProduct(row.products) && row.product_id) {
+                  const p = productMap.get(row.product_id);
+                  if (p) row.products = [p];
+                }
+              }
+            }
+          }
+          setOrders(rows);
+        } else if (error) {
           console.error('Failed to load orders:', error);
-        } else {
-          setOrders((data as SellerOrder[]) || []);
         }
       } catch (err) {
         console.error('Failed to load orders:', err);
@@ -145,7 +203,7 @@ export default function SellerOrdersPage() {
       ) : (
         <div className="space-y-4">
           {orders.map((order) => {
-            const product = order.products?.[0];
+            const product = getOrderProduct(order.products);
             const canPack = order.status === 'in_escrow';
             const canReady = order.status === 'packing';
             const fulfilled = order.status === 'ready_for_pickup' || order.status === 'confirmed' || order.status === 'delivered' || order.status === 'completed';

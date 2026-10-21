@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { formatNaira, nairaToKobo } from '@/utils/money';
-import { Wallet, Loader2, Banknote, ArrowDownUp, CheckCircle2, Clock, Landmark } from 'lucide-react';
+import { Wallet, Loader2, Banknote, ArrowDownUp, CheckCircle2, Clock, Landmark, ShoppingBag } from 'lucide-react';
 
 type Withdrawal = {
   id: string;
@@ -134,7 +134,10 @@ export default function SellerWalletPage() {
       <div className="rounded-[2rem] bg-gradient-to-br from-[#2e2520] to-[#544038] p-6 text-white shadow-xl">
         <div className="flex items-center justify-between"><div><p className="text-xs text-white/65">FuhsiMarket wallet</p><h1 className="mt-1 text-xl font-black">Your money</h1></div><div className="grid h-11 w-11 place-items-center rounded-2xl bg-white/15"><Wallet size={20}/></div></div>
         <p className="mt-8 text-xs text-white/65">Available to withdraw</p><p className="mt-1 text-4xl font-black tracking-tight">₦{formatNaira(balanceKobo)}</p>
-        <button onClick={() => document.getElementById('withdraw')?.scrollIntoView({behavior:'smooth'})} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#ef6b3b] py-3.5 text-sm font-bold"><Banknote size={16}/>Withdraw money</button>
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          <button onClick={() => document.getElementById('withdraw')?.scrollIntoView({behavior:'smooth'})} className="flex items-center justify-center gap-2 rounded-2xl bg-[#ef6b3b] py-3.5 text-xs font-bold"><Banknote size={16}/>Withdraw money</button>
+          <button onClick={() => router.push('/buyer')} className="flex items-center justify-center gap-2 rounded-2xl bg-white/20 hover:bg-white/30 text-white py-3.5 text-xs font-bold transition-colors"><ShoppingBag size={16}/>Shop with wallet</button>
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-3"><div className="rounded-[1.5rem] bg-white p-4 shadow-sm"><div className="flex items-center gap-2 text-xs text-[#81756d]"><Clock size={14} className="text-[#ef6b3b]"/>On the way</div><p className="mt-2 text-lg font-black text-[#251d18]">₦{formatNaira(pendingKobo)}</p><p className="mt-1 text-[10px] text-[#81756d]">Withdrawal requests</p></div><div className="rounded-[1.5rem] bg-white p-4 shadow-sm"><div className="flex items-center gap-2 text-xs text-[#81756d]"><CheckCircle2 size={14} className="text-[#17805b]"/>Paid out</div><p className="mt-2 text-lg font-black text-[#251d18]">₦{formatNaira(paidKobo)}</p><p className="mt-1 text-[10px] text-[#81756d]">All-time withdrawals</p></div></div>
 

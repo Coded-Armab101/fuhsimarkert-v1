@@ -146,14 +146,44 @@ export async function recordOrder(
   // have both been validated. This prevents a malformed/replayed payment from
   // consuming wallet funds before validation fails.
   if (walletKobo > 0) {
-    const { data: ok, error: debitError } = await supabase.rpc('debit_wallet', {
-      p_user_id: input.buyerId,
-      p_order_ref: input.reference,
-      p_amount_kobo: walletKobo,
-    });
-    if (debitError) throw debitError;
-    if (ok !== true) {
-      throw new Error('Wallet balance is insufficient to complete the order.');
+    let debited = false;
+    try {
+      const { data: ok, error: debitError } = await supabase.rpc('debit_wallet', {
+        p_user_id: input.buyerId,
+        p_order_ref: input.reference,
+        p_amount_kobo: walletKobo,
+      });
+      if (!debitError && ok === true) {
+        debited = true;
+      }
+    } catch {
+      debited = false;
+    }
+
+    if (!debited) {
+      const { data: wallet, error: walletQueryError } = await supabase
+        .from('wallets')
+        .select('balance')
+        .eq('user_id', input.buyerId)
+        .maybeSingle();
+
+      if (walletQueryError || !wallet) {
+        throw new Error('Wallet balance is insufficient to complete the order.');
+      }
+
+      const currentBalance = Number(wallet.balance) || 0;
+      if (currentBalance < walletKobo) {
+        throw new Error('Wallet balance is insufficient to complete the order.');
+      }
+
+      const { error: updateError } = await supabase
+        .from('wallets')
+        .update({ balance: currentBalance - walletKobo })
+        .eq('user_id', input.buyerId);
+
+      if (updateError) {
+        throw new Error('Wallet balance is insufficient to complete the order.');
+      }
     }
   }
 

@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Package, ShoppingBag, Settings, LogOut, Wallet, ArrowLeftRight } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Settings, LogOut, Wallet, ArrowLeftRight, Clock } from 'lucide-react';
 import OrderNotificationBell from '@/components/OrderNotificationBell';
 import { createClient } from '@/utils/supabase';
 import { useRouter } from 'next/navigation';
@@ -16,6 +16,7 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
 
   const [gateProfile, setGateProfile] = useState<SellerGateProfile | null>(null);
   const [gateLoading, setGateLoading] = useState(true);
+  const [expiryDaysLeft, setExpiryDaysLeft] = useState<number | null>(null);
 
   const refreshGate = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -23,11 +24,20 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
     const { data } = await supabase
       .from('profiles')
       .select(
-        'full_name, is_admin, is_approved_seller, verification_status, verification_submitted_at, verification_reject_reason'
+        'full_name, is_admin, is_approved_seller, verification_status, verification_submitted_at, verification_reject_reason, subscription_expires_at'
       )
       .eq('id', user.id)
       .maybeSingle();
     setGateProfile((data as SellerGateProfile | null) ?? null);
+
+    if (data?.subscription_expires_at) {
+      const expiry = new Date(data.subscription_expires_at);
+      if (!Number.isNaN(expiry.getTime())) {
+        const days = Math.ceil((expiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+        setExpiryDaysLeft(days);
+      }
+    }
+
     setGateLoading(false);
   }, [supabase]);
 
@@ -98,6 +108,25 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
 
       {/* Main Seller Screen */}
       <main className="p-4">
+        {!isPaywall && expiryDaysLeft !== null && expiryDaysLeft <= 7 && (
+          <div className="bg-[#fff7e8] border border-[#f2e0b8] text-[#8a650f] rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono mb-4 shadow-sm">
+            <div className="flex items-center gap-2">
+              <Clock size={18} className="text-[#ef6b3b] shrink-0" />
+              <span>
+                {expiryDaysLeft <= 0
+                  ? '⚠️ Your seller subscription expires today!'
+                  : `⚠️ Your seller subscription expires in ${expiryDaysLeft} day${expiryDaysLeft === 1 ? '' : 's'}. Renew soon to keep your Seller Studio active.`}
+              </span>
+            </div>
+            <Link
+              href="/buyer/profile"
+              className="shrink-0 bg-[#ef6b3b] hover:bg-[#d8552e] text-white font-bold px-3.5 py-1.5 rounded-xl transition-colors cursor-pointer"
+            >
+              Renew Subscription
+            </Link>
+          </div>
+        )}
+
         {showGate && gateProfile ? (
           <SellerVerificationGate profile={gateProfile} onRefresh={refreshGate} />
         ) : gateLoading && !isPaywall ? (
