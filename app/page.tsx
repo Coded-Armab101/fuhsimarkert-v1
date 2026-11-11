@@ -19,6 +19,7 @@ import {
   Minus,
   Plus,
   Search,
+  SearchX,
   ShieldCheck,
   ShoppingCart,
   Shuffle,
@@ -312,10 +313,14 @@ export default function LandingPage() {
     [products, shuffleSeed]
   );
 
+  const activeQuery = search.trim();
+
   const shownProducts = useMemo(() => {
-    if (category === 'All') return shuffledProducts;
+    // A search runs against the whole catalogue (the query hits the database),
+    // so a leftover category chip must not hide a product that does exist.
+    if (activeQuery || category === 'All') return shuffledProducts;
     return shuffledProducts.filter((p) => p.category === category);
-  }, [shuffledProducts, category]);
+  }, [shuffledProducts, category, activeQuery]);
 
   const requireAuth = () => {
     router.push('/login?redirect=/');
@@ -457,41 +462,51 @@ export default function LandingPage() {
           )}
         </label>
 
-        {/* Category chips */}
-        <div className="mt-4 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
-          {categoryOptions.map((item) => (
-            <button
-              key={item}
-              onClick={() => setCategory(item)}
-              className={`shrink-0 rounded-full px-3.5 py-2 text-xs font-bold transition-colors ${
-                category === item
-                  ? 'bg-[#2C2C2C] text-white'
-                  : 'border border-[#ECE5DE] bg-white text-[#5F5650] hover:border-[#DE6437] hover:text-[#DE6437]'
-              }`}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
+        {/* Category chips — hidden while searching, because search already
+            covers the whole catalogue and an empty chip row under a "no
+            result" message is confusing. */}
+        {!activeQuery && (
+          <div className="mt-4 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
+            {categoryOptions.map((item) => (
+              <button
+                key={item}
+                onClick={() => setCategory(item)}
+                className={`shrink-0 rounded-full px-3.5 py-2 text-xs font-bold transition-colors ${
+                  category === item
+                    ? 'bg-[#2C2C2C] text-white'
+                    : 'border border-[#ECE5DE] bg-white text-[#5F5650] hover:border-[#DE6437] hover:text-[#DE6437]'
+                }`}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Feed */}
         <section id="feed" className="mt-5 scroll-mt-24">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-black tracking-tight text-[#2C2C2C]">
-                Around campus
+                {activeQuery ? 'Search results' : 'Around campus'}
               </h2>
               <p className="text-xs text-[#81756D]">
-                A scattered mix of student listings
+                {activeQuery
+                  ? shownProducts.length > 0
+                    ? `${shownProducts.length} listing${shownProducts.length === 1 ? '' : 's'} for “${activeQuery}”`
+                    : `Nothing on FuhsiMarket matches “${activeQuery}”`
+                  : 'A scattered mix of student listings'}
               </p>
             </div>
-            <button
-              onClick={() => setShuffleSeed(newShuffleSeed())}
-              className="inline-flex items-center gap-1.5 rounded-full border border-[#ECE5DE] bg-white px-3 py-2 text-[11px] font-bold text-[#5F5650] transition-colors hover:border-[#DE6437] hover:text-[#DE6437]"
-            >
-              <Shuffle size={14} />
-              Shuffle
-            </button>
+            {!activeQuery && (
+              <button
+                onClick={() => setShuffleSeed(newShuffleSeed())}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#ECE5DE] bg-white px-3 py-2 text-[11px] font-bold text-[#5F5650] transition-colors hover:border-[#DE6437] hover:text-[#DE6437]"
+              >
+                <Shuffle size={14} />
+                Shuffle
+              </button>
+            )}
           </div>
 
           {loading ? (
@@ -524,18 +539,72 @@ export default function LandingPage() {
                 />
               ))}
             </div>
-          ) : (
+          ) : loadFailed ? (
             <div className="rounded-3xl border border-dashed border-[#DCD4CB] bg-white px-6 py-12 text-center">
               <Store size={34} className="mx-auto text-[#CFC5BA]" />
               <p className="mt-3 text-sm font-bold text-[#2C2C2C]">
-                {loadFailed ? 'The market is taking a break' : 'No listings yet'}
+                The market is taking a break
               </p>
               <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[#81756D]">
-                {loadFailed
-                  ? 'We could not load listings right now. Check your connection and try again shortly.'
-                  : search.trim()
-                    ? `Nothing matched “${search.trim()}”. Try a different word or clear the filter.`
-                    : 'Be the first student to list something on FuhsiMarket.'}
+                We could not load listings right now. Check your connection and try again shortly.
+              </p>
+              <button
+                onClick={() => window.location.reload()}
+                className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-[#DE6437] px-4 py-2.5 text-xs font-bold text-white"
+              >
+                Try again
+                <ArrowRight size={14} />
+              </button>
+            </div>
+          ) : activeQuery ? (
+            <div className="rounded-3xl border border-dashed border-[#DCD4CB] bg-white px-6 py-12 text-center">
+              <SearchX size={34} className="mx-auto text-[#CFC5BA]" />
+              <p className="mt-3 text-base font-black text-[#2C2C2C]">Product not found</p>
+              <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[#81756D]">
+                “{activeQuery}” does not exist on FuhsiMarket right now. Check the spelling or
+                try a shorter word.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                <button
+                  onClick={() => setSearch('')}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-[#DE6437] px-4 py-2.5 text-xs font-bold text-white"
+                >
+                  Clear search
+                  <X size={14} />
+                </button>
+                <Link
+                  href="/signup"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[#ECE5DE] bg-white px-4 py-2.5 text-xs font-bold text-[#5F5650] transition-colors hover:border-[#DE6437] hover:text-[#DE6437]"
+                >
+                  Sell it instead
+                  <ArrowRight size={14} />
+                </Link>
+              </div>
+            </div>
+          ) : category !== 'All' ? (
+            <div className="rounded-3xl border border-dashed border-[#DCD4CB] bg-white px-6 py-12 text-center">
+              <Store size={34} className="mx-auto text-[#CFC5BA]" />
+              <p className="mt-3 text-sm font-bold text-[#2C2C2C]">
+                Nothing in {category} yet
+              </p>
+              <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[#81756D]">
+                No one has listed a product in this category yet. Try another category or
+                browse everything on the market.
+              </p>
+              <button
+                onClick={() => setCategory('All')}
+                className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-[#DE6437] px-4 py-2.5 text-xs font-bold text-white"
+              >
+                Browse all products
+                <ArrowRight size={14} />
+              </button>
+            </div>
+          ) : (
+            <div className="rounded-3xl border border-dashed border-[#DCD4CB] bg-white px-6 py-12 text-center">
+              <Store size={34} className="mx-auto text-[#CFC5BA]" />
+              <p className="mt-3 text-sm font-bold text-[#2C2C2C]">No listings yet</p>
+              <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[#81756D]">
+                Be the first student to list something on FuhsiMarket.
               </p>
               <Link
                 href="/signup"
