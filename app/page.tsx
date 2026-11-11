@@ -4,32 +4,27 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { useCart } from '@/context/CartContext';
 import { formatNaira } from '@/utils/money';
+import { FEATURED_CATEGORIES } from '@/utils/categories';
+import { newShuffleSeed, seededShuffle } from '@/utils/shuffle';
+import BrandLogo from '@/components/BrandLogo';
 import {
-  Search,
-  ShoppingCart,
-  User,
-  Zap,
-  Flame,
-  Award,
-  ChevronRight,
+  ArrowRight,
   Heart,
   Image as ImageIcon,
+  Lock,
+  MapPin,
   Minus,
   Plus,
-  Star,
-  X,
-  MapPin,
+  Search,
   ShieldCheck,
+  ShoppingCart,
+  Shuffle,
   Store,
-  Sparkles,
-  Lock,
-  ArrowRight,
-  TrendingUp,
-  Tag,
-  Clock,
-  CheckCircle,
+  User,
+  X,
 } from 'lucide-react';
 
 type Product = {
@@ -44,13 +39,12 @@ type Product = {
   created_at: string;
   stock?: number | null;
 };
+
 const isAvailable = (p: Product) =>
   p.stock === null || p.stock === undefined || p.stock > 0;
 
 const stockLimit = (p: Product) =>
-  p.stock === null || p.stock === undefined
-    ? Infinity
-    : Number(p.stock) || 0;
+  p.stock === null || p.stock === undefined ? Infinity : Number(p.stock) || 0;
 
 function ProductCard({
   product,
@@ -99,108 +93,115 @@ function ProductCard({
   };
 
   return (
-    <article className="group relative bg-white border border-[#eae3db] rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
-      <div>
-        <div className="relative aspect-square w-full overflow-hidden bg-[#f7f2ed] cursor-pointer" onClick={onOpen}>
-          {product.image_url ? (
-            <img
-              src={product.image_url}
-              alt={product.title}
-              className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
-              loading="lazy"
-            />
-          ) : (
-            <ImageIcon className="absolute inset-0 m-auto text-[#d4c9bd]" size={36} />
-          )}
+    <article className="group flex flex-col overflow-hidden rounded-3xl border border-[#ECE5DE] bg-white shadow-[0_6px_20px_rgba(44,44,44,0.04)] transition-shadow hover:shadow-[0_10px_30px_rgba(44,44,44,0.08)]">
+      <div
+        className="relative aspect-[4/5] w-full cursor-pointer overflow-hidden bg-[#F5F1EC]"
+        onClick={onOpen}
+      >
+        {product.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={product.image_url}
+            alt={product.title}
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+            loading="lazy"
+          />
+        ) : (
+          <ImageIcon className="absolute inset-0 m-auto text-[#CFC5BA]" size={34} />
+        )}
 
-          {unavailable && (
-            <span className="absolute left-2 top-2 rounded-full bg-black/75 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white">
-              Sold Out
-            </span>
-          )}
+        {unavailable && (
+          <span className="absolute left-2.5 top-2.5 rounded-full bg-[#2C2C2C]/80 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
+            Sold out
+          </span>
+        )}
 
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onSave();
-            }}
-            aria-label={saved ? 'Remove from saved' : 'Save item'}
-            className={`absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full backdrop-blur transition-colors ${
-              saved ? 'bg-[#f56616] text-white' : 'bg-white/90 text-[#312722] hover:bg-white'
-            }`}
-          >
-            <Heart size={15} fill={saved ? 'currentColor' : 'none'} />
-          </button>
-        </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onSave();
+          }}
+          aria-label={saved ? 'Remove from saved' : 'Save item'}
+          className={`absolute right-2.5 top-2.5 grid h-9 w-9 place-items-center rounded-full backdrop-blur transition-colors ${
+            saved ? 'bg-[#DE6437] text-white' : 'bg-white/90 text-[#2C2C2C] hover:bg-white'
+          }`}
+        >
+          <Heart size={16} fill={saved ? 'currentColor' : 'none'} />
+        </button>
+      </div>
 
-        <div className="p-3 cursor-pointer" onClick={onOpen}>
+      <div className="flex flex-1 flex-col p-3">
+        <div className="cursor-pointer" onClick={onOpen}>
           {product.category && (
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#f56616]">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#DE6437]">
               {product.category}
             </span>
           )}
-          <h3 className="line-clamp-2 text-xs font-bold text-[#251d18] mt-0.5 leading-snug group-hover:text-[#f56616] transition-colors">
+          <h3 className="mt-0.5 line-clamp-2 text-sm font-bold leading-snug text-[#2C2C2C] transition-colors group-hover:text-[#DE6437]">
             {product.title}
           </h3>
-
-          <div className="mt-2 flex items-baseline gap-1.5">
-            <span className="text-sm font-black text-[#f56616]">₦{formatNaira(product.price)}</span>
-            <span className="text-[10px] text-[#81756d] line-through">
-              ₦{formatNaira(Math.round(product.price * 1.15))}
-            </span>
-          </div>
-
-          <div className="mt-1 flex items-center gap-1 text-[11px] text-[#81756d]">
-            <Star size={11} fill="#f5a623" className="text-[#f5a623]" />
-            <span className="font-bold text-[#251d18]">4.8</span>
-            <span className="text-[#a1958b]">(Verified)</span>
-          </div>
+          {product.hostel_location && (
+            <p className="mt-1 flex items-center gap-1 truncate text-[11px] text-[#81756D]">
+              <MapPin size={11} className="shrink-0" />
+              {product.hostel_location}
+            </p>
+          )}
         </div>
-      </div>
 
-      <div className="p-3 pt-0">
-        {!unavailable && (
-          quantity > 0 ? (
-            <div className="flex items-center justify-between rounded-xl bg-[#fff2eb] px-2.5 py-1.5 text-[#f56616] font-bold text-xs">
-              <button onClick={handleDecrease} className="p-1 hover:bg-[#ffe3d6] rounded-md transition-colors">
-                <Minus size={14} />
-              </button>
-              <span className="font-mono">{quantity}</span>
+        <div className="mt-auto pt-2">
+          <p className="text-base font-black text-[#2C2C2C]">
+            ₦{formatNaira(product.price)}
+          </p>
+
+          {!unavailable &&
+            (quantity > 0 ? (
+              <div className="mt-2 flex items-center justify-between rounded-full bg-[#FDF0EA] px-2 py-1 text-xs font-bold text-[#DE6437]">
+                <button
+                  onClick={handleDecrease}
+                  className="rounded-full p-1 transition-colors hover:bg-[#F8DFD4]"
+                  aria-label={`Remove one ${product.title}`}
+                >
+                  <Minus size={14} />
+                </button>
+                <span className="font-mono">{quantity}</span>
+                <button
+                  onClick={handleIncrease}
+                  disabled={quantity >= stockLimit(product)}
+                  className="rounded-full p-1 transition-colors hover:bg-[#F8DFD4] disabled:opacity-40"
+                  aria-label={`Add one ${product.title}`}
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+            ) : (
               <button
-                onClick={handleIncrease}
-                disabled={quantity >= stockLimit(product)}
-                className="p-1 hover:bg-[#ffe3d6] rounded-md transition-colors disabled:opacity-40"
+                onClick={handleAddToCart}
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full bg-[#DE6437] py-2.5 text-[11px] font-bold text-white transition-colors hover:bg-[#C9511F]"
               >
-                <Plus size={14} />
+                <ShoppingCart size={13} />
+                <span>Add to cart</span>
               </button>
-            </div>
-          ) : (
-            <button
-              onClick={handleAddToCart}
-              className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-[#f56616] hover:bg-[#e0550a] py-2 text-xs font-bold text-white shadow-sm transition-colors cursor-pointer"
-            >
-              <ShoppingCart size={13} />
-              <span>ADD TO CART</span>
-            </button>
-          )
-        )}
+            ))}
+        </div>
       </div>
     </article>
   );
 }
 
-export default function JumiaLandingPage() {
+export default function LandingPage() {
   const router = useRouter();
   const supabase = createClient();
   const { totalItems, addToCartOnce } = useCart();
 
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
   const [selected, setSelected] = useState<Product | null>(null);
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
   const [wishlistIds, setWishlistIds] = useState<Record<string, string>>({});
+  const [shuffleSeed, setShuffleSeed] = useState(1);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -210,7 +211,10 @@ export default function JumiaLandingPage() {
       setUser(currentUser);
 
       if (currentUser) {
-        const { data } = await supabase.from('wishlists').select('id, product_id').eq('user_id', currentUser.id);
+        const { data } = await supabase
+          .from('wishlists')
+          .select('id, product_id')
+          .eq('user_id', currentUser.id);
         if (data) {
           setWishlistIds(Object.fromEntries(data.map((row) => [row.product_id, row.id])));
         }
@@ -220,79 +224,83 @@ export default function JumiaLandingPage() {
   }, [supabase]);
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchProducts = async () => {
       setLoading(true);
+      setLoadFailed(false);
 
-  try {
-    let query = supabase
-      .from('products')
-      .select('*')
-      .eq('is_available', true)
-      .order('created_at', { ascending: false });
+      try {
+        let query = supabase
+          .from('products')
+          .select('*')
+          .eq('is_available', true);
 
-    if (search.trim()) {
-      query = query.ilike('title', `%${search.trim()}%`);
-    }
+        if (search.trim()) {
+          query = query.ilike('title', `%${search.trim()}%`);
+        }
 
-    const { data, error } = await query;
+        const { data, error } = await query;
 
-    if (error) {
-      console.error('Failed to fetch landing products:', error);
+        if (cancelled) return;
 
-      // Use demo products only when the database request fails.
-      const matchedFallback = search.trim()
-        ? DEFAULT_CAMPUS_PRODUCTS.filter((p) =>
-            p.title.toLowerCase().includes(search.trim().toLowerCase())
-          )
-        : DEFAULT_CAMPUS_PRODUCTS;
+        if (error) {
+          console.error('Failed to fetch landing products:', error);
+          setProducts([]);
+          setLoadFailed(true);
+          return;
+        }
 
-      setProducts(matchedFallback);
-      return;
-    }
-
-    // An empty database result should remain empty rather than
-    // presenting demo products as real marketplace listings.
-    setProducts((data as Product[]) || []);
-  } catch (err) {
-    console.error('Failed to fetch landing products:', err);
-
-    const matchedFallback = search.trim()
-      ? DEFAULT_CAMPUS_PRODUCTS.filter((p) =>
-          p.title.toLowerCase().includes(search.trim().toLowerCase())
-        )
-      : DEFAULT_CAMPUS_PRODUCTS;
-
-    setProducts(matchedFallback);
-  } finally {
-    setLoading(false);
-  }
-};
+        // No demo rows: an empty catalogue stays empty.
+        setProducts((data as Product[]) || []);
+      } catch (err) {
+        if (cancelled) return;
+        console.error('Failed to fetch landing products:', err);
+        setProducts([]);
+        setLoadFailed(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
 
     const timer = setTimeout(fetchProducts, 250);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [search, supabase]);
 
-  const categories = useMemo(() => {
-    const raw = Array.from(new Set(products.map((p) => p.category).filter(Boolean) as string[]));
-    return ['All', 'Tech & Gadgets', 'Campus Essentials', 'Fashion', 'Books', 'Food & Snacks', ...raw.filter(c => !['Tech & Gadgets', 'Campus Essentials', 'Fashion', 'Books', 'Food & Snacks'].includes(c))];
+  const categoryOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = ['All'];
+    const candidates: string[] = [
+      ...FEATURED_CATEGORIES,
+      ...products
+        .map((p) => p.category)
+        .filter((value): value is string => Boolean(value)),
+    ];
+
+    for (const value of candidates) {
+      if (value && !seen.has(value)) {
+        seen.add(value);
+        list.push(value);
+      }
+    }
+    return list;
   }, [products]);
 
-  const filteredProducts = useMemo(() => {
-    if (category === 'All') return products;
-    return products.filter((p) => p.category === category);
-  }, [products, category]);
+  // Display order is deliberately scattered rather than newest-first so one
+  // seller cannot own the top of the feed. The seed only changes when the user
+  // taps Shuffle, so re-renders never make tiles jump.
+  const shuffledProducts = useMemo(
+    () => seededShuffle(products, shuffleSeed),
+    [products, shuffleSeed]
+  );
 
-  const availableNow = useMemo(() => {
-    return products.filter(isAvailable).slice(0, 6);
-  }, [products]);
-
-  const popularProducts = useMemo(() => {
-    return [...products].sort((a, b) => Number(isAvailable(b)) - Number(isAvailable(a))).slice(0, 8);
-  }, [products]);
-
-  const featuredProducts = useMemo(() => {
-    return products.slice(0, 6);
-  }, [products]);
+  const shownProducts = useMemo(() => {
+    if (category === 'All') return shuffledProducts;
+    return shuffledProducts.filter((p) => p.category === category);
+  }, [shuffledProducts, category]);
 
   const requireAuth = () => {
     router.push('/login?redirect=/');
@@ -338,346 +346,158 @@ export default function JumiaLandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f1f3f6] text-[#251d18] font-sans pb-16">
-      {/* Jumia Top Promo Banner */}
-      <div className="bg-[#282828] text-white text-[11px] font-bold py-1.5 px-4 text-center flex items-center justify-center gap-3">
-        <span className="bg-[#f56616] text-white px-2 py-0.5 rounded text-[10px] tracking-wide uppercase font-black">
-          FUHSI ESCROW
-        </span>
-        <span className="hidden sm:inline">Shop campus deals securely — money released only upon pickup confirmation!</span>
-        <span className="sm:hidden">100% Escrow Protected Campus Handover</span>
-      </div>
+    <div className="min-h-[100dvh] bg-[#FAFAFA] pb-24 font-sans text-[#2C2C2C]">
+      <header className="sticky top-0 z-40 border-b border-[#ECE5DE] bg-[#FAFAFA]/95 backdrop-blur">
+        <div className="mx-auto flex max-w-2xl items-center justify-between gap-3 px-4 py-3">
+          <BrandLogo height={30} />
 
-      {/* Main Jumia Header */}
-      <header className="sticky top-0 z-40 bg-white border-b border-[#e1e3e8] shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
-          {/* Logo */}
-          <Link href="/" className="flex items-center gap-1.5 shrink-0">
-            <span className="text-xl font-black tracking-tight text-[#282828]">
-              FUHSI<span className="text-[#f56616]">MARKET</span>
-            </span>
-            <span className="bg-[#f56616] text-white font-extrabold text-[9px] px-1.5 py-0.5 rounded uppercase">
-              CAMPUS
-            </span>
-          </Link>
-
-          {/* Search Bar */}
-          <div className="flex-1 max-w-2xl relative hidden md:block">
-            <div className="relative flex items-center">
-              <Search className="absolute left-3.5 text-[#81756d]" size={18} />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search products, brands, campus essentials..."
-                className="w-full bg-[#f1f3f6] border border-[#d1d5db] focus:border-[#f56616] rounded-xl pl-10 pr-24 py-2.5 text-xs text-[#251d18] outline-none transition-colors"
-              />
-              <button className="absolute right-1 bg-[#f56616] hover:bg-[#e0550a] text-white text-xs font-bold px-4 py-1.5 rounded-lg transition-colors cursor-pointer">
-                SEARCH
-              </button>
-            </div>
-          </div>
-
-          {/* User Account & Cart links */}
-          <div className="flex items-center gap-3">
-            {user ? (
-              <Link
-                href="/buyer"
-                className="flex items-center gap-2 hover:text-[#f56616] text-xs font-bold text-[#282828] py-1.5 px-3 rounded-xl border border-transparent hover:border-[#eae3db] transition-colors"
-              >
-                <User size={18} className="text-[#f56616]" />
-                <span className="hidden sm:inline">My Account</span>
-              </Link>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Link
-                  href="/login"
-                  className="flex items-center gap-1.5 text-xs font-bold text-[#282828] hover:text-[#f56616] px-3 py-1.5 rounded-xl border border-[#d1d5db] hover:border-[#f56616] transition-colors"
-                >
-                  <User size={16} />
-                  <span>Sign In</span>
-                </Link>
-                <Link
-                  href="/signup"
-                  className="hidden sm:flex items-center gap-1 bg-[#f56616] hover:bg-[#e0550a] text-white text-xs font-bold px-3.5 py-1.5 rounded-xl transition-colors"
-                >
-                  Register
-                </Link>
-              </div>
-            )}
-
+          <div className="flex items-center gap-1.5">
             <button
               onClick={() => {
                 if (!user) requireAuth();
                 else router.push('/buyer/cart');
               }}
-              className="relative flex items-center gap-2 text-xs font-bold text-[#282828] hover:text-[#f56616] py-1.5 px-3 rounded-xl border border-transparent hover:border-[#eae3db] transition-colors cursor-pointer"
+              className="relative grid h-10 w-10 place-items-center rounded-full border border-[#ECE5DE] bg-white text-[#2C2C2C] transition-colors hover:border-[#DE6437] hover:text-[#DE6437]"
+              aria-label="Open cart"
             >
-              <div className="relative">
-                <ShoppingCart size={20} className="text-[#f56616]" />
-                {totalItems > 0 && (
-                  <span className="absolute -top-2 -right-2 bg-[#f56616] text-white text-[10px] font-black h-4 w-4 rounded-full flex items-center justify-center">
-                    {totalItems}
-                  </span>
-                )}
-              </div>
-              <span className="hidden sm:inline">Cart</span>
+              <ShoppingCart size={19} />
+              {totalItems > 0 && (
+                <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#DE6437] px-1 text-[10px] font-black text-white">
+                  {totalItems}
+                </span>
+              )}
             </button>
-          </div>
-        </div>
 
-        {/* Mobile Search Bar */}
-        <div className="px-4 pb-3 md:hidden">
-          <div className="relative flex items-center">
-            <Search className="absolute left-3 text-[#81756d]" size={16} />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search products, books, gadgets..."
-              className="w-full bg-[#f1f3f6] border border-[#d1d5db] focus:border-[#f56616] rounded-xl pl-9 pr-16 py-2 text-xs text-[#251d18] outline-none"
-            />
-            <button className="absolute right-1 bg-[#f56616] text-white text-[11px] font-bold px-3 py-1 rounded-lg">
-              Search
-            </button>
-          </div>
-        </div>
-
-        {/* Category Navigation Bar */}
-        <div className="bg-[#282828] text-white overflow-x-auto [scrollbar-width:none]">
-          <div className="max-w-7xl mx-auto px-4 flex items-center gap-6 text-xs font-bold whitespace-nowrap py-2.5">
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setCategory(cat)}
-                className={`transition-colors cursor-pointer ${
-                  category === cat ? 'text-[#f56616] underline underline-offset-4 decoration-2' : 'text-neutral-300 hover:text-white'
-                }`}
-              >
-                {cat === 'All' ? '⚡ ALL DEALS' : cat.toUpperCase()}
-              </button>
-            ))}
+            <Link
+              href={user ? '/buyer' : '/login'}
+              className="grid h-10 w-10 place-items-center rounded-full border border-[#ECE5DE] bg-white text-[#2C2C2C] transition-colors hover:border-[#DE6437] hover:text-[#DE6437]"
+              aria-label={user ? 'Open your account' : 'Sign in'}
+            >
+              <User size={19} />
+            </Link>
           </div>
         </div>
       </header>
 
-      {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 pt-4 space-y-6">
-        {/* Jumia Hero Promotional Slider Banner */}
-        <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="md:col-col-span-3 md:col-span-3 bg-gradient-to-r from-[#f56616] via-[#ea580c] to-[#c2410c] rounded-2xl p-6 text-white shadow-md relative overflow-hidden flex flex-col justify-between min-h-[220px]">
-            <div className="relative z-10 max-w-lg space-y-2">
-              <span className="inline-flex items-center gap-1 bg-black/30 backdrop-blur px-3 py-1 rounded-full text-xs font-black tracking-wider uppercase">
-                <Flame size={14} className="text-yellow-300 fill-yellow-300" /> Jumia-Style Super Deals
-              </span>
-              <h1 className="text-2xl sm:text-3xl font-black leading-tight">
-                Verified Campus Marketplace for Students
-              </h1>
-              <p className="text-xs sm:text-sm text-white/90">
-                Buy & sell gadgets, textbooks, hostellers&apos; appliances & snacks safely with escrow protection.
-              </p>
-            </div>
+      <main className="mx-auto max-w-2xl px-4 pt-4">
+        {/* App-style onboarding hero */}
+        <section className="relative overflow-hidden rounded-[2rem] bg-[#DE6437] px-5 pb-5 pt-6 text-white shadow-[0_14px_40px_rgba(222,100,55,0.24)]">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-[#FFA726]/40 blur-2xl"
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -bottom-16 -left-10 h-44 w-44 rounded-full bg-black/10 blur-2xl"
+          />
 
-            <div className="relative z-10 mt-4 flex items-center gap-3">
-              <button
-                onClick={() => {
-                  const el = document.getElementById('all-products-section');
-                  el?.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="bg-white text-[#f56616] hover:bg-neutral-100 font-black text-xs px-5 py-2.5 rounded-xl shadow-lg transition-transform active:scale-95 cursor-pointer flex items-center gap-1.5"
+          <div className="relative">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em]">
+              <ShieldCheck size={13} />
+              FUHSI campus marketplace
+            </span>
+            <h1 className="mt-3 text-[1.7rem] font-black leading-[1.15] tracking-tight">
+              Buy and sell simply with FUHSI students.
+            </h1>
+            <p className="mt-2 max-w-sm text-sm leading-relaxed text-white/85">
+              Textbooks, gadgets, food and hostel essentials — safely handed over on campus with escrow protection.
+            </p>
+
+            <div className="mt-5 flex items-center gap-2.5">
+              <a
+                href="#feed"
+                className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2.5 text-xs font-bold text-[#DE6437] transition-transform active:scale-95"
               >
-                <span>SHOP NOW</span>
+                Browse the market
                 <ArrowRight size={15} />
-              </button>
+              </a>
               <Link
-                href="/seller/subscribe"
-                className="bg-black/40 hover:bg-black/60 text-white font-bold text-xs px-4 py-2.5 rounded-xl border border-white/30 transition-colors"
+                href="/signup"
+                className="inline-flex items-center rounded-full border border-white/40 px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-white/10"
               >
-                Start Selling
+                Start selling
               </Link>
             </div>
-
-            {/* Decorative background shapes */}
-            <div aria-hidden className="absolute -right-10 -bottom-10 h-64 w-64 rounded-full bg-white/10 blur-2xl pointer-events-none" />
           </div>
+        </section>
 
-          {/* Side Promo Card */}
-          <div className="bg-white border border-[#eae3db] rounded-2xl p-4 shadow-sm flex flex-col justify-between space-y-3">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-[#f56616] text-xs font-black uppercase tracking-wider">
-                <ShieldCheck size={18} />
-                <span>Buyer Protection</span>
-              </div>
-              <h3 className="text-sm font-bold text-[#251d18]">100% Escrow Guarantee</h3>
-              <p className="text-xs text-[#81756d] leading-relaxed">
-                Payments stay safely in escrow until you verify your product upon delivery.
+        {/* Search */}
+        <label className="mt-4 flex items-center gap-2.5 rounded-2xl border border-[#ECE5DE] bg-white px-4 py-3 shadow-sm">
+          <Search size={18} className="shrink-0 text-[#81756D]" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search textbooks, gadgets, food..."
+            className="min-w-0 flex-1 bg-transparent text-sm text-[#2C2C2C] outline-none placeholder:text-[#A79C92]"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="grid h-6 w-6 place-items-center rounded-full bg-[#F3EEE9] text-[#81756D]"
+              aria-label="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </label>
+
+        {/* Category chips */}
+        <div className="mt-4 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
+          {categoryOptions.map((item) => (
+            <button
+              key={item}
+              onClick={() => setCategory(item)}
+              className={`shrink-0 rounded-full px-3.5 py-2 text-xs font-bold transition-colors ${
+                category === item
+                  ? 'bg-[#2C2C2C] text-white'
+                  : 'border border-[#ECE5DE] bg-white text-[#5F5650] hover:border-[#DE6437] hover:text-[#DE6437]'
+              }`}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+
+        {/* Feed */}
+        <section id="feed" className="mt-5 scroll-mt-24">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-black tracking-tight text-[#2C2C2C]">
+                Around campus
+              </h2>
+              <p className="text-xs text-[#81756D]">
+                A scattered mix of student listings
               </p>
             </div>
-
-            <div className="space-y-2 pt-2 border-t border-[#f1f3f6]">
-              <div className="flex items-center gap-2 text-xs font-bold text-[#251d18]">
-                <Clock size={16} className="text-[#f56616]" />
-                <span>Fast Handover</span>
-              </div>
-              <p className="text-[11px] text-[#81756d]">Meet directly at hostel points or campus hotspots.</p>
-            </div>
-          </div>
-        </section>
-
-        {/* SECTION 1: AVAILABLE NOW (Flash Sale / Live Stock) */}
-        <section className="bg-white border border-[#eae3db] rounded-2xl p-4 shadow-sm space-y-3">
-          <div className="bg-[#f56616] text-white px-4 py-2.5 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-2">
-            <div className="flex items-center gap-2 font-black text-sm tracking-wide uppercase">
-              <Zap size={18} className="fill-yellow-300 text-yellow-300 animate-bounce" />
-              <span>AVAILABLE NOW — LIVE CAMPUS STOCK</span>
-            </div>
-            <div className="text-xs font-mono font-bold flex items-center gap-1 bg-black/20 px-3 py-1 rounded-lg">
-              <span>Ending soon:</span>
-              <span className="text-yellow-300">02h : 45m : 12s</span>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 animate-pulse py-2">
-              {[1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="aspect-square bg-[#f1f3f6] rounded-xl" />
-              ))}
-            </div>
-          ) : availableNow.length > 0 ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-2">
-              {availableNow.map((p) => (
-                <ProductCard
-                  key={p.id}
-                  product={p}
-                  saved={!!wishlistIds[p.id]}
-                  onSave={() => toggleWishlist(p.id)}
-                  onOpen={() => setSelected(p)}
-                  onRequireAuth={requireAuth}
-                  userAuthenticated={!!user}
-                />
-              ))}
-            </div>
-          ) : (
-            <p className="py-6 text-center text-xs text-[#81756d]">No items currently live.</p>
-          )}
-        </section>
-
-        {/* SECTION 2: POPULAR PRODUCTS */}
-        <section className="bg-white border border-[#eae3db] rounded-2xl p-4 shadow-sm space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-[#f1f3f6]">
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 bg-[#fff2eb] text-[#f56616] rounded-lg">
-                <Flame size={18} />
-              </div>
-              <div>
-                <h2 className="text-base font-black text-[#251d18]">POPULAR PRODUCTS</h2>
-                <p className="text-[11px] text-[#81756d]">Top student favorites & trending campus items</p>
-              </div>
-            </div>
             <button
-              onClick={() => setCategory('All')}
-              className="text-xs font-bold text-[#f56616] hover:underline flex items-center gap-0.5"
+              onClick={() => setShuffleSeed(newShuffleSeed())}
+              className="inline-flex items-center gap-1.5 rounded-full border border-[#ECE5DE] bg-white px-3 py-2 text-[11px] font-bold text-[#5F5650] transition-colors hover:border-[#DE6437] hover:text-[#DE6437]"
             >
-              <span>See All</span>
-              <ChevronRight size={14} />
+              <Shuffle size={14} />
+              Shuffle
             </button>
           </div>
 
           {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3 animate-pulse">
+            <div className="grid grid-cols-2 gap-3">
               {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="h-48 bg-[#f1f3f6] rounded-xl" />
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3">
-              {popularProducts.map((p) => (
-                <ProductCard
-                  key={p.id}
-                  product={p}
-                  saved={!!wishlistIds[p.id]}
-                  onSave={() => toggleWishlist(p.id)}
-                  onOpen={() => setSelected(p)}
-                  onRequireAuth={requireAuth}
-                  userAuthenticated={!!user}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* SECTION 3: FEATURED SECTION */}
-        <section className="bg-white border border-[#eae3db] rounded-2xl p-4 shadow-sm space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-[#f1f3f6]">
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 bg-purple-100 text-purple-700 rounded-lg">
-                <Award size={18} />
-              </div>
-              <div>
-                <h2 className="text-base font-black text-[#251d18]">FEATURED CAMPUS PICKS</h2>
-                <p className="text-[11px] text-[#81756d]">Handpicked verified quality products</p>
-              </div>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 animate-pulse">
-              {[1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="h-48 bg-[#f1f3f6] rounded-xl" />
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-              {featuredProducts.map((p) => (
-                <ProductCard
-                  key={p.id}
-                  product={p}
-                  saved={!!wishlistIds[p.id]}
-                  onSave={() => toggleWishlist(p.id)}
-                  onOpen={() => setSelected(p)}
-                  onRequireAuth={requireAuth}
-                  userAuthenticated={!!user}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* SECTION 4: PRODUCT LIST (FULL MARKETPLACE GRID) */}
-        <section id="all-products-section" className="bg-white border border-[#eae3db] rounded-2xl p-4 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#f1f3f6]">
-            <div>
-              <h2 className="text-lg font-black text-[#251d18]">ALL PRODUCTS</h2>
-              <p className="text-xs text-[#81756d]">Browse all available items across FUHSI campus</p>
-            </div>
-
-            {/* Category Filter Pills */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
-              {categories.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setCategory(cat)}
-                  className={`shrink-0 text-xs font-bold px-3.5 py-1.5 rounded-xl transition-all cursor-pointer ${
-                    category === cat
-                      ? 'bg-[#f56616] text-white shadow-sm'
-                      : 'bg-[#f1f3f6] text-[#5f534b] hover:bg-[#eae3db]'
-                  }`}
+                <div
+                  key={i}
+                  className="animate-pulse overflow-hidden rounded-3xl border border-[#ECE5DE] bg-white"
                 >
-                  {cat}
-                </button>
+                  <div className="aspect-[4/5] bg-[#F1ECE6]" />
+                  <div className="space-y-2 p-3">
+                    <div className="h-3 w-1/2 rounded bg-[#F1ECE6]" />
+                    <div className="h-3 w-4/5 rounded bg-[#F1ECE6]" />
+                    <div className="h-8 w-full rounded-full bg-[#F1ECE6]" />
+                  </div>
+                </div>
               ))}
             </div>
-          </div>
-
-          {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 animate-pulse">
-              {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-                <div key={i} className="h-60 bg-[#f1f3f6] rounded-2xl" />
-              ))}
-            </div>
-          ) : filteredProducts.length > 0 ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {filteredProducts.map((p) => (
+          ) : shownProducts.length > 0 ? (
+            <div className="grid grid-cols-2 gap-3">
+              {shownProducts.map((p) => (
                 <ProductCard
                   key={p.id}
                   product={p}
@@ -690,75 +510,162 @@ export default function JumiaLandingPage() {
               ))}
             </div>
           ) : (
-            <div className="py-12 text-center space-y-2">
-              <Store size={36} className="mx-auto text-[#d4c9bd]" />
-              <p className="text-sm font-bold text-[#251d18]">No products found</p>
-              <p className="text-xs text-[#81756d]">Try searching for something else or clearing filters.</p>
+            <div className="rounded-3xl border border-dashed border-[#DCD4CB] bg-white px-6 py-12 text-center">
+              <Store size={34} className="mx-auto text-[#CFC5BA]" />
+              <p className="mt-3 text-sm font-bold text-[#2C2C2C]">
+                {loadFailed ? 'The market is taking a break' : 'No listings yet'}
+              </p>
+              <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[#81756D]">
+                {loadFailed
+                  ? 'We could not load listings right now. Check your connection and try again shortly.'
+                  : search.trim()
+                    ? `Nothing matched “${search.trim()}”. Try a different word or clear the filter.`
+                    : 'Be the first student to list something on FuhsiMarket.'}
+              </p>
+              <Link
+                href="/signup"
+                className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-[#DE6437] px-4 py-2.5 text-xs font-bold text-white"
+              >
+                Start selling
+                <ArrowRight size={14} />
+              </Link>
             </div>
           )}
         </section>
+
+        <footer className="mt-10 border-t border-[#ECE5DE] pb-2 pt-6 text-center">
+          <div className="flex justify-center">
+            <BrandLogo height={28} />
+          </div>
+          <p className="mt-2 text-xs text-[#81756D]">
+            Buy and sell simply with FUHSI students · fuhsimarket.com.ng
+          </p>
+          <div className="mt-3 flex items-center justify-center gap-4 text-[11px] font-semibold text-[#81756D]">
+            <Link href="/terms" className="hover:text-[#DE6437]">
+              Terms
+            </Link>
+            <Link href="/privacy" className="hover:text-[#DE6437]">
+              Privacy
+            </Link>
+            <Link href="/marketplace" className="hover:text-[#DE6437]">
+              Marketplace
+            </Link>
+          </div>
+        </footer>
       </main>
 
-      {/* PRODUCT DETAIL MODAL */}
+      {/* App-style bottom navigation */}
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[#ECE5DE] bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-2xl items-center justify-around px-4 py-2">
+          <Link
+            href="/"
+            className="flex flex-col items-center gap-1 rounded-xl px-4 py-1 text-[#DE6437]"
+          >
+            <Store size={20} />
+            <span className="text-[10px] font-bold">Home</span>
+          </Link>
+          <a
+            href="#feed"
+            className="flex flex-col items-center gap-1 rounded-xl px-4 py-1 text-[#81756D]"
+          >
+            <Search size={20} />
+            <span className="text-[10px] font-bold">Browse</span>
+          </a>
+          <button
+            onClick={() => {
+              if (!user) requireAuth();
+              else router.push('/buyer/cart');
+            }}
+            className="relative flex flex-col items-center gap-1 rounded-xl px-4 py-1 text-[#81756D]"
+          >
+            <ShoppingCart size={20} />
+            <span className="text-[10px] font-bold">Cart</span>
+            {totalItems > 0 && (
+              <span className="absolute right-2 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-[#DE6437] px-1 text-[9px] font-black text-white">
+                {totalItems}
+              </span>
+            )}
+          </button>
+          <Link
+            href={user ? '/buyer' : '/login'}
+            className="flex flex-col items-center gap-1 rounded-xl px-4 py-1 text-[#81756D]"
+          >
+            <User size={20} />
+            <span className="text-[10px] font-bold">{user ? 'Account' : 'Sign in'}</span>
+          </Link>
+        </div>
+      </nav>
+
+      {/* Product detail sheet */}
       {selected && (
-        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center sm:p-4">
           <div
             role="dialog"
             aria-modal="true"
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-white p-6 shadow-2xl space-y-4"
+            aria-label={selected.title}
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-[2rem] bg-[#FAFAFA] p-5 shadow-2xl sm:rounded-[2rem]"
           >
-            <div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-[#f7f2ed]">
+            <div className="relative aspect-square w-full overflow-hidden rounded-[1.5rem] bg-[#F1ECE6]">
               {selected.image_url ? (
-                <img src={selected.image_url} alt={selected.title} className="h-full w-full object-cover" />
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={selected.image_url}
+                  alt={selected.title}
+                  className="h-full w-full object-cover"
+                />
               ) : (
-                <ImageIcon className="absolute inset-0 m-auto text-[#d4c9bd]" size={48} />
+                <ImageIcon className="absolute inset-0 m-auto text-[#CFC5BA]" size={48} />
               )}
               <button
                 onClick={() => setSelected(null)}
-                className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-white text-[#251d18] shadow-md hover:bg-neutral-100 transition-colors"
+                className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-white text-[#2C2C2C] shadow-md transition-colors hover:bg-[#F3EEE9]"
                 aria-label="Close"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <div className="space-y-2">
+            <div className="mt-4 space-y-2">
               {selected.category && (
-                <span className="text-xs font-black uppercase text-[#f56616] tracking-wider">
+                <span className="text-[11px] font-black uppercase tracking-wider text-[#DE6437]">
                   {selected.category}
                 </span>
               )}
 
               <div className="flex items-start justify-between gap-4">
-                <h2 className="text-xl font-black text-[#251d18]">{selected.title}</h2>
-                <span className="text-xl font-black text-[#f56616] shrink-0">₦{formatNaira(selected.price)}</span>
+                <h2 className="text-xl font-black leading-tight text-[#2C2C2C]">
+                  {selected.title}
+                </h2>
+                <span className="shrink-0 text-xl font-black text-[#DE6437]">
+                  ₦{formatNaira(selected.price)}
+                </span>
               </div>
 
-              <p className="text-xs text-[#81756d] leading-relaxed">
+              <p className="text-sm leading-relaxed text-[#5F5650]">
                 {selected.description || 'No additional details provided by the seller.'}
               </p>
 
               {selected.hostel_location && (
-                <div className="flex items-center gap-1.5 text-xs font-medium text-[#5f534b] pt-1">
-                  <MapPin size={15} className="text-[#f56616]" />
-                  <span>Hostel / Location: {selected.hostel_location}</span>
+                <div className="flex items-center gap-1.5 pt-1 text-xs font-medium text-[#5F5650]">
+                  <MapPin size={15} className="text-[#DE6437]" />
+                  <span>Hostel / location: {selected.hostel_location}</span>
                 </div>
               )}
 
-              <div className="flex items-center gap-2 p-3 bg-[#fff2eb] text-[#f56616] rounded-xl text-xs font-bold">
+              <div className="flex items-center gap-2 rounded-2xl bg-[#FDF0EA] p-3 text-xs font-bold text-[#C9511F]">
                 <ShieldCheck size={18} className="shrink-0" />
-                <span>Protected by Escrow: Money is released only when you confirm receipt.</span>
+                <span>Escrow protected: money is released only when you confirm receipt.</span>
               </div>
             </div>
 
-            <div className="flex items-center gap-3 pt-2">
+            <div className="mt-4 flex items-center gap-3">
               {!user ? (
                 <button
                   onClick={requireAuth}
-                  className="w-full flex items-center justify-center gap-2 bg-[#f56616] hover:bg-[#e0550a] text-white font-bold text-xs py-3.5 rounded-xl shadow-md transition-colors cursor-pointer"
+                  className="flex w-full items-center justify-center gap-2 rounded-full bg-[#DE6437] py-3.5 text-sm font-bold text-white shadow-md transition-colors hover:bg-[#C9511F]"
                 >
                   <Lock size={16} />
-                  <span>Sign In to Buy or Add to Cart</span>
+                  <span>Sign in to buy</span>
                 </button>
               ) : (
                 <>
@@ -767,15 +674,15 @@ export default function JumiaLandingPage() {
                       addToCartOnce(selected);
                       setSelected(null);
                     }}
-                    className="flex-1 bg-[#f56616] hover:bg-[#e0550a] text-white font-bold text-xs py-3.5 rounded-xl shadow-md transition-colors cursor-pointer"
+                    className="flex-1 rounded-full bg-[#DE6437] py-3.5 text-sm font-bold text-white shadow-md transition-colors hover:bg-[#C9511F]"
                   >
-                    ADD TO CART
+                    Add to cart
                   </button>
                   <button
                     onClick={handleBuyNowModal}
-                    className="flex-1 bg-[#282828] hover:bg-black text-white font-bold text-xs py-3.5 rounded-xl shadow-md transition-colors cursor-pointer"
+                    className="flex-1 rounded-full bg-[#2C2C2C] py-3.5 text-sm font-bold text-white shadow-md transition-colors hover:bg-black"
                   >
-                    BUY NOW
+                    Buy now
                   </button>
                 </>
               )}

@@ -2,8 +2,8 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
+import BrandLogo from '@/components/BrandLogo';
 import { User, Mail, Lock, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 const GoogleIcon = ({ size = 16 }: { size?: number }) => (
@@ -28,7 +28,6 @@ const GoogleIcon = ({ size = 16 }: { size?: number }) => (
 );
 
 export default function SignUpPage() {
-  const router = useRouter();
   const supabase = createClient();
 
   const [fullName, setFullName] = useState('');
@@ -40,7 +39,7 @@ export default function SignUpPage() {
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!fullName || !email || !password) {
       setUiStatus({ type: 'error', text: 'Please fill out all required fields.' });
       return;
@@ -51,7 +50,7 @@ export default function SignUpPage() {
 
     try {
       // Execute the signup request to Supabase Auth
-      const { data, error } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -63,25 +62,25 @@ export default function SignUpPage() {
           emailRedirectTo: `${window.location.origin}/login`,
           // The user metadata maps directly to our public profile trigger!
           data: {
-            full_name: fullName
-          }
-        }
+            full_name: fullName,
+          },
+        },
       });
 
       if (error) throw error;
 
-      setUiStatus({ 
-        type: 'success', 
-        text: 'Account initiated! Please check your campus email inbox to click the verification link.' 
+      setUiStatus({
+        type: 'success',
+        text: 'Account initiated! Please check your campus email inbox to click the verification link.',
       });
-      
+
       // Reset inputs
       setFullName('');
       setEmail('');
       setPassword('');
-
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'An error occurred during account registration.';
+      const message =
+        err instanceof Error ? err.message : 'An error occurred during account registration.';
       setUiStatus({ type: 'error', text: message });
     } finally {
       setIsSubmitting(false);
@@ -111,72 +110,86 @@ export default function SignUpPage() {
   };
 
   return (
-    <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-white px-4 py-12 font-sans text-neutral-900 select-none">
-      {/* glassmorphism backdrop orbs — same world as the onboarding */}
-      <div aria-hidden className="pointer-events-none absolute -right-24 -top-28 h-80 w-80 rounded-full bg-[#fe7743]/25 blur-3xl" />
-      <div aria-hidden className="pointer-events-none absolute -left-28 top-1/3 h-72 w-72 rounded-full bg-[#ffc3a1]/50 blur-3xl" />
-      <div aria-hidden className="pointer-events-none absolute -bottom-20 right-4 h-64 w-64 rounded-full bg-[#fe7743]/20 blur-3xl" />
-
-      <div className="relative z-10 w-full max-w-md">
-        <div className="mb-8 text-center">
-          <span className="text-2xl font-black tracking-tight text-neutral-900">FUHSI<span className="text-[#fe7743]">MARKET</span></span>
-          <p className="mt-2 text-sm font-medium text-neutral-500">Create your secure student account</p>
+    <div className="flex min-h-[100dvh] flex-col bg-[#FAFAFA] px-4 py-10 font-sans text-[#2C2C2C]">
+      <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center">
+        <div className="mb-8 flex flex-col items-center text-center">
+          <BrandLogo height={34} />
+          <h1 className="mt-5 text-2xl font-black tracking-tight text-[#2C2C2C]">
+            Create your account
+          </h1>
+          <p className="mt-1.5 text-sm text-[#81756D]">
+            Join the FUHSI campus marketplace
+          </p>
         </div>
 
-        <div className="rounded-[2rem] bg-white/60 p-7 shadow-2xl shadow-[#fe7743]/20 ring-1 ring-white/70 backdrop-blur-2xl">
+        <div className="rounded-[1.75rem] border border-[#ECE5DE] bg-white p-6 shadow-[0_14px_40px_rgba(44,44,44,0.06)]">
           <form onSubmit={handleSignUp} className="space-y-4">
             <div>
-              <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-neutral-500">Full Name</label>
+              <label htmlFor="signup-name" className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-[#81756D]">
+                Full Name
+              </label>
               <div className="relative">
-                <User className="absolute left-4 top-1/2 -translate-y-1/2 text-[#fe7743]" size={18} />
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 text-[#DE6437]" size={18} />
                 <input
+                  id="signup-name"
                   type="text"
                   placeholder="e.g., Abdulrahman..."
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  className="w-full rounded-2xl bg-white/70 py-3.5 pl-11 pr-4 text-sm text-neutral-900 outline-none ring-1 ring-black/10 transition-shadow placeholder:text-neutral-400 focus:bg-white focus:ring-2 focus:ring-[#fe7743]"
+                  autoComplete="name"
+                  className="w-full rounded-2xl border border-[#E7E0D8] bg-[#FAFAFA] py-3.5 pl-11 pr-4 text-sm text-[#2C2C2C] outline-none transition-colors placeholder:text-[#A79C92] focus:border-[#DE6437] focus:bg-white focus:ring-2 focus:ring-[#DE6437]/20"
                 />
               </div>
             </div>
 
             <div>
-              <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-neutral-500">Campus Email Address</label>
+              <label htmlFor="signup-email" className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-[#81756D]">
+                Campus Email Address
+              </label>
               <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-[#fe7743]" size={18} />
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-[#DE6437]" size={18} />
                 <input
+                  id="signup-email"
                   type="email"
                   placeholder="you@student.edu.ng"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full rounded-2xl bg-white/70 py-3.5 pl-11 pr-4 text-sm text-neutral-900 outline-none ring-1 ring-black/10 transition-shadow placeholder:text-neutral-400 focus:bg-white focus:ring-2 focus:ring-[#fe7743]"
+                  autoComplete="email"
+                  className="w-full rounded-2xl border border-[#E7E0D8] bg-[#FAFAFA] py-3.5 pl-11 pr-4 text-sm text-[#2C2C2C] outline-none transition-colors placeholder:text-[#A79C92] focus:border-[#DE6437] focus:bg-white focus:ring-2 focus:ring-[#DE6437]/20"
                 />
               </div>
             </div>
 
             <div>
-              <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-neutral-500">Secure Password</label>
+              <label htmlFor="signup-password" className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-[#81756D]">
+                Secure Password
+              </label>
               <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-[#fe7743]" size={18} />
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-[#DE6437]" size={18} />
                 <input
+                  id="signup-password"
                   type="password"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-2xl bg-white/70 py-3.5 pl-11 pr-4 text-sm text-neutral-900 outline-none ring-1 ring-black/10 transition-shadow placeholder:text-neutral-400 focus:bg-white focus:ring-2 focus:ring-[#fe7743]"
+                  autoComplete="new-password"
+                  className="w-full rounded-2xl border border-[#E7E0D8] bg-[#FAFAFA] py-3.5 pl-11 pr-4 text-sm text-[#2C2C2C] outline-none transition-colors placeholder:text-[#A79C92] focus:border-[#DE6437] focus:bg-white focus:ring-2 focus:ring-[#DE6437]/20"
                 />
               </div>
             </div>
 
             {uiStatus.text && (
-              <div className={`flex items-start space-x-2 rounded-2xl p-4 text-sm ${
-                uiStatus.type === 'error'
-                  ? 'bg-[#fe7743]/15 text-neutral-900 ring-1 ring-[#fe7743]/40'
-                  : 'bg-white/70 text-neutral-900 ring-1 ring-black/10'
-              }`}>
+              <div
+                className={`flex items-start gap-2 rounded-2xl p-4 text-sm ${
+                  uiStatus.type === 'error'
+                    ? 'bg-[#FDF0EA] text-[#9A3A17] ring-1 ring-[#DE6437]/25'
+                    : 'bg-[#EEF8F1] text-[#236B45] ring-1 ring-[#236B45]/15'
+                }`}
+              >
                 {uiStatus.type === 'error' ? (
-                  <AlertCircle className="mt-0.5 shrink-0 text-[#fe7743]" size={16} />
+                  <AlertCircle className="mt-0.5 shrink-0 text-[#DE6437]" size={16} />
                 ) : (
-                  <CheckCircle2 className="mt-0.5 shrink-0 text-[#fe7743]" size={16} />
+                  <CheckCircle2 className="mt-0.5 shrink-0 text-[#236B45]" size={16} />
                 )}
                 <span>{uiStatus.text}</span>
               </div>
@@ -185,18 +198,18 @@ export default function SignUpPage() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex w-full items-center justify-center space-x-2 rounded-full bg-[#fe7743] py-4 text-sm font-bold text-white shadow-lg shadow-[#fe7743]/40 transition-transform hover:brightness-105 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-[#DE6437] py-4 text-sm font-bold text-white shadow-[0_10px_24px_rgba(222,100,55,0.25)] transition-colors hover:bg-[#C9511F] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <span>Register Profile</span>}
+              {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <span>Create account</span>}
             </button>
           </form>
 
           <div className="relative my-6">
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-black/10" />
+              <div className="w-full border-t border-[#ECE5DE]" />
             </div>
             <div className="relative flex justify-center text-xs">
-              <span className="rounded-full bg-white/70 px-3 font-semibold text-neutral-500">or sign up with</span>
+              <span className="bg-white px-3 font-semibold text-[#81756D]">or continue with</span>
             </div>
           </div>
 
@@ -204,17 +217,31 @@ export default function SignUpPage() {
             type="button"
             onClick={handleGoogle}
             disabled={isGoogle}
-            className="flex w-full items-center justify-center space-x-2 rounded-full bg-white py-4 text-sm font-semibold text-neutral-900 ring-1 ring-black/10 transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-70"
+            className="flex w-full items-center justify-center gap-2 rounded-full border border-[#E7E0D8] bg-white py-3.5 text-sm font-semibold text-[#2C2C2C] transition-colors hover:bg-[#FAFAFA] disabled:cursor-not-allowed disabled:opacity-70"
           >
             {isGoogle ? <Loader2 className="animate-spin" size={18} /> : <GoogleIcon />}
             <span>{isGoogle ? 'Redirecting to Google…' : 'Continue with Google'}</span>
           </button>
         </div>
 
-        <p className="mt-6 text-center text-xs text-neutral-500">
-          Already verified?{' '}
-          <Link href="/login" className="font-bold text-[#fe7743] hover:underline">
-            Log in here
+        <p className="mt-6 text-center text-xs text-[#81756D]">
+          Already have an account?{' '}
+          <Link href="/login" className="font-bold text-[#DE6437] hover:underline">
+            Sign in
+          </Link>
+        </p>
+
+        <p className="mt-6 text-center text-[11px] text-[#A79C92]">
+          <Link href="/" className="hover:text-[#DE6437]">
+            Back to market
+          </Link>
+          <span className="mx-2">·</span>
+          <Link href="/terms" className="hover:text-[#DE6437]">
+            Terms
+          </Link>
+          <span className="mx-2">·</span>
+          <Link href="/privacy" className="hover:text-[#DE6437]">
+            Privacy
           </Link>
         </p>
       </div>

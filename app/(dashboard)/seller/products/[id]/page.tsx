@@ -6,16 +6,9 @@ import { createClient } from '@/utils/supabase';
 import { nairaToKobo, koboToNaira } from '@/utils/money';
 import { uploadProductImage, getSellerStorageUsed } from '@/utils/upload';
 import { Package, Loader2, ArrowLeft, UploadCloud, Database } from 'lucide-react';
+import { PRODUCT_CATEGORIES } from '@/utils/categories';
 
-const CATEGORIES = [
-  'General',
-  'Textbooks & Academics',
-  'Electronics & Gadgets',
-  'Fashion & Apparel',
-  'Hostel & Room Essentials',
-  'Food & Snacks',
-  'Services',
-];
+const CATEGORIES = PRODUCT_CATEGORIES;
 
 export default function EditProductPage() {
   const router = useRouter();
