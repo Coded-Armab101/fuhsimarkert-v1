@@ -93,7 +93,7 @@ export default async function SellerSubscribePage() {
           href="/buyer/profile"
           className="w-full inline-flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 text-white font-bold text-xs py-3.5 rounded-2xl transition-all shadow-xl shadow-red-950/50"
         >
-          {hasLapsed ? 'Renew Seller Plan' : 'Choose Seller Role'}
+          {hasLapsed ? 'Pay for next month' : 'Choose Seller Role'}
           <ArrowRight size={14} />
         </Link>
 

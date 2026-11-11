@@ -2,7 +2,8 @@
 "use client";
 
 import Link from "next/link";
-import { User, ShieldCheck, ArrowRight } from "lucide-react";
+import { User, ShieldCheck, ArrowRight, ArrowLeftRight } from "lucide-react";
+import PushNotificationToggle from "@/components/PushNotificationToggle";
 
 export default function SettingsPage() {
   return (
@@ -12,6 +13,31 @@ export default function SettingsPage() {
         <p className="text-xs text-[#81756d] mt-1">
           Manage your account security and seller profile settings.
         </p>
+      </div>
+
+      <PushNotificationToggle />
+
+      <div className="bg-white border border-[#eee4dc] rounded-[1.75rem] p-6 shadow-sm space-y-4">
+        <div className="flex items-center gap-3 border-b border-[#f0e9e2] pb-4">
+          <div className="w-10 h-10 rounded-2xl bg-[#fff0e9] border border-[#ffe0cf] flex items-center justify-center text-[#ef6b3b]">
+            <ArrowLeftRight size={20} />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-[#251d18]">Switch to buyer</h2>
+            <p className="text-xs text-[#81756d]">
+              Browse the market, track purchases and shop with your wallet balance.
+            </p>
+          </div>
+        </div>
+
+        <Link
+          href="/buyer"
+          className="inline-flex items-center justify-center gap-2 bg-[#ef6b3b] hover:bg-[#d8552e] text-white font-bold text-xs py-3 px-5 rounded-2xl transition-all cursor-pointer shadow-sm"
+        >
+          <ArrowLeftRight size={15} />
+          <span>Go to buyer market</span>
+          <ArrowRight size={15} />
+        </Link>
       </div>
 
       <div className="bg-white border border-[#eee4dc] rounded-[1.75rem] p-6 shadow-sm space-y-4">

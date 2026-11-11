@@ -3,15 +3,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Package, ShoppingBag, Settings, LogOut, Wallet, ArrowLeftRight, Clock } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Settings, Wallet, Clock } from 'lucide-react';
 import OrderNotificationBell from '@/components/OrderNotificationBell';
 import { createClient } from '@/utils/supabase';
-import { useRouter } from 'next/navigation';
 import SellerVerificationGate, { type SellerGateProfile } from '../SellerVerificationGate';
 
 export default function SellerLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
   const supabase = createClient();
 
   const [gateProfile, setGateProfile] = useState<SellerGateProfile | null>(null);
@@ -42,13 +40,11 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
   }, [supabase]);
 
   useEffect(() => {
-    void refreshGate();
+    // Deferred so the first paint is never blocked by the profile round-trip;
+    // the gate skeleton shows until `refreshGate` resolves.
+    const timer = window.setTimeout(() => void refreshGate(), 0);
+    return () => window.clearTimeout(timer);
   }, [refreshGate]);
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push('/login');
-  };
 
   const sellerNav = [
     { label: 'Overview', href: '/seller', icon: LayoutDashboard },
@@ -86,23 +82,6 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
         </div>
         <div className="flex items-center gap-2">
           {approved && <OrderNotificationBell role="seller" />}
-          <button
-            onClick={() => router.push('/buyer/profile')}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#fff0e9] text-xs font-bold text-[#b94a29] hover:bg-[#ffe2d2] transition-colors cursor-pointer"
-            aria-label="Switch to your buyer profile"
-          >
-            <ArrowLeftRight size={13} />
-            <span className="hidden sm:inline">Buyer</span>
-            <span className="sm:hidden">Buyer</span>
-          </button>
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f6efe9] text-xs font-bold text-[#81756d] hover:text-[#b04a27] transition-colors cursor-pointer"
-          >
-            <LogOut size={13} />
-            <span className="hidden sm:inline">Exit</span>
-            <span className="sm:hidden">Exit</span>
-          </button>
         </div>
       </header>
 

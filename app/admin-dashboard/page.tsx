@@ -21,8 +21,12 @@ import {
   LayoutDashboard,
   Users,
   RefreshCw,
+  Sun,
+  Moon,
+  Wallet,
 } from 'lucide-react';
 import OverviewTab from './_components/OverviewTab';
+import MoneyTab from './_components/MoneyTab';
 import PeopleTab from './_components/PeopleTab';
 import type { AdminOverview, AdminTab } from '@/utils/admin/metrics';
 
@@ -104,6 +108,17 @@ export default function AdminDashboardPage() {
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [tab, setTab] = useState<AdminTab>('overview');
   const [refreshToken, setRefreshToken] = useState(0);
+  // Read the saved theme during the first client render. The main board is not
+  // part of the initial server HTML (admin access is checked client-side), so
+  // this cannot cause a hydration mismatch.
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    if (typeof window === 'undefined') return 'dark';
+    return window.localStorage.getItem('fuhsi_admin_theme') === 'light' ? 'light' : 'dark';
+  });
+
+  useEffect(() => {
+    window.localStorage.setItem('fuhsi_admin_theme', theme);
+  }, [theme]);
 
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [oLoading, setOLoading] = useState(true);
@@ -342,6 +357,7 @@ setSLoading(false);
 
   const tabs: Array<{ id: AdminTab; label: string; icon: React.ReactNode; badge?: number; danger?: boolean }> = [
     { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={14} />, badge: dangerAlerts, danger: true },
+    { id: 'money', label: 'Money', icon: <Wallet size={14} /> },
     { id: 'people', label: 'People', icon: <Users size={14} /> },
     { id: 'withdrawals', label: 'Payouts', icon: <Banknote size={14} />, badge: pendingCount },
     { id: 'verifications', label: 'Verifications', icon: <IdCard size={14} />, badge: pendingVerifications },
@@ -350,7 +366,7 @@ setSLoading(false);
   ];
 
   return (
-    <div className="min-h-screen bg-[#070708] text-white px-4 py-6 sm:py-8">
+    <div className={`min-h-screen bg-[#070708] text-white px-4 py-6 sm:py-8 ${theme === 'light' ? 'admin-light' : ''}`}>
       <div className="mx-auto max-w-6xl">
         <header className="mb-4 flex flex-col gap-4 rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.07] via-white/[0.025] to-transparent p-4 sm:flex-row sm:items-center">
           <div className="flex items-center gap-3">
@@ -370,6 +386,15 @@ setSLoading(false);
                 Updated {new Date(overview.generatedAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}
               </span>
             ) : null}
+            <button
+              onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+              aria-label={theme === 'dark' ? 'Switch admin board to light mode' : 'Switch admin board to dark mode'}
+              title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-neutral-300 transition-colors hover:text-white"
+            >
+              {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+              <span className="hidden sm:inline">{theme === 'dark' ? 'Light' : 'Dark'}</span>
+            </button>
             <button
               onClick={refreshAll}
               disabled={refreshing}
@@ -461,6 +486,13 @@ setSLoading(false);
             error={oError}
             onRetry={loadOverview}
             onOpenTab={setTab}
+          />
+        ) : tab === 'money' ? (
+          <MoneyTab
+            data={overview}
+            loading={oLoading}
+            error={oError}
+            onRetry={loadOverview}
           />
         ) : tab === 'people' ? (
           <PeopleTab onOpenTab={setTab} refreshToken={refreshToken} />

@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bell, CheckCheck } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
+import PushNotificationToggle from '@/components/PushNotificationToggle';
 
 interface OrderNotice {
   id: string;
@@ -35,7 +36,7 @@ export default function OrderNotificationBell({ role, className = '' }: Props) {
 
   const storageKey = `fuhsi_order_notifications_${role}`;
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     const query = supabase.from('orders').select('id,status,order_ref,created_at,products(title)').order('created_at', { ascending: false }).limit(30);
@@ -64,13 +65,18 @@ export default function OrderNotificationBell({ role, className = '' }: Props) {
     setUnreadIds(Array.from(nextUnread));
     localStorage.setItem(`${storageKey}_snapshot`, JSON.stringify(current));
     localStorage.setItem(`${storageKey}_unread`, JSON.stringify(Array.from(nextUnread)));
-  };
+  }, [role, storageKey, supabase]);
 
   useEffect(() => {
-    void load();
+    // Kick off the first fetch on the next tick so the bell can paint
+    // immediately, then poll for status changes while the app stays open.
+    const first = window.setTimeout(() => void load(), 0);
     const timer = window.setInterval(() => void load(), 30000);
-    return () => window.clearInterval(timer);
-  }, [role]);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+    };
+  }, [load]);
 
   const unread = useMemo(() => new Set(unreadIds), [unreadIds]);
 
@@ -110,6 +116,7 @@ export default function OrderNotificationBell({ role, className = '' }: Props) {
             ))}
             {orders.length === 0 && <p className="p-6 text-center text-xs text-[#81756d]">No order notifications yet.</p>}
           </div>
+          {role === 'seller' && <PushNotificationToggle variant="inline" />}
         </div>
       )}
     </div>

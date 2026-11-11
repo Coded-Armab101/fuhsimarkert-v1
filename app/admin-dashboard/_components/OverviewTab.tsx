@@ -347,6 +347,12 @@ export default function OverviewTab({ data, loading, error, onRetry, onOpenTab }
             <MoneyLine label="Buyer wallet float" value={data.money.buyerWalletKobo} />
             <MoneyLine label="All-time paid out" value={data.money.paidWithdrawalsKobo} />
           </div>
+          <button
+            onClick={() => onOpenTab('money')}
+            className="flex w-full items-center justify-center gap-1.5 border-t border-white/10 py-2.5 text-[10px] font-bold text-neutral-400 transition-colors hover:bg-white/5 hover:text-white"
+          >
+            See the full money split <ArrowRight size={11} />
+          </button>
           <div className="grid grid-cols-3 gap-2 border-t border-white/10 px-4 py-3 text-center">
             <div>
               <p className="text-lg font-black text-white">{data.catalogue.total}</p>

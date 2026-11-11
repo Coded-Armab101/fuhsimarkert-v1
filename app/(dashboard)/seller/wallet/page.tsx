@@ -131,12 +131,12 @@ export default function SellerWalletPage() {
   return (
     <div className="seller-secondary mx-auto max-w-2xl space-y-5 py-2">
       <button onClick={() => router.push('/seller')} className="text-xs font-bold text-[#81756d] hover:text-[#d8552e]">← Back to seller home</button>
-      <div className="rounded-[2rem] bg-gradient-to-br from-[#2e2520] to-[#544038] p-6 text-white shadow-xl">
-        <div className="flex items-center justify-between"><div><p className="text-xs text-white/65">FuhsiMarket wallet</p><h1 className="mt-1 text-xl font-black">Your money</h1></div><div className="grid h-11 w-11 place-items-center rounded-2xl bg-white/15"><Wallet size={20}/></div></div>
-        <p className="mt-8 text-xs text-white/65">Available to withdraw</p><p className="mt-1 text-4xl font-black tracking-tight">₦{formatNaira(balanceKobo)}</p>
+      <div className="wallet-hero rounded-[2rem] bg-gradient-to-br from-[#2e2520] to-[#544038] p-6 text-white shadow-xl">
+        <div className="flex items-center justify-between"><div><p className="wallet-muted text-xs text-white/65">FuhsiMarket wallet</p><h1 className="mt-1 text-xl font-black">Your money</h1></div><div className="grid h-11 w-11 place-items-center rounded-2xl bg-white/15"><Wallet size={20}/></div></div>
+        <p className="wallet-muted mt-8 text-xs text-white/65">Available to withdraw</p><p className="mt-1 text-4xl font-black tracking-tight">₦{formatNaira(balanceKobo)}</p>
         <div className="mt-5 grid grid-cols-2 gap-2">
-          <button onClick={() => document.getElementById('withdraw')?.scrollIntoView({behavior:'smooth'})} className="flex items-center justify-center gap-2 rounded-2xl bg-[#ef6b3b] py-3.5 text-xs font-bold"><Banknote size={16}/>Withdraw money</button>
-          <button onClick={() => router.push('/buyer')} className="flex items-center justify-center gap-2 rounded-2xl bg-white/20 hover:bg-white/30 text-white py-3.5 text-xs font-bold transition-colors"><ShoppingBag size={16}/>Shop with wallet</button>
+          <button onClick={() => document.getElementById('withdraw')?.scrollIntoView({behavior:'smooth'})} className="flex items-center justify-center gap-2 rounded-2xl bg-[#ef6b3b] py-3.5 text-xs font-bold text-white"><Banknote size={16}/>Withdraw money</button>
+          <button onClick={() => router.push('/buyer')} className="flex items-center justify-center gap-2 rounded-2xl bg-white/20 hover:bg-white/30 py-3.5 text-xs font-bold text-white transition-colors"><ShoppingBag size={16}/>Shop with wallet</button>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3"><div className="rounded-[1.5rem] bg-white p-4 shadow-sm"><div className="flex items-center gap-2 text-xs text-[#81756d]"><Clock size={14} className="text-[#ef6b3b]"/>On the way</div><p className="mt-2 text-lg font-black text-[#251d18]">₦{formatNaira(pendingKobo)}</p><p className="mt-1 text-[10px] text-[#81756d]">Withdrawal requests</p></div><div className="rounded-[1.5rem] bg-white p-4 shadow-sm"><div className="flex items-center gap-2 text-xs text-[#81756d]"><CheckCircle2 size={14} className="text-[#17805b]"/>Paid out</div><p className="mt-2 text-lg font-black text-[#251d18]">₦{formatNaira(paidKobo)}</p><p className="mt-1 text-[10px] text-[#81756d]">All-time withdrawals</p></div></div>
@@ -161,53 +161,53 @@ export default function SellerWalletPage() {
         {feedback && (
           <div className={`p-3 rounded-xl text-xs font-mono border ${
             feedback.kind === 'ok'
-              ? 'bg-emerald-950/20 border-emerald-900/40 text-emerald-400'
-              : 'bg-red-950/20 border-red-900/40 text-red-400'
+              ? 'bg-[#ecfdf5] border-[#c7f0dd] text-[#17805b]'
+              : 'bg-[#fef2f2] border-[#f6d3d0] text-[#b42318]'
           }`}>
             {feedback.msg}
           </div>
         )}
 
         <div className="space-y-2">
-          <label className="block text-[11px] font-mono text-neutral-400">Amount (₦)</label>
+          <label className="block text-[11px] font-mono text-[#81756d]">Amount (₦)</label>
           <input
             type="number"
             min="1"
             value={amountInput}
             onChange={(e) => setAmountInput(e.target.value)}
             placeholder="e.g. 5000"
-            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-emerald-600"
+            className="w-full bg-[#faf6f2] border border-[#e8ddd4] rounded-xl px-4 py-3 text-sm text-[#251d18] outline-none focus:border-[#ef6b3b] placeholder:text-[#a89a90]"
           />
         </div>
 
         <div className="space-y-2">
-          <label className="block text-[11px] font-mono text-neutral-400">Bank Name</label>
+          <label className="block text-[11px] font-mono text-[#81756d]">Bank Name</label>
           <input
             value={bankName}
             onChange={(e) => setBankName(e.target.value)}
             placeholder="e.g. GTBank"
-            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-emerald-600"
+            className="w-full bg-[#faf6f2] border border-[#e8ddd4] rounded-xl px-4 py-3 text-sm text-[#251d18] outline-none focus:border-[#ef6b3b] placeholder:text-[#a89a90]"
           />
         </div>
 
         <div className="space-y-2">
-          <label className="block text-[11px] font-mono text-neutral-400">Account Name</label>
+          <label className="block text-[11px] font-mono text-[#81756d]">Account Name</label>
           <input
             value={accountName}
             onChange={(e) => setAccountName(e.target.value)}
             placeholder="Full name on account"
-            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-emerald-600"
+            className="w-full bg-[#faf6f2] border border-[#e8ddd4] rounded-xl px-4 py-3 text-sm text-[#251d18] outline-none focus:border-[#ef6b3b] placeholder:text-[#a89a90]"
           />
         </div>
 
         <div className="space-y-2">
-          <label className="block text-[11px] font-mono text-neutral-400">Account Number</label>
+          <label className="block text-[11px] font-mono text-[#81756d]">Account Number</label>
           <input
             value={accountNumber}
             onChange={(e) => setAccountNumber(e.target.value)}
             placeholder="10-digit account number"
             inputMode="numeric"
-            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-emerald-600"
+            className="w-full bg-[#faf6f2] border border-[#e8ddd4] rounded-xl px-4 py-3 text-sm text-[#251d18] outline-none focus:border-[#ef6b3b] placeholder:text-[#a89a90]"
           />
         </div>
 
@@ -228,26 +228,26 @@ export default function SellerWalletPage() {
         </h2>
 
         {withdrawals.length === 0 ? (
-          <p className="text-xs text-neutral-500 font-mono">No withdrawals yet.</p>
+          <p className="text-xs text-[#81756d] font-mono">No withdrawals yet.</p>
         ) : (
           <div className="space-y-3">
             {withdrawals.map((w) => (
-              <div key={w.id} className="flex items-center justify-between border border-neutral-800 rounded-xl p-4">
-                <div>
-                  <p className="text-base font-mono font-black text-neutral-100">
+              <div key={w.id} className="flex items-center justify-between gap-3 border border-[#eee4dc] bg-[#fffdfa] rounded-xl p-4">
+                <div className="min-w-0">
+                  <p className="text-base font-mono font-black text-[#251d18]">
                     ₦{formatNaira(w.amount_kobo)}
                   </p>
-                  <p className="text-[10px] text-neutral-500 font-mono">
+                  <p className="text-[10px] text-[#81756d] font-mono truncate">
                     {w.bank_name || '—'} ••••{w.account_number ? w.account_number.slice(-4) : '—'} ·{' '}
                     {new Date(w.created_at).toLocaleDateString()}
                   </p>
                 </div>
-                <span className={`flex items-center gap-1 text-[10px] font-mono uppercase px-2.5 py-1 rounded border ${
+                <span className={`flex shrink-0 items-center gap-1 text-[10px] font-mono uppercase px-2.5 py-1 rounded border ${
                   w.status === 'paid'
-                    ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-400'
+                    ? 'bg-[#ecfdf5] border-[#c7f0dd] text-[#17805b]'
                     : w.status === 'failed' || w.status === 'rejected'
-                      ? 'bg-red-950/40 border-red-800/60 text-red-400'
-                      : 'bg-amber-950/40 border-amber-800/60 text-amber-400'
+                      ? 'bg-[#fef2f2] border-[#f6d3d0] text-[#b42318]'
+                      : 'bg-[#fff7e8] border-[#f2e0b8] text-[#8a650f]'
                 }`}>
                   {w.status === 'paid' ? <CheckCircle2 size={11} /> : <Clock size={11} />}
                   {STATUS_LABEL[w.status] || w.status}

@@ -3,11 +3,11 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { User, Wallet, Landmark, Save, PlusCircle, Cake, Store, X, CheckCircle, Zap, LayoutDashboard, Loader2, LogOut, IdCard, UploadCloud, ShieldCheck, Lock } from 'lucide-react';
+import { User, Wallet, Landmark, Save, PlusCircle, Cake, Store, X, CheckCircle, Zap, LayoutDashboard, Loader2, LogOut, IdCard, UploadCloud, ShieldCheck, Lock, RefreshCw } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
 import { useCart } from '@/context/CartContext';
 import { ROLE_PLANS, type RolePlan } from '@/utils/plans';
-import { activeRole } from '@/utils/roles';
+import { activeRole, hasLapsedRole } from '@/utils/roles';
 import { formatNaira } from '@/utils/money';
 import { uploadStudentId, uploadVerificationVideo } from '@/utils/verify';
 import VerificationRecorder from '../VerificationRecorder';
@@ -57,9 +57,18 @@ export default function ProfilePage() {
 
   // Track if user has an active seller subscription
   const [isSeller, setIsSeller] = useState(false);
+  // True when the user used to be a seller but the paid month has run out.
+  // Those users need a renew CTA, not a "choose a role" pitch.
+  const [sellerLapsed, setSellerLapsed] = useState(false);
 
   // State for Role Selection Modal
   const [showRoleModal, setShowRoleModal] = useState(false);
+  const [roleModalMode, setRoleModalMode] = useState<'subscribe' | 'renew'>('subscribe');
+
+  const openRoleModal = (mode: 'subscribe' | 'renew') => {
+    setRoleModalMode(mode);
+    setShowRoleModal(true);
+  };
 
   // Password Change State
   const [passwordForm, setPasswordForm] = useState({
@@ -146,7 +155,10 @@ export default function ProfilePage() {
 
       if (isMounted) {
         if (savedAvatar) setAvatar(savedAvatar);
-        setIsSeller(activeRole(profile) !== null);
+        const paidSellerActive = activeRole(profile) !== null;
+        const usedToSell = profile?.is_seller === true || profile?.seller_active === true;
+        setIsSeller(paidSellerActive);
+        setSellerLapsed(!paidSellerActive && usedToSell && hasLapsedRole(profile));
         setVerification({
           isApproved: profile?.is_approved_seller === true,
           status: profile?.verification_status || null,
@@ -177,7 +189,7 @@ export default function ProfilePage() {
   return () => {
     isMounted = false;
   };
-}, []);
+}, [supabase]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -455,9 +467,17 @@ export default function ProfilePage() {
             <ShieldCheck size={16} />
             <span>Complete Verification to Sell</span>
           </button>
+        ) : sellerLapsed ? (
+          <button
+            onClick={() => openRoleModal('renew')}
+            className="bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-4 py-3 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-red-950/40 active:scale-95 cursor-pointer"
+          >
+            <RefreshCw size={16} />
+            <span>Renew for next month</span>
+          </button>
         ) : (
-          <button 
-            onClick={() => setShowRoleModal(true)}
+          <button
+            onClick={() => openRoleModal('subscribe')}
             className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-4 py-3 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-amber-950/30 active:scale-95 cursor-pointer"
           >
             <PlusCircle size={16} />
@@ -484,7 +504,7 @@ export default function ProfilePage() {
         <button onClick={() => document.getElementById('profile-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><User size={17} className="text-[#d8552e]" />Manage profile</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
         <button onClick={() => document.getElementById('wallet-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Wallet size={17} className="text-[#d8552e]" />Wallet and bank</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
         <button onClick={() => document.getElementById('security-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Lock size={17} className="text-[#d8552e]" />Security & Change Password</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
-        <button onClick={() => isSeller ? document.getElementById('seller-details')?.scrollIntoView({ behavior: 'smooth' }) : setShowRoleModal(true)} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Store size={17} className="text-[#d8552e]" />Selling on FuhsiMarket</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
+        <button onClick={() => isSeller ? document.getElementById('seller-details')?.scrollIntoView({ behavior: 'smooth' }) : openRoleModal(sellerLapsed ? 'renew' : 'subscribe')} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Store size={17} className="text-[#d8552e]" />Selling on FuhsiMarket</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
       </section>
 
       {/* SELLER VERIFICATION ONBOARDING */}
@@ -795,10 +815,16 @@ export default function ProfilePage() {
             {/* MODAL HEADER */}
             <div className="space-y-1 text-center sm:text-left">
               <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-amber-500 bg-amber-950/50 px-2.5 py-0.5 rounded border border-amber-800/60">
-                FUHSI Role Activation
+                {roleModalMode === 'renew' ? 'FUHSI Seller Renewal' : 'FUHSI Role Activation'}
               </span>
-              <h2 className="text-xl sm:text-2xl font-black text-white">Choose a Role to Become</h2>
-              <p className="text-xs text-neutral-400">Select how you want to expand your profile capabilities on FUHSI Market.</p>
+              <h2 className="text-xl sm:text-2xl font-black text-white">
+                {roleModalMode === 'renew' ? 'Renew your seller plan' : 'Choose a Role to Become'}
+              </h2>
+              <p className="text-xs text-neutral-400">
+                {roleModalMode === 'renew'
+                  ? 'Your paid month has ended. Renew now to reopen your Seller Studio, keep your listings live and keep accepting orders.'
+                  : 'Select how you want to expand your profile capabilities on FUHSI Market.'}
+              </p>
             </div>
 
             {/* OPTIONS GRID */}
@@ -817,9 +843,13 @@ export default function ProfilePage() {
                   </div>
 
                   <div>
-                    <h3 className="text-base font-bold text-white">Become a Seller</h3>
+                    <h3 className="text-base font-bold text-white">
+                      {roleModalMode === 'renew' ? 'Renew Seller Plan' : 'Become a Seller'}
+                    </h3>
                     <p className="text-xs text-neutral-400 mt-1">
-                      List and sell your goods, electronics, books, or hostel services directly to students.
+                      {roleModalMode === 'renew'
+                        ? 'Adds another 30 days to your seller access. Your products, orders and verification stay exactly as they are.'
+                        : 'List and sell your goods, electronics, books, or hostel services directly to students.'}
                     </p>
                   </div>
 
@@ -849,8 +879,12 @@ export default function ProfilePage() {
                       </>
                     ) : (
                       <>
-                        <span>Become Seller ({naira(ROLE_PLANS.seller.amount)}/mo)</span>
-                        <Zap size={14} />
+                        <span>
+                          {roleModalMode === 'renew'
+                            ? `Renew for next month (${naira(ROLE_PLANS.seller.amount)})`
+                            : `Become Seller (${naira(ROLE_PLANS.seller.amount)}/mo)`}
+                        </span>
+                        {roleModalMode === 'renew' ? <RefreshCw size={14} /> : <Zap size={14} />}
                       </>
                     )}
                   </button>
@@ -861,7 +895,10 @@ export default function ProfilePage() {
 
             {/* MODAL FOOTER */}
             <div className="text-center text-[11px] text-neutral-500 border-t border-neutral-900 pt-3">
-              💡 <strong>Pro Tip:</strong> Becoming a Seller unlocks your Studio, product listings and escrow payout access.
+              💡 <strong>Pro Tip:</strong>{' '}
+              {roleModalMode === 'renew'
+                ? 'Renewing keeps your existing listings and seller verification — nothing needs to be re-uploaded.'
+                : 'Becoming a Seller unlocks your Studio, product listings and escrow payout access.'}
             </div>
 
           </div>

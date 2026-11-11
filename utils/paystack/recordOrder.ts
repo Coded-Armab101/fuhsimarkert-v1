@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { sellerCommissionKobo, buyerServiceFeeKobo } from '@/utils/pricing';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { sendPushToUsers } from '@/utils/push';
 
 /**
  * Shared order-creation routine for a successful Paystack payment.
@@ -250,10 +251,34 @@ export async function recordOrder(
       message: 'A buyer has paid for your product. Open Sales to prepare the order.',
       order_id: order.id,
     }));
-    const { error: notificationError } = await admin
+    const { data: insertedNotifications, error: notificationError } = await admin
       .from('notifications')
-      .upsert(notifications, { onConflict: 'user_id,order_id,type', ignoreDuplicates: true });
-    if (notificationError) console.error('[recordOrder] seller notification failed', notificationError);
+      .upsert(notifications, { onConflict: 'user_id,order_id,type', ignoreDuplicates: true })
+      .select('user_id');
+    if (notificationError) {
+      console.error('[recordOrder] seller notification failed', notificationError);
+    } else if (insertedNotifications?.length) {
+      // Only push for rows that were actually inserted. A webhook/verify retry
+      // returns nothing here, so the seller does not get the same alert twice.
+      const sellerIds = Array.from(
+        new Set(
+          insertedNotifications
+            .map((row) => row.user_id as string | null)
+            .filter((id): id is string => Boolean(id)),
+        ),
+      );
+      try {
+        await sendPushToUsers(admin, sellerIds, {
+          title: 'New paid order',
+          body: 'A buyer has paid for your product. Open Sales to prepare the order.',
+          url: '/seller/orders',
+          tag: `order-${input.reference}`,
+        });
+      } catch (pushError) {
+        // Push is best-effort: never fail a paid order because a phone was offline.
+        console.error('[recordOrder] push notification failed', pushError);
+      }
+    }
   }
 
   // One escrow ledger row per escrowed order, held until the buyer confirms

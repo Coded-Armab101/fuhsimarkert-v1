@@ -85,3 +85,98 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 .seller-shell [class*="bg-sky-9"] { background-color:#eff6ff !important; }
 .seller-shell [class*="text-white"]:not(button):not(a), .seller-shell [class*="text-neutral-2"], .seller-shell [class*="text-neutral-3"] { color:#251d18 !important; }
 .buyer-secondary input:focus, .buyer-secondary select:focus, .buyer-secondary textarea:focus { outline: 3px solid rgba(239,107,59,.28) !important; outline-offset: 2px; border-color:#ef6b3b !important; }
+
+/* Dark hero cards must keep their own white text even though the surrounding
+   seller shell remaps every `text-white` element to dark ink. */
+.seller-shell .wallet-hero,
+.seller-shell .wallet-hero * { color: #ffffff !important; }
+.seller-shell .wallet-hero .wallet-muted { color: rgba(255,255,255,.72) !important; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Admin console light theme
+   The operator board was built dark-first. `.admin-light` remaps the same
+   utility classes to the buyer/seller light palette, so a single toggle flips
+   the whole console without touching every component. Buttons and links are
+   excluded from the neutral overrides so their accent backgrounds keep the
+   contrast they were designed with.
+   ───────────────────────────────────────────────────────────────────────── */
+.admin-light {
+  background-color: #faf7f4 !important;
+  color: #251d18 !important;
+}
+.admin-light [class*="bg-[#070708]"] { background-color: #faf7f4 !important; }
+.admin-light [class*="from-white/"] { background-image: none !important; background-color: #ffffff !important; }
+.admin-light [class*="bg-neutral-950"]:not(button):not(a) {
+  background-color: #ffffff !important;
+  border-color: #eee4dc !important;
+  box-shadow: 0 8px 24px rgba(65, 42, 29, .06) !important;
+}
+.admin-light [class*="bg-neutral-900"]:not(button):not(a) {
+  background-color: #faf6f2 !important;
+  border-color: #eee4dc !important;
+}
+.admin-light [class*="bg-neutral-8"]:not(button):not(a),
+.admin-light [class*="bg-neutral-7"]:not(button):not(a),
+.admin-light [class*="bg-neutral-6"]:not(button):not(a) {
+  background-color: #f1eae3 !important;
+  border-color: #eee4dc !important;
+}
+.admin-light [class*="bg-white/[0.035]"] { background-color: #ffffff !important; }
+.admin-light [class*="bg-white/"] { background-color: rgba(255, 255, 255, .75) !important; }
+.admin-light [class*="border-neutral-"]:not(button),
+.admin-light [class*="border-white/"] { border-color: #ece2da !important; }
+.admin-light [class*="divide-white/"] > * + * { border-color: #f0e9e2 !important; }
+.admin-light [class*="text-white"]:not(button) { color: #251d18 !important; }
+.admin-light [class*="text-[#FFB08F]"] { color: #c9552e !important; }
+.admin-light [class*="text-neutral-1"],
+.admin-light [class*="text-neutral-2"],
+.admin-light [class*="text-neutral-3"] { color: #251d18 !important; }
+.admin-light [class*="text-neutral-4"],
+.admin-light [class*="text-neutral-5"],
+.admin-light [class*="text-neutral-6"],
+.admin-light [class*="text-neutral-7"] { color: #81756d !important; }
+.admin-light input,
+.admin-light select,
+.admin-light textarea {
+  background-color: #ffffff !important;
+  border-color: #e8ddd4 !important;
+  color: #251d18 !important;
+}
+.admin-light input::placeholder { color: #a89a90 !important; }
+
+/* Status tones: swap the dark tinted pills for soft light ones. */
+.admin-light [class*="bg-amber-5"]:not(button):not(a),
+.admin-light [class*="bg-amber-9"]:not(button):not(a) { background-color: #fff7e8 !important; }
+.admin-light [class*="border-amber-5"],
+.admin-light [class*="border-amber-8"] { border-color: #f2e0b8 !important; }
+.admin-light [class*="text-amber-1"],
+.admin-light [class*="text-amber-3"] { color: #8a650f !important; }
+
+.admin-light [class*="bg-emerald-5"]:not(button):not(a),
+.admin-light [class*="bg-emerald-9"]:not(button):not(a) { background-color: #ecfdf5 !important; }
+.admin-light [class*="border-emerald-5"],
+.admin-light [class*="border-emerald-8"],
+.admin-light [class*="border-emerald-9"] { border-color: #c7f0dd !important; }
+.admin-light [class*="text-emerald-1"],
+.admin-light [class*="text-emerald-3"],
+.admin-light [class*="text-emerald-4"] { color: #17805b !important; }
+
+.admin-light [class*="bg-red-5"]:not(button):not(a),
+.admin-light [class*="bg-red-9"]:not(button):not(a) { background-color: #fef2f2 !important; }
+.admin-light [class*="border-red-5"],
+.admin-light [class*="border-red-8"],
+.admin-light [class*="border-red-9"] { border-color: #f6d3d0 !important; }
+.admin-light [class*="text-red-1"],
+.admin-light [class*="text-red-3"],
+.admin-light [class*="text-red-4"] { color: #b42318 !important; }
+
+.admin-light [class*="bg-sky-5"]:not(button):not(a),
+.admin-light [class*="bg-blue-5"]:not(button):not(a) { background-color: #eff6ff !important; }
+.admin-light [class*="border-sky-5"],
+.admin-light [class*="border-blue-5"] { border-color: #d6e4ff !important; }
+.admin-light [class*="text-sky-3"] { color: #0369a1 !important; }
+.admin-light [class*="text-blue-3"] { color: #1d4ed8 !important; }
+
+.admin-light [class*="bg-violet-5"]:not(button):not(a) { background-color: #f5f3ff !important; }
+.admin-light [class*="border-violet-5"] { border-color: #e4dcff !important; }
+.admin-light [class*="text-violet-3"] { color: #6d28d9 !important; }

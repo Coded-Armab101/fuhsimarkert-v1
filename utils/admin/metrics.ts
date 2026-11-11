@@ -12,6 +12,7 @@ import { buyerServiceFeeKobo, sellerCommissionKobo } from '@/utils/pricing';
 
 export type AdminTab =
   | 'overview'
+  | 'money'
   | 'people'
   | 'withdrawals'
   | 'verifications'

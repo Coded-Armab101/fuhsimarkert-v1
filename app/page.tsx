@@ -201,7 +201,10 @@ export default function LandingPage() {
   const [selected, setSelected] = useState<Product | null>(null);
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [wishlistIds, setWishlistIds] = useState<Record<string, string>>({});
-  const [shuffleSeed, setShuffleSeed] = useState(1);
+  // A fresh seed per visit keeps the catalogue from freezing into the same
+  // order for everyone. It is also reset on every sign-in/sign-out below, so
+  // logging out and back in shows a genuinely new arrangement.
+  const [shuffleSeed, setShuffleSeed] = useState(newShuffleSeed);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -221,6 +224,17 @@ export default function LandingPage() {
       }
     };
     checkAuth();
+
+    // `getUser` only runs on mount, but signing in or out can happen without a
+    // full page reload. Reshuffle on both so the first screen after login is
+    // never the same order as the last screen before logout.
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      setShuffleSeed(newShuffleSeed());
+    });
+
+    return () => subscription.unsubscribe();
   }, [supabase]);
 
   useEffect(() => {
@@ -290,8 +304,9 @@ export default function LandingPage() {
   }, [products]);
 
   // Display order is deliberately scattered rather than newest-first so one
-  // seller cannot own the top of the feed. The seed only changes when the user
-  // taps Shuffle, so re-renders never make tiles jump.
+  // seller cannot own the top of the feed. The seed is fresh on every visit and
+  // changes again on login/logout and when the user taps Shuffle, so re-renders
+  // never make tiles jump but each session gets a different layout.
   const shuffledProducts = useMemo(
     () => seededShuffle(products, shuffleSeed),
     [products, shuffleSeed]
