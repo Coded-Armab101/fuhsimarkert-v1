@@ -15,7 +15,7 @@ export default function MarketplacePage() {
     <div className="flex min-h-[100dvh] flex-col bg-[#FAFAFA] px-4 py-10 font-sans text-[#2C2C2C]">
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center">
         <div className="mb-8 flex justify-center">
-          <BrandLogo height={34} />
+          <BrandLogo height={44} />
         </div>
 
         <div className="rounded-[1.75rem] border border-[#ECE5DE] bg-white p-7 text-center shadow-[0_14px_40px_rgba(44,44,44,0.06)]">

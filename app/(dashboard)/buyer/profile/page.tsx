@@ -467,7 +467,7 @@ export default function ProfilePage() {
 
         <button
           onClick={() => setShowLogoutModal(true)}
-          className="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white text-xs font-bold px-4 py-3 rounded-xl flex items-center gap-2 transition-all border border-neutral-800 hover:border-red-700 active:scale-95 cursor-pointer"
+          className="bg-white hover:bg-[#FFF1EA] text-[#C2410C] text-xs font-black px-5 py-3 rounded-xl flex items-center gap-2 transition-all border border-white shadow-lg shadow-black/30 hover:shadow-black/40 active:scale-95 cursor-pointer"
         >
           <LogOut size={16} />
           <span>Logout</span>

@@ -349,7 +349,7 @@ export default function LandingPage() {
     <div className="min-h-[100dvh] bg-[#FAFAFA] pb-24 font-sans text-[#2C2C2C]">
       <header className="sticky top-0 z-40 border-b border-[#ECE5DE] bg-[#FAFAFA]/95 backdrop-blur">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-3 px-4 py-3">
-          <BrandLogo height={30} />
+          <BrandLogo height={38} />
 
           <div className="flex items-center gap-1.5">
             <button
@@ -535,7 +535,7 @@ export default function LandingPage() {
 
         <footer className="mt-10 border-t border-[#ECE5DE] pb-2 pt-6 text-center">
           <div className="flex justify-center">
-            <BrandLogo height={28} />
+            <BrandLogo height={34} />
           </div>
           <p className="mt-2 text-xs text-[#81756D]">
             Buy and sell simply with FUHSI students · fuhsimarket.com.ng

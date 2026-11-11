@@ -61,7 +61,7 @@ export default function TermsPage() {
   return (
     <main className="min-h-[100dvh] bg-[#FAFAFA] font-sans text-[#2C2C2C]">
       <div className="mx-auto max-w-xl px-6 py-10 pb-16">
-        <BrandLogo height={30} />
+        <BrandLogo height={38} />
 
         <div className="mt-6 rounded-[1.75rem] border border-[#ECE5DE] bg-white p-7 shadow-[0_14px_40px_rgba(44,44,44,0.06)]">
           <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#DE6437]">Legal</p>

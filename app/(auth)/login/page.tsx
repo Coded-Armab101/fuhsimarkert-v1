@@ -107,7 +107,7 @@ export default function LoginPage() {
     <div className="flex min-h-[100dvh] flex-col bg-[#FAFAFA] px-4 py-10 font-sans text-[#2C2C2C]">
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center">
         <div className="mb-8 flex flex-col items-center text-center">
-          <BrandLogo height={34} />
+          <BrandLogo height={46} />
           <h1 className="mt-5 text-2xl font-black tracking-tight text-[#2C2C2C]">
             Welcome back
           </h1>

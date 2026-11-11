@@ -18,7 +18,13 @@ import {
   Package,
   Clock,
   TriangleAlert,
+  LayoutDashboard,
+  Users,
+  RefreshCw,
 } from 'lucide-react';
+import OverviewTab from './_components/OverviewTab';
+import PeopleTab from './_components/PeopleTab';
+import type { AdminOverview, AdminTab } from '@/utils/admin/metrics';
 
 type Withdrawal = {
   id: string;
@@ -96,7 +102,12 @@ function elapsedLabel(iso: string): string {
 export default function AdminDashboardPage() {
   const supabase = createClient();
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
-  const [tab, setTab] = useState<'withdrawals' | 'storage' | 'verifications' | 'fulfilment'>('withdrawals');
+  const [tab, setTab] = useState<AdminTab>('overview');
+  const [refreshToken, setRefreshToken] = useState(0);
+
+  const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [oLoading, setOLoading] = useState(true);
+  const [oError, setOError] = useState<string | null>(null);
 
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [wLoading, setWLoading] = useState(true);
@@ -226,9 +237,34 @@ setSLoading(false);
     }
   };
 
+  const loadOverview = async () => {
+    setOLoading(true);
+    setOError(null);
+    try {
+      const res = await fetch('/api/admin/overview');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load');
+      setOverview(data as AdminOverview);
+    } catch (err) {
+      setOError(err instanceof Error ? err.message : 'Failed to load overview');
+    } finally {
+      setOLoading(false);
+    }
+  };
+
+  const refreshAll = () => {
+    setRefreshToken((token) => token + 1);
+    loadOverview();
+    loadWithdrawals();
+    loadSellers();
+    loadVerifications();
+    loadFulfilments();
+  };
+
   useEffect(() => {
     if (!isAdmin) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadOverview();
     loadWithdrawals();
     loadSellers();
     loadVerifications();
@@ -300,84 +336,135 @@ setSLoading(false);
     (n, g) => n + g.items.filter((i) => i.slow).length,
     0
   );
+  const dangerAlerts = overview?.alerts.filter((alert) => alert.level === 'danger').length ?? 0;
+  const warningAlerts = overview?.alerts.filter((alert) => alert.level === 'warn').length ?? 0;
+  const refreshing = oLoading || wLoading || vLoading || fLoading || sLoading;
+
+  const tabs: Array<{ id: AdminTab; label: string; icon: React.ReactNode; badge?: number; danger?: boolean }> = [
+    { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={14} />, badge: dangerAlerts, danger: true },
+    { id: 'people', label: 'People', icon: <Users size={14} /> },
+    { id: 'withdrawals', label: 'Payouts', icon: <Banknote size={14} />, badge: pendingCount },
+    { id: 'verifications', label: 'Verifications', icon: <IdCard size={14} />, badge: pendingVerifications },
+    { id: 'fulfilment', label: 'Fulfilment', icon: <Package size={14} />, badge: slowSellerCount, danger: true },
+    { id: 'storage', label: 'Storage', icon: <HardDrive size={14} /> },
+  ];
 
   return (
-    <div className="min-h-screen bg-black text-white px-4 py-8 max-w-4xl mx-auto">
-      <div className="flex items-center gap-3 mb-8">
-        <div className="w-11 h-11 rounded-2xl bg-red-950/50 border border-red-900/50 flex items-center justify-center">
-          <ShieldCheck size={22} className="text-red-500" />
-        </div>
-        <div>
-          <h1 className="text-lg font-bold">Admin Dashboard</h1>
-          <p className="text-[11px] text-neutral-500 font-mono">Operator console</p>
-        </div>
-        {pendingCount > 0 && (
-          <span className="ml-auto text-[11px] font-mono text-amber-300 bg-amber-950/60 border border-amber-800 rounded-full px-3 py-1">
-            {pendingCount} pending withdrawal{pendingCount === 1 ? '' : 's'}
-          </span>
-        )}
-        {pendingVerifications > 0 && (
-          <span className="text-[11px] font-mono text-amber-300 bg-amber-950/60 border border-amber-800 rounded-full px-3 py-1">
-            {pendingVerifications} pending verification{pendingVerifications === 1 ? '' : 's'}
-          </span>
-        )}
-      </div>
+    <div className="min-h-screen bg-[#070708] text-white px-4 py-6 sm:py-8">
+      <div className="mx-auto max-w-6xl">
+        <header className="mb-4 flex flex-col gap-4 rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.07] via-white/[0.025] to-transparent p-4 sm:flex-row sm:items-center">
+          <div className="flex items-center gap-3">
+            <div className="grid h-11 w-11 place-items-center rounded-2xl border border-[#DE6437]/30 bg-[#DE6437]/10">
+              <ShieldCheck size={22} className="text-[#FF9B73]" />
+            </div>
+            <div>
+              <h1 className="text-lg font-black tracking-tight">FuhsiMarket Ops</h1>
+              <p className="text-[11px] font-mono text-neutral-400">
+                Signups · orders · money · seller activity
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 sm:ml-auto">
+            {overview ? (
+              <span className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-mono text-neutral-400 sm:inline-flex">
+                Updated {new Date(overview.generatedAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            ) : null}
+            <button
+              onClick={refreshAll}
+              disabled={refreshing}
+              className="inline-flex items-center gap-2 rounded-xl bg-[#DE6437] px-3.5 py-2 text-xs font-bold text-white transition-colors hover:bg-[#C9511F] disabled:opacity-60"
+            >
+              <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+        </header>
 
-      <div className="flex gap-2 mb-6">
-        <button
-          onClick={() => setTab('withdrawals')}
-          className={`flex items-center gap-2 text-xs font-mono px-4 py-2 rounded-xl border transition-all cursor-pointer ${
-            tab === 'withdrawals'
-              ? 'bg-red-600 border-red-500 text-white'
-              : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
-          }`}
-        >
-          <Banknote size={14} /> Withdrawals
-        </button>
-        <button
-          onClick={() => setTab('storage')}
-          className={`flex items-center gap-2 text-xs font-mono px-4 py-2 rounded-xl border transition-all cursor-pointer ${
-            tab === 'storage'
-              ? 'bg-red-600 border-red-500 text-white'
-              : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
-          }`}
-        >
-          <HardDrive size={14} /> Seller Storage
-        </button>
-        <button
-          onClick={() => setTab('verifications')}
-          className={`flex items-center gap-2 text-xs font-mono px-4 py-2 rounded-xl border transition-all cursor-pointer ${
-            tab === 'verifications'
-              ? 'bg-red-600 border-red-500 text-white'
-              : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
-          }`}
-        >
-          <IdCard size={14} /> Verifications
-        </button>
-        <button
-          onClick={() => setTab('fulfilment')}
-          className={`flex items-center gap-2 text-xs font-mono px-4 py-2 rounded-xl border transition-all cursor-pointer ${
-            tab === 'fulfilment'
-              ? 'bg-red-600 border-red-500 text-white'
-              : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
-          }`}
-        >
-          <Package size={14} /> Fulfilment
-          {slowSellerCount > 0 && (
-            <span className="text-[10px] text-red-300 bg-red-950/60 border border-red-800 rounded-full px-1.5">
-              {slowSellerCount}
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          {pendingCount > 0 ? (
+            <button
+              onClick={() => setTab('withdrawals')}
+              className="rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1 text-[10px] font-mono text-amber-300"
+            >
+              {pendingCount} payout{pendingCount === 1 ? '' : 's'} waiting
+            </button>
+          ) : null}
+          {pendingVerifications > 0 ? (
+            <button
+              onClick={() => setTab('verifications')}
+              className="rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1 text-[10px] font-mono text-amber-300"
+            >
+              {pendingVerifications} verification{pendingVerifications === 1 ? '' : 's'} waiting
+            </button>
+          ) : null}
+          {slowSellerCount > 0 ? (
+            <button
+              onClick={() => setTab('fulfilment')}
+              className="rounded-full border border-red-500/25 bg-red-500/10 px-3 py-1 text-[10px] font-mono text-red-300"
+            >
+              {slowSellerCount} slow fulfilment item{slowSellerCount === 1 ? '' : 's'}
+            </button>
+          ) : null}
+          {dangerAlerts > 0 ? (
+            <button
+              onClick={() => setTab('overview')}
+              className="rounded-full border border-red-500/25 bg-red-500/10 px-3 py-1 text-[10px] font-mono text-red-300"
+            >
+              {dangerAlerts} critical alert{dangerAlerts === 1 ? '' : 's'}
+            </button>
+          ) : null}
+          {pendingCount === 0 && pendingVerifications === 0 && slowSellerCount === 0 && dangerAlerts === 0 && warningAlerts === 0 ? (
+            <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1 text-[10px] font-mono text-emerald-300">
+              All systems normal
             </span>
-          )}
-        </button>
-      </div>
+          ) : null}
+        </div>
 
-      {wError && (
-        <p className="text-[11px] font-mono text-red-400 bg-red-950/30 border border-red-900/50 rounded-xl px-3 py-2.5 mb-4">
-          {wError}
-        </p>
-      )}
+        <div className="mb-5 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
+          {tabs.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setTab(item.id)}
+              className={`flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-4 py-2 text-xs font-mono transition-all ${
+                tab === item.id
+                  ? 'border-[#DE6437] bg-[#DE6437] text-white shadow-lg shadow-[#DE6437]/20'
+                  : 'border-white/10 bg-white/[0.04] text-neutral-400 hover:border-white/20 hover:text-white'
+              }`}
+            >
+              {item.icon} {item.label}
+              {item.badge && item.badge > 0 ? (
+                <span
+                  className={`rounded-full border px-1.5 text-[10px] ${
+                    item.danger
+                      ? 'border-red-400/30 bg-red-500/20 text-red-100'
+                      : 'border-amber-400/30 bg-amber-500/20 text-amber-100'
+                  }`}
+                >
+                  {item.badge}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
 
-      {tab === 'withdrawals' ? (
+        {tab === 'withdrawals' && wError && (
+          <p className="mb-4 rounded-xl border border-red-900/50 bg-red-950/30 px-3 py-2.5 font-mono text-[11px] text-red-400">
+            {wError}
+          </p>
+        )}
+
+        {tab === 'overview' ? (
+          <OverviewTab
+            data={overview}
+            loading={oLoading}
+            error={oError}
+            onRetry={loadOverview}
+            onOpenTab={setTab}
+          />
+        ) : tab === 'people' ? (
+          <PeopleTab onOpenTab={setTab} refreshToken={refreshToken} />
+        ) : tab === 'withdrawals' ? (
         <div className="space-y-3">
           {wLoading ? (
             <div className="flex justify-center py-16">
@@ -699,6 +786,7 @@ setSLoading(false);
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }
