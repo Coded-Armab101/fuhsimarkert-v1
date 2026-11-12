@@ -117,14 +117,14 @@ export default function SellerVerificationGate({
 
   return (
     <div className="mx-auto max-w-xl space-y-4 py-2">
-      <div className="rounded-[1.75rem] bg-gradient-to-br from-[#2e2520] to-[#473a32] p-6 text-white">
-        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-white/70">
-          <ShieldCheck size={16} className="text-[#ff9a55]" /> Seller onboarding
+      <div className="verification-hero rounded-[1.75rem] bg-gradient-to-br from-[#2e2520] to-[#473a32] p-6 text-white">
+        <div className="verification-muted flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-white/70">
+          <ShieldCheck size={16} className="verification-accent text-[#ff9a55]" /> Seller onboarding
         </div>
         <h1 className="mt-2 text-2xl font-black leading-tight">
           {profile.full_name ? `${profile.full_name.split(' ')[0]}, ` : ''}verify to start selling
         </h1>
-        <p className="mt-2 text-sm text-white/75">
+        <p className="verification-muted mt-2 text-sm text-white/75">
           Your seller payment was successful. One quick identity check protects buyers — once an
           admin approves it, your full Seller Studio unlocks.
         </p>
@@ -175,7 +175,7 @@ export default function SellerVerificationGate({
               <div className="flex items-center gap-2 text-xs font-bold text-[#251d18]">
                 <IdCard size={16} className="text-[#ef6b3b]" /> Student ID Card (Photo)
               </div>
-              <p className="text-[10px] text-[#9d9188] mt-1 mb-2">JPG / PNG / WEBP, up to 1MB</p>
+              <p className="text-[10px] text-[#9d9188] mt-1 mb-2">JPG / PNG / WEBP, up to 10MB</p>
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"

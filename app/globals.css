@@ -70,7 +70,7 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 .buyer-secondary [class*="text-neutral-6"] { color: #81756d !important; }
 .buyer-secondary { background: #fffdfa; color: #251d18; }
 .buyer-secondary [class*="text-white"]:not(button):not(a) { color: #251d18; }
-.buyer-secondary [class*="bg-red-"], .buyer-secondary [class*="bg-emerald-"] { color: inherit; }
+.buyer-secondary [class*="bg-red-"]:not(button):not(a), .buyer-secondary [class*="bg-emerald-"]:not(button):not(a) { color: inherit; }
 
 /* Seller screens use the same approachable, light mobile system as the buyer app. */
 .seller-shell [class*="bg-neutral-950"] { background-color: #fff !important; border-color: #eee4dc !important; box-shadow: 0 8px 24px rgba(65,42,29,.05) !important; }
@@ -87,10 +87,15 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 .buyer-secondary input:focus, .buyer-secondary select:focus, .buyer-secondary textarea:focus { outline: 3px solid rgba(239,107,59,.28) !important; outline-offset: 2px; border-color:#ef6b3b !important; }
 
 /* Dark hero cards must keep their own white text even though the surrounding
-   seller shell remaps every `text-white` element to dark ink. */
-.seller-shell .wallet-hero,
-.seller-shell .wallet-hero * { color: #ffffff !important; }
-.seller-shell .wallet-hero .wallet-muted { color: rgba(255,255,255,.72) !important; }
+   seller shell remaps every `text-white` element to dark ink. `div.` is part of
+   the selector so it outranks the shell's `[class*="text-white"]` remap. */
+.seller-shell div.wallet-hero,
+.seller-shell div.wallet-hero *,
+.seller-shell div.verification-hero,
+.seller-shell div.verification-hero * { color: #ffffff !important; }
+.seller-shell div.wallet-hero .wallet-muted,
+.seller-shell div.verification-hero .verification-muted { color: rgba(255,255,255,.72) !important; }
+.seller-shell div.verification-hero .verification-accent { color: #ff9a55 !important; }
 
 /* ─────────────────────────────────────────────────────────────────────────
    Admin console light theme
