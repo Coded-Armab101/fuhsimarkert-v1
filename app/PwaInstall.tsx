@@ -13,6 +13,15 @@ export default function PwaInstall() {
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
 
   useEffect(() => {
+    // Register unconditionally so offline browsing works even when the install
+    // prompt is dismissed or the user is signed in. The worker skips API and
+    // authenticated navigation caching (see public/sw.js).
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((err) => {
+        console.warn('[pwa] service worker registration failed', err);
+      });
+    }
+
     const supabase = createClient();
     void supabase.auth.getUser().then(({ data }) => setSignedIn(Boolean(data.user)));
     const handler = (event: Event) => { event.preventDefault(); setPromptEvent(event as InstallEvent); };

@@ -42,6 +42,7 @@ type Product = {
   stock?: number | null;
   unit?: string | null;
   delivery_fee_kobo?: number | null;
+  verified?: boolean | null;
 };
 
 const isAvailable = (p: Product) =>
@@ -143,6 +144,13 @@ function ProductCard({
           )}
           <h3 className="mt-0.5 line-clamp-2 text-sm font-bold leading-snug text-[#2C2C2C] transition-colors group-hover:text-[#DE6437]">
             {product.title}
+            {product.verified ? (
+              <ShieldCheck
+                size={12}
+                className="ml-1 inline text-[#17805B]"
+                aria-label="Verified seller"
+              />
+            ) : null}
           </h3>
           {product.hostel_location && (
             <p className="mt-1 flex items-center gap-1 truncate text-[11px] text-[#81756D]">
@@ -284,8 +292,29 @@ export default function LandingPage() {
           return;
         }
 
+        // Verified-seller badges come from a SECURITY DEFINER RPC so the
+        // catalogue never has to expose the protected profiles rows.
+        let rows = data || [];
+        if (rows.length > 0) {
+          const sellerIds = Array.from(new Set(rows.map((row) => row.seller_id).filter(Boolean)));
+          if (sellerIds.length > 0) {
+            const { data: verifiedRows, error: verifiedError } = await supabase.rpc(
+              'verified_seller_ids',
+              { p_ids: sellerIds },
+            );
+            if (!verifiedError && Array.isArray(verifiedRows)) {
+              const verified = new Set(
+                (verifiedRows as { id: string; is_verified: boolean }[])
+                  .filter((row) => row.is_verified)
+                  .map((row) => row.id),
+              );
+              rows = rows.map((row) => ({ ...row, verified: verified.has(row.seller_id) }));
+            }
+          }
+        }
+
         // No demo rows: an empty catalogue stays empty.
-        setProducts(data || []);
+        setProducts(rows);
       } catch (err) {
         if (cancelled) return;
         console.error('Failed to fetch landing products:', err);

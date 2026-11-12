@@ -2,13 +2,13 @@
  * Product image upload with a per-seller storage quota.
  *
  * Enforces:
- *  - a 2MB cap per file (also enforced by the bucket's `file_size_limit`), and
+ *  - a 5MB cap per file (also enforced by the bucket's `file_size_limit`), and
  *  - a per-seller total quota (default 8MB, adjustable on `profiles`).
  * Objects are namespaced under `{sellerId}/` so a seller's *total* usage can be
  * computed by listing their prefix and summing sizes — self-healing and immune
  * to drift from a missed delete.
  */
-const MAX_FILE_BYTES = 2 * 1024 * 1024; // 2MB per file
+const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB per file
 const ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const BUCKET = 'product-images';
 
@@ -42,7 +42,7 @@ export async function uploadProductImage(
     return { ok: false, error: 'Only JPG, PNG, WEBP or GIF images are allowed.' };
   }
   if (file.size > MAX_FILE_BYTES) {
-    return { ok: false, error: 'Image must be 2MB or smaller.' };
+    return { ok: false, error: 'Image must be 5MB or smaller.' };
   }
 
   // Enforce the seller's total quota before accepting more.

@@ -11,7 +11,7 @@ import DeliveryAnnouncement from './DeliveryAnnouncement';
 import { ChevronRight, Heart, Image as ImageIcon, Minus, Plus, Search, Star, X, MapPin, ShieldCheck } from 'lucide-react';
 import OrderNotificationBell from '@/components/OrderNotificationBell';
 
-type Product = { id: string; title: string; description?: string | null; price: number; image_url?: string | null; category?: string | null; hostel_location?: string | null; seller_id: string; created_at: string; stock?: number | null; unit?: string | null; delivery_fee_kobo?: number | null; rating?: number | null; review_count?: number | null; };
+type Product = { id: string; title: string; description?: string | null; price: number; image_url?: string | null; category?: string | null; hostel_location?: string | null; seller_id: string; created_at: string; stock?: number | null; unit?: string | null; delivery_fee_kobo?: number | null; rating?: number | null; review_count?: number | null; verified?: boolean | null; };
 const isAvailable = (p: Product) => p.stock === null || p.stock === undefined || p.stock > 0;
 const stockLimit = (p: Product) => p.stock === null || p.stock === undefined ? Infinity : Number(p.stock) || 0;
 type Review = { id: string; rating: number; comment: string | null; created_at: string };
@@ -26,7 +26,7 @@ function ProductTile({ product, saved, onSave, onOpen, compact = false }: { prod
       {unavailable && <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1 text-[9px] font-bold text-white">Sold out</span>}
       <button onClick={onSave} aria-label={saved ? 'Remove from saved items' : 'Save this item'} className={`absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full backdrop-blur ${saved ? 'bg-[#ef6b3b] text-white' : 'bg-white/90 text-[#312722]'}`}><Heart size={15} fill={saved ? 'currentColor' : 'none'} /></button>
     </div>
-    <button onClick={onOpen} className="mt-2 block w-full text-left"><h3 className="line-clamp-1 text-sm font-bold text-[#251d18]">{product.title}</h3><p className="mt-0.5 text-sm font-extrabold text-[#ef6b3b]">₦{formatNaira(product.price)}{product.unit ? <span className="text-[11px] font-semibold text-[#81756d]"> / {product.unit}</span> : null}</p><p className="mt-1 flex items-center gap-1 text-[11px] text-[#81756d]"><Star size={12} fill={product.review_count ? '#f5a623' : 'none'} className="text-[#f5a623]" /> {product.review_count ? `${Number(product.rating ?? 0).toFixed(1)} (${product.review_count})` : 'No reviews yet'}</p></button>
+    <button onClick={onOpen} className="mt-2 block w-full text-left"><h3 className="line-clamp-1 text-sm font-bold text-[#251d18]">{product.title}{product.verified ? <ShieldCheck size={12} className="ml-1 inline text-[#17805b]" aria-label="Verified seller" /> : null}</h3><p className="mt-0.5 text-sm font-extrabold text-[#ef6b3b]">₦{formatNaira(product.price)}{product.unit ? <span className="text-[11px] font-semibold text-[#81756d]"> / {product.unit}</span> : null}</p><p className="mt-1 flex items-center gap-1 text-[11px] text-[#81756d]"><Star size={12} fill={product.review_count ? '#f5a623' : 'none'} className="text-[#f5a623]" /> {product.review_count ? `${Number(product.rating ?? 0).toFixed(1)} (${product.review_count})` : 'No reviews yet'}</p></button>
     {!unavailable && (quantity ? <div className="mt-2 flex items-center gap-2"><span className="rounded-full bg-[#e8f7ef] px-2 py-1 text-[10px] font-bold text-[#17805b]">Added</span><div className="flex items-center gap-2 rounded-full bg-[#fff0e9] px-2 py-1 text-[#c9552e]"><button onClick={() => decreaseQuantity(product.id)} aria-label={`Remove one ${product.title}`}><Minus size={14} /></button><span className="w-4 text-center text-xs font-bold">{quantity}</span><button onClick={() => addToCart(product)} disabled={quantity >= stockLimit(product)} aria-label={`Add one ${product.title}`}><Plus size={14} /></button></div></div> : <button onClick={() => addToCartOnce(product)} className="mt-2 rounded-full bg-[#2e2520] px-3 py-1.5 text-[11px] font-bold text-white">Add to cart</button>)}
   </article>;
 }
@@ -96,6 +96,26 @@ export default function BuyerDashboardPage() {
             const rating = byId.get(row.id);
             return { ...row, rating: rating?.rating_avg ?? null, review_count: Number(rating?.review_count ?? 0) };
           });
+        }
+      }
+
+      // Verified seller badges. profiles is RLS-protected, so the boolean comes
+      // from a SECURITY DEFINER RPC that exposes nothing but the badge.
+      if (rows.length) {
+        const sellerIds = Array.from(new Set(rows.map((row) => row.seller_id).filter(Boolean)));
+        if (sellerIds.length > 0) {
+          const { data: verifiedRows, error: verifiedError } = await supabase.rpc(
+            'verified_seller_ids',
+            { p_ids: sellerIds },
+          );
+          if (!verifiedError && Array.isArray(verifiedRows)) {
+            const verified = new Set(
+              (verifiedRows as { id: string; is_verified: boolean }[])
+                .filter((row) => row.is_verified)
+                .map((row) => row.id),
+            );
+            rows = rows.map((row) => ({ ...row, verified: verified.has(row.seller_id) }));
+          }
         }
       }
 

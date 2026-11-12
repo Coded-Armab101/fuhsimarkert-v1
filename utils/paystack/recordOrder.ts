@@ -3,6 +3,8 @@ import crypto from 'crypto';
 import { sellerCommissionKobo, buyerServiceFeeKobo } from '@/utils/pricing';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { sendPushToUsers } from '@/utils/push';
+import { appLink, sendEmailToUsers } from '@/utils/email';
+import { formatNaira } from '@/utils/money';
 
 /**
  * Shared order-creation routine for a successful Paystack payment.
@@ -420,6 +422,54 @@ export async function recordOrder(
     .eq('user_id', input.buyerId)
     .in('product_id', products.map((product) => product.id));
   if (cartError) throw cartError;
+
+  // Transactional email is a best-effort side effect, exactly like push. It runs
+  // last so a slow provider can never delay the order/escrow write. Only the
+  // call that inserted the rows sends it, so the webhook/verify race cannot
+  // email the buyer twice.
+  if (newlyInsertedOrders.length > 0) {
+    try {
+      const admin = createAdminClient();
+      const sellerIds = Array.from(
+        new Set(
+          newlyInsertedOrders
+            .map((row) => row.seller_id as string | null)
+            .filter((id): id is string => Boolean(id)),
+        ),
+      );
+      const boughtIds = new Set(newlyInsertedOrders.map((row) => row.product_id));
+      const titles = products
+        .filter((product) => boughtIds.has(product.id) && product.title)
+        .map((product) => product.title as string)
+        .slice(0, 3);
+      const label = titles.length > 0 ? titles.join(', ') : 'your order';
+
+      await sendEmailToUsers(admin, [input.buyerId], {
+        subject: 'Your FuhsiMarket order is in escrow',
+        heading: 'Order placed successfully',
+        lines: [
+          `We received ₦${formatNaira(expectedTotalKobo)} for ${label}.`,
+          'Your money is held safely in escrow and only released to the seller after you confirm receipt.',
+          'You can follow the order from your Orders page.',
+        ],
+        cta: { label: 'View your orders', url: appLink('/buyer/orders') },
+      });
+
+      if (sellerIds.length > 0) {
+        await sendEmailToUsers(admin, sellerIds, {
+          subject: 'You have a new paid FuhsiMarket order',
+          heading: 'New paid order',
+          lines: [
+            `A buyer has paid for ${label}.`,
+            'The payment is safely in escrow. Open your Sales page to prepare and hand off the order.',
+          ],
+          cta: { label: 'Open your sales', url: appLink('/seller/orders') },
+        });
+      }
+    } catch (emailError) {
+      console.warn('[recordOrder] email failed', emailError);
+    }
+  }
 
   return walletKobo;
 }

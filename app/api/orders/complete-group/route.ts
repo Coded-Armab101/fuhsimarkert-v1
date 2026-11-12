@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { appLink, sendEmailToUsers } from '@/utils/email';
 
 /**
  * Buyer confirms receipt of a WHOLE combined order (one order_ref, possibly from
@@ -63,6 +64,58 @@ export async function POST(request: Request) {
       // The atomic guard rejected the transition (e.g. already completed by a
       // concurrent request) — treat as already handled rather than an error.
       return NextResponse.json({ ok: false, reason: 'already-handed-off' }, { status: 409 });
+    }
+
+    // Money has been released. Let both sides know (best-effort, non-blocking).
+    try {
+      const { data: completed } = await admin
+        .from('orders')
+        .select('id, seller_id, product_id, amount_kobo')
+        .eq('order_ref', orderRef)
+        .eq('buyer_id', user.id);
+
+      const rows = completed || [];
+      const sellerIds = Array.from(
+        new Set(rows.map((row) => row.seller_id).filter((id): id is string => Boolean(id))),
+      );
+      const productIds = rows
+        .map((row) => row.product_id)
+        .filter((id): id is string => Boolean(id));
+
+      let label = orderRef;
+      if (productIds.length > 0) {
+        const { data: products } = await admin
+          .from('products')
+          .select('title')
+          .in('id', productIds);
+        const titles = (products || []).map((p) => p.title).filter(Boolean).slice(0, 3);
+        if (titles.length > 0) label = titles.join(', ');
+      }
+
+      await sendEmailToUsers(admin, [user.id], {
+        subject: 'Order completed — thank you!',
+        heading: 'Order confirmed',
+        lines: [
+          `You confirmed receipt of ${label}.`,
+          'The payment has been released to the seller. We hope everything arrived as expected.',
+          'You can now leave a review to help other buyers.',
+        ],
+        cta: { label: 'Review your order', url: appLink('/buyer/orders') },
+      });
+
+      if (sellerIds.length > 0) {
+        await sendEmailToUsers(admin, sellerIds, {
+          subject: 'Your FuhsiMarket sale is complete',
+          heading: 'Payment released',
+          lines: [
+            `The buyer confirmed receipt of ${label}.`,
+            'Your earnings (minus the 3% platform commission) are now in your FuhsiMarket wallet.',
+          ],
+          cta: { label: 'Open your wallet', url: appLink('/seller/wallet') },
+        });
+      }
+    } catch (emailError) {
+      console.warn('[orders/complete-group] email failed', emailError);
     }
 
     return NextResponse.json({ ok: true, status: 'completed' });

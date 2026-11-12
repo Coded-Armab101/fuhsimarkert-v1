@@ -28,6 +28,9 @@ type BuyerOrderRow = {
   delivery_address?: string | null;
   meetup_location?: string | null;
   created_at: string;
+  refunded_at?: string | null;
+  refund_method?: string | null;
+  refund_card_kobo?: number | null;
   products?: { id: string; title: string; image_url?: string | null }[] | { id: string; title: string; image_url?: string | null } | null;
 };
 
@@ -52,6 +55,9 @@ type OrderGroup = {
   items: BuyerOrderRow[];
   totalKobo: number;
   deliveryFeeKobo: number;
+  refunded: boolean;
+  refundMethod: string | null;
+  refundCardKobo: number;
 };
 
 const TRACK_STEPS = ['in_escrow', 'packing', 'ready_for_pickup', 'confirmed', 'completed'];
@@ -148,6 +154,9 @@ async function fetchBuyerOrderGroups(
       delivery_address,
       meetup_location,
       created_at,
+      refunded_at,
+      refund_method,
+      refund_card_kobo,
       products:product_id ( id, title, image_url )
     `)
     .eq('buyer_id', user.id)
@@ -232,12 +241,23 @@ async function fetchBuyerOrderGroups(
         items: [row],
         totalKobo: row.amount_kobo + (row.delivery_fee_kobo || 0),
         deliveryFeeKobo: row.delivery_fee_kobo || 0,
+        refunded: Boolean(row.refunded_at),
+        refundMethod: row.refund_method ?? null,
+        refundCardKobo: Number(row.refund_card_kobo) || 0,
       });
     } else {
       existing.items.push(row);
       existing.totalKobo += row.amount_kobo;
       // Delivery fee applies once for the whole combined order.
       existing.deliveryFeeKobo = existing.deliveryFeeKobo || row.delivery_fee_kobo || 0;
+      // Refund state is written to every row of the group; treat the group as
+      // refunded as soon as any row says so.
+      if (row.refunded_at) existing.refunded = true;
+      existing.refundMethod = existing.refundMethod || row.refund_method || null;
+      existing.refundCardKobo = Math.max(
+        existing.refundCardKobo,
+        Number(row.refund_card_kobo) || 0,
+      );
       // The group only advances to a stage once EVERY seller's item has
       // reached it. Whichever seller is furthest behind sets the tracker.
       const rank = (s: string) => TRACK_STEPS.indexOf(s);
@@ -266,6 +286,7 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<OrderGroup[]>([]);
   const [updatingRef, setUpdatingRef] = useState<string | null>(null);
+  const [refundingRef, setRefundingRef] = useState<string | null>(null);
   const [paymentNotice, setPaymentNotice] = useState<{ kind: 'success' | 'error'; message: string; retry?: boolean } | null>(null);
   const [expandedRefs, setExpandedRefs] = useState<Record<string, boolean>>({});
 
@@ -404,6 +425,56 @@ export default function OrdersPage() {
     }
   };
 
+  const handleGroupRefund = async (group: OrderGroup) => {
+    const ok = window.confirm(
+      'Report a problem with this order and request a refund?\n\nIf you paid by card, the card portion is refunded to your card; any wallet portion returns to your FuhsiMarket wallet. The whole order will be cancelled.',
+    );
+    if (!ok) return;
+
+    setRefundingRef(group.order_ref);
+    try {
+      const res = await fetch('/api/orders/dispute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderRef: group.order_ref }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data?.ok) {
+        setGroups((prev) =>
+          prev.map((g) =>
+            g.order_ref === group.order_ref
+              ? {
+                  ...g,
+                  status: 'disputed',
+                  refunded: true,
+                  refundMethod: data.method || 'wallet',
+                  refundCardKobo: Number(data.cardKobo) || 0,
+                }
+              : g,
+          ),
+        );
+        setPaymentNotice({
+          kind: 'success',
+          message:
+            Number(data.cardKobo) > 0
+              ? 'Refund started. The card portion is on its way and any wallet portion is already in your wallet.'
+              : 'Refund complete. The full amount is now in your FuhsiMarket wallet.',
+        });
+      } else if (res.status === 409) {
+        alert(data?.error || 'This order has already been settled and cannot be refunded.');
+        setRefreshToken((n) => n + 1);
+      } else {
+        alert(data?.error || 'Could not start the refund. Please try again.');
+      }
+    } catch (err) {
+      console.error('Refund request error:', err);
+      alert('Could not reach the server to refund this order. Please try again.');
+    } finally {
+      setRefundingRef(null);
+    }
+  };
+
   if (loading) {
     if (returnReference) {
       return (
@@ -481,7 +552,9 @@ export default function OrdersPage() {
             const statusIndex = TRACK_STEPS.indexOf(group.status);
             const isDelivered = ['confirmed', 'delivered', 'completed'].includes(group.status);
             const isDisputed = group.status === 'disputed';
+            const isRefunded = group.refunded;
             const canConfirm = group.status === 'ready_for_pickup';
+            const canRefund = !isRefunded && ['in_escrow', 'packing', 'ready_for_pickup', 'confirmed', 'delivered'].includes(group.status);
             const isTerminal = ['completed', 'confirmed', 'delivered', 'cancelled', 'rejected'].includes(group.status);
             const open = isExpanded(group.order_ref);
             const productNames = group.items
@@ -664,7 +737,25 @@ export default function OrdersPage() {
                     })}
                   </div>
                 )}
-                {isDisputed && (
+                {canRefund && (
+                  <button
+                    onClick={() => handleGroupRefund(group)}
+                    disabled={refundingRef === group.order_ref}
+                    className="w-full border border-[#ffd9c4] bg-[#fff7f2] hover:bg-[#fff0e9] text-[#b04a27] font-bold text-xs py-3 rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 disabled:opacity-60"
+                  >
+                    {refundingRef === group.order_ref ? <Loader2 size={15} className="animate-spin" /> : <AlertTriangle size={15} />}
+                    {refundingRef === group.order_ref ? 'Starting refund…' : 'Report a problem / Request refund'}
+                  </button>
+                )}
+                {isRefunded ? (
+                  <div className="p-4 bg-[#e8f7ef] border border-[#cdeeda] text-[#0f6b4a] text-xs rounded-xl text-center font-medium font-mono">
+                    <CheckCircle2 size={16} className="inline mr-1" />
+                    Refund processed.
+                    {group.refundCardKobo > 0
+                      ? ` ₦${formatNaira(group.refundCardKobo)} is returning to your card; the rest is in your wallet.`
+                      : ' The full amount is in your FuhsiMarket wallet.'}
+                  </div>
+                ) : isDisputed && (
                   <div className="p-4 bg-[#fff0e9] border border-[#ffd9c4] text-[#b04a27] text-xs rounded-xl text-center font-medium font-mono">
                     <AlertTriangle size={16} className="inline mr-1" /> We are checking this order. Your money is still protected.
                   </div>

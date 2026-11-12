@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Package, ShoppingBag, Settings, Wallet, Clock } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Settings, Wallet, Clock, TrendingUp } from 'lucide-react';
 import OrderNotificationBell from '@/components/OrderNotificationBell';
 import { createClient } from '@/utils/supabase';
 import SellerVerificationGate, { type SellerGateProfile } from '../SellerVerificationGate';
@@ -50,6 +50,7 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
     { label: 'Overview', href: '/seller', icon: LayoutDashboard },
     { label: 'Products', href: '/seller/products', icon: Package },
     { label: 'Sales', href: '/seller/orders', icon: ShoppingBag },
+    { label: 'Insights', href: '/seller/analytics', icon: TrendingUp },
     { label: 'Wallet', href: '/seller/wallet', icon: Wallet },
     { label: 'Settings', href: '/seller/settings', icon: Settings },
   ];
