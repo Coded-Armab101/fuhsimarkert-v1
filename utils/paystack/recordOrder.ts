@@ -79,7 +79,7 @@ export async function recordOrder(
 
   const { data: products, error: productsError } = await supabase
     .from('products')
-    .select('id, price, seller_id, stock')
+    .select('id, title, price, seller_id, stock')
     .in('id', snapshotIds);
 
   if (productsError) throw productsError;
@@ -88,8 +88,14 @@ export async function recordOrder(
   }
 
   const productById = new Map(products.map((p) => [p.id, p]));
-  if (products.some((product) => product.seller_id === input.buyerId)) {
-    throw new Error('seller cannot purchase their own product');
+  const ownProducts = products.filter((product) => product.seller_id === input.buyerId);
+  if (ownProducts.length > 0) {
+    // Include the titles so the verify route's buyer-facing message (and the
+    // server log) identifies exactly which cart line caused the rejection.
+    const names = ownProducts
+      .map((product) => `"${product.title ?? product.id}"`)
+      .join(', ');
+    throw new Error(`seller cannot purchase their own product (${names})`);
   }
   const qtyByProduct = new Map<string, number>();
 

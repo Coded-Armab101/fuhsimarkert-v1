@@ -37,6 +37,44 @@ function baseType(file: File): string {
   return (file.type || '').split(';')[0].trim().toLowerCase();
 }
 
+/**
+ * Turn a Supabase Storage error into something the seller can act on. The most
+ * common causes are a bucket-level size limit (separate from MAX_*_BYTES), a
+ * missing/denied storage policy, or an unsupported MIME type; the raw message
+ * is appended so support can diagnose anything else.
+ */
+function storageErrorMessage(
+  error: { message?: string } | null,
+  label: 'ID card' | 'verification video',
+): string {
+  const raw = error?.message || '';
+  const lower = raw.toLowerCase();
+
+  if (
+    lower.includes('maximum allowed size') ||
+    lower.includes('too large') ||
+    lower.includes('exceeded') ||
+    lower.includes('payload')
+  ) {
+    return `Your ${label} is larger than the verification storage allows. Ask an administrator to raise the verification-documents bucket size limit.`;
+  }
+  if (
+    lower.includes('row-level security') ||
+    lower.includes('not authorized') ||
+    lower.includes('unauthorized') ||
+    lower.includes('permission')
+  ) {
+    return `Storage rejected your ${label} upload (permission denied). Sign out, sign in again, and retry.`;
+  }
+  if (lower.includes('bucket not found')) {
+    return 'Verification storage is not configured yet. Please contact support.';
+  }
+  if (lower.includes('mime') || lower.includes('content type')) {
+    return `This ${label} file type is not allowed by storage. Use JPG, PNG or WEBP for the ID card.`;
+  }
+  return `Could not upload your ${label}${raw ? `: ${raw}` : '. Please try again.'}`;
+}
+
 /** Upload the student ID card image. Returns the object path, not a public URL. */
 export async function uploadStudentId(
   supabase: StorageClient,
@@ -56,7 +94,7 @@ export async function uploadStudentId(
   });
   if (error || !data?.path) {
     console.error('[verify] id upload failed', error);
-    return { ok: false, error: 'Could not upload your ID card. Please try again.' };
+    return { ok: false, error: storageErrorMessage(error, 'ID card') };
   }
   return { ok: true, path: data.path };
 }
@@ -80,7 +118,7 @@ export async function uploadVerificationVideo(
   });
   if (error || !data?.path) {
     console.error('[verify] video upload failed', error);
-    return { ok: false, error: 'Could not upload your verification video. Please try again.' };
+    return { ok: false, error: storageErrorMessage(error, 'verification video') };
   }
   return { ok: true, path: data.path };
 }

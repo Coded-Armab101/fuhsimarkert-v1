@@ -179,12 +179,11 @@ export default function SellerVerificationGate({
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
-                capture="environment"
                 onChange={(e) => setIdFile(e.target.files?.[0] || null)}
                 className="hidden"
               />
               <span className="text-[11px] text-[#81756d]">
-                {idFile ? `✓ ${idFile.name}` : 'Tap to select your ID image'}
+                {idFile ? `✓ ${idFile.name}` : 'Tap to choose a photo (camera or gallery)'}
               </span>
             </label>
 

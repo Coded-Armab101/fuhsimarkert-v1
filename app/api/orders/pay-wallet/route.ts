@@ -48,7 +48,7 @@ export async function POST(request: Request) {
 
     const { data: products, error: productsError } = await supabase
       .from('products')
-      .select('id, price, stock, seller_id')
+      .select('id, title, price, stock, seller_id')
       .in('id', productIds);
     if (productsError || !products) {
       return NextResponse.json({ error: 'Internal system pricing error.' }, { status: 500 });
@@ -56,9 +56,17 @@ export async function POST(request: Request) {
 
     // Same guard as the card route: refuse a self-purchase before the wallet is
     // debited, because recordOrder would reject it after the money moved.
-    if (products.some((product) => product.seller_id === user.id)) {
+    const ownProducts = products.filter((product) => product.seller_id === user.id);
+    if (ownProducts.length > 0) {
+      const names = ownProducts.map((product) => `“${product.title}”`).join(', ');
+      console.error('[orders/pay-wallet] self-purchase blocked', {
+        userId: user.id,
+        productIds: ownProducts.map((product) => product.id),
+      });
       return NextResponse.json(
-        { error: 'You cannot buy your own product. Remove it from your cart to continue.' },
+        {
+          error: `You cannot buy your own product${ownProducts.length > 1 ? 's' : ''} (${names}). Remove ${ownProducts.length > 1 ? 'them' : 'it'} from your cart to continue.`,
+        },
         { status: 400 },
       );
     }

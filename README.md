@@ -39,6 +39,8 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 Before deploying the hardened build, apply `supabase/migrations/20260923_security_hardening.sql` to the production Supabase project. The build expects the database-side RLS, atomic stock/withdrawal functions, profile privilege trigger, image URL validation trigger, and payment idempotency indexes from that migration.
 
+Also apply `supabase/migrations/20261112_verification_storage.sql`. It sets the private `verification-documents` bucket to a 25MB per-file limit and (re)creates the owner-only storage policies, so seller ID images and selfie videos upload reliably. Without it, a hand-configured 1MB bucket limit still rejects phone photos even though the app allows 10MB.
+
 ## Phone alerts for sellers (Web Push)
 
 Sellers can turn on order alerts from **Seller Settings**, or from the bell menu in
