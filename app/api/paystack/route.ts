@@ -67,12 +67,23 @@ export async function POST(request: Request) {
     //       with an explicit query.
     const { data: products, error: productsError } = await supabase
       .from('products')
-      .select('id, price, stock')
+      .select('id, price, stock, seller_id')
       .in('id', productIds);
 
     if (productsError || !products) {
       console.error('[paystack] products query failed', { userId: user.id, productsError: productsError?.message });
       return NextResponse.json({ error: 'Internal system pricing error.' }, { status: 500 });
+    }
+
+    // Block paying for your own listing BEFORE money leaves the buyer. Otherwise
+    // the charge succeeds, but recordOrder refuses to escrow it ("seller cannot
+    // purchase their own product") and the buyer is left with a confirmed
+    // payment and no order.
+    if (products.some((product) => product.seller_id === user.id)) {
+      return NextResponse.json(
+        { error: 'You cannot buy your own product. Remove it from your cart to continue.' },
+        { status: 400 },
+      );
     }
 
     const productById = new Map(

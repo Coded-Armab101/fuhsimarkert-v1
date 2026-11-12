@@ -112,7 +112,22 @@ export async function GET(request: Request) {
           gatewayAmountKobo: Number(transaction.amount),
         });
       } catch (err) {
-        console.error('[paystack/verify] failed to record order', { reference, err });
+        // Log structured fields: many log viewers render an Error object as {}
+        // and lose the Postgres code/hint, which makes a paid-but-unrecorded
+        // order impossible to diagnose.
+        const recordError = err as {
+          message?: string;
+          code?: string;
+          details?: string;
+          hint?: string;
+        };
+        console.error('[paystack/verify] failed to record order', {
+          reference,
+          message: recordError?.message ?? String(err),
+          code: recordError?.code,
+          details: recordError?.details,
+          hint: recordError?.hint,
+        });
 
         // The webhook may have won the race, or a previous attempt may have
         // written the rows before a later step failed. If the order exists for
@@ -129,11 +144,28 @@ export async function GET(request: Request) {
             .limit(1);
           orderExists = !existingError && Boolean(existingOrders?.length);
         } catch (lookupError) {
-          console.error('[paystack/verify] order existence check failed', { reference, lookupError });
+          console.error('[paystack/verify] order existence check failed', {
+            reference,
+            message: lookupError instanceof Error ? lookupError.message : String(lookupError),
+          });
         }
 
         if (!orderExists) {
-          return NextResponse.json({ error: 'Payment confirmed but the order could not be recorded.' }, { status: 500 });
+          // Surface the known, actionable causes to the buyer instead of a
+          // generic dead end. Unknown database errors stay generic (and are in
+          // the server log above).
+          const reason = recordError?.message ?? '';
+          let message = 'Payment confirmed but the order could not be recorded.';
+          if (reason.includes('own product')) {
+            message = 'You paid for your own product, so it cannot be recorded as an order. Please contact support for a refund.';
+          } else if (reason.includes('unavailable')) {
+            message = 'One of the products is no longer available. Please contact support for a refund.';
+          } else if (reason.includes('insufficient') || reason.includes('balance')) {
+            message = 'Your wallet balance could not cover the wallet portion of this payment. Please contact support.';
+          } else if (reason.includes('SUPABASE_SERVICE_ROLE_KEY') || reason.includes('NEXT_PUBLIC_SUPABASE_URL')) {
+            message = 'Payment recording is unavailable because the server is misconfigured. Please contact support.';
+          }
+          return NextResponse.json({ error: message }, { status: 500 });
         }
       }
     }

@@ -48,11 +48,21 @@ export async function POST(request: Request) {
 
     const { data: products, error: productsError } = await supabase
       .from('products')
-      .select('id, price, stock')
+      .select('id, price, stock, seller_id')
       .in('id', productIds);
     if (productsError || !products) {
       return NextResponse.json({ error: 'Internal system pricing error.' }, { status: 500 });
     }
+
+    // Same guard as the card route: refuse a self-purchase before the wallet is
+    // debited, because recordOrder would reject it after the money moved.
+    if (products.some((product) => product.seller_id === user.id)) {
+      return NextResponse.json(
+        { error: 'You cannot buy your own product. Remove it from your cart to continue.' },
+        { status: 400 },
+      );
+    }
+
     const priceById = new Map((products ?? []).map((p) => [p.id, Number(p.price) || 0]));
 
     const itemsTotalKobo = (cartItems as { product_id: string; quantity: number }[]).reduce((acc, item) => {
