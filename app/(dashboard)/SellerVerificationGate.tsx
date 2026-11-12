@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { uploadStudentId, uploadVerificationVideo } from '@/utils/verify';
@@ -38,21 +38,19 @@ export default function SellerVerificationGate({
   const [submitting, setSubmitting] = useState(false);
   const [refreshLoading, setRefreshLoading] = useState(false);
 
-  const [status, setStatus] = useState<string | null>(profile.verification_status ?? null);
-  const [submittedAt, setSubmittedAt] = useState<string | null>(
-    profile.verification_submitted_at ?? null,
-  );
-  const [rejectReason, setRejectReason] = useState<string | null>(
-    profile.verification_reject_reason ?? null,
-  );
+  // The parent profile is the source of truth. Only keep local overrides for
+  // values this form changes before the parent re-fetches (e.g. after submit).
+  // Deriving instead of copying into state through an effect avoids an extra
+  // render and the react-hooks/set-state-in-effect warning.
+  const [override, setOverride] = useState<{
+    status?: string | null;
+    submittedAt?: string | null;
+    rejectReason?: string | null;
+  }>({});
 
-  // Stay in sync when the parent re-fetches the profile (e.g. after submitting
-  // or when the admin approves on another screen and the user checks again).
-  useEffect(() => {
-    setStatus(profile.verification_status ?? null);
-    setSubmittedAt(profile.verification_submitted_at ?? null);
-    setRejectReason(profile.verification_reject_reason ?? null);
-  }, [profile]);
+  const status = override.status !== undefined ? override.status : (profile.verification_status ?? null);
+  const submittedAt = override.submittedAt !== undefined ? override.submittedAt : (profile.verification_submitted_at ?? null);
+  const rejectReason = override.rejectReason !== undefined ? override.rejectReason : (profile.verification_reject_reason ?? null);
 
   const isPending = Boolean(submittedAt) && status === 'pending';
 
@@ -102,8 +100,7 @@ export default function SellerVerificationGate({
         .eq('id', user.id);
       if (error) throw error;
 
-      setStatus('pending');
-      setSubmittedAt(new Date().toISOString());
+      setOverride({ status: 'pending', submittedAt: new Date().toISOString() });
       setIdFile(null);
       setRecordingBlob(null);
       await onRefresh();

@@ -7,6 +7,7 @@ import { nairaToKobo } from '@/utils/money';
 import { uploadProductImage, getSellerStorageUsed } from '@/utils/upload';
 import { PackagePlus, Loader2, ArrowLeft, UploadCloud, Database } from 'lucide-react';
 import { PRODUCT_CATEGORIES } from '@/utils/categories';
+import { PRODUCT_UNITS } from '@/utils/units';
 
 const CATEGORIES = PRODUCT_CATEGORIES;
 
@@ -19,6 +20,8 @@ export default function AddProductPage() {
   const [category, setCategory] = useState('General');
   const [description, setDescription] = useState('');
   const [stock, setStock] = useState('');
+  const [unit, setUnit] = useState('');
+  const [deliveryFee, setDeliveryFee] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -80,6 +83,18 @@ export default function AddProductPage() {
       stockValue = parsed;
     }
 
+    // Delivery fee is optional. Blank = platform default (₦500), 0 = free,
+    // anything else is this seller's own doorstep charge in naira.
+    let deliveryFeeKobo: number | null = null;
+    if (deliveryFee.trim() !== '') {
+      const parsed = Number(deliveryFee);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setError('Delivery fee must be ₦0 or more. Leave it blank for the default.');
+        return;
+      }
+      deliveryFeeKobo = Math.round(parsed * 100);
+    }
+
     setSubmitting(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -105,6 +120,8 @@ export default function AddProductPage() {
           description: description.trim(),
           image_url: upload.url || null,
           stock: stockValue,
+          unit: unit.trim() || null,
+          delivery_fee_kobo: deliveryFeeKobo,
           is_available: true,
         },
       ]);
@@ -193,6 +210,43 @@ export default function AddProductPage() {
               onChange={(e) => setStock(e.target.value)}
               className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-600"
             />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-neutral-300">Sold by (unit)</label>
+              <input
+                type="text"
+                list="product-units"
+                placeholder="e.g. cup, congo, kg, piece"
+                value={unit}
+                onChange={(e) => setUnit(e.target.value)}
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-600"
+              />
+              <datalist id="product-units">
+                {PRODUCT_UNITS.map((option) => (
+                  <option key={option} value={option} />
+                ))}
+              </datalist>
+              <p className="text-[10px] text-neutral-500 font-mono">
+                Garri, beans and pepper sell well by cup or congo. Buyers then pick “2 cups”.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-neutral-300">Your delivery fee (₦)</label>
+              <input
+                type="number"
+                min="0"
+                placeholder="Blank = ₦500 default"
+                value={deliveryFee}
+                onChange={(e) => setDeliveryFee(e.target.value)}
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-600"
+              />
+              <p className="text-[10px] text-neutral-500 font-mono">
+                Charged once per seller. Enter 0 for free delivery.
+              </p>
+            </div>
           </div>
 
           <div className="space-y-1.5">

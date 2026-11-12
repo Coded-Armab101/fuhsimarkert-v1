@@ -6,10 +6,8 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { useCart } from '@/context/CartContext';
 import { formatNaira } from '@/utils/money';
-import { buyerServiceFeeKobo } from '@/utils/pricing';
+import { buyerServiceFeeKobo, deliveryFeeForSellers } from '@/utils/pricing';
 import { ShoppingBag, Trash2, ArrowLeft, ShieldCheck, Plus, Minus, Loader2, Truck, Store, User, Phone, Hash, Wallet } from 'lucide-react';
-
-const DELIVERY_FEE_NGN = 500;
 
 export default function BuyerCartPage() {
   const router = useRouter();
@@ -30,9 +28,12 @@ export default function BuyerCartPage() {
   useEffect(() => {
     const url = new URL(window.location.href);
     if (url.searchParams.get('checkout') === '1') {
-      setCheckoutStage('checkout');
       url.searchParams.delete('checkout');
       window.history.replaceState(null, '', url.toString());
+      // Defer the state write to a callback so React does not cascade renders
+      // from the effect body (react-hooks/set-state-in-effect).
+      const timer = window.setTimeout(() => setCheckoutStage('checkout'), 0);
+      return () => window.clearTimeout(timer);
     }
   }, []);
 
@@ -73,8 +74,10 @@ export default function BuyerCartPage() {
   }, [supabase]);
 
   const buyerFeeKobo = buyerServiceFeeKobo(totalAmount);
+  // One delivery charge per seller, taken from each product's configured fee.
+  const deliveryFeeKobo = deliveryFeeForSellers(cart);
   const grandTotalKobo =
-    totalAmount + (delivery.type === 'delivery' ? DELIVERY_FEE_NGN * 100 : 0) + buyerFeeKobo;
+    totalAmount + (delivery.type === 'delivery' ? deliveryFeeKobo : 0) + buyerFeeKobo;
 
   // Wallet-first split: wallet covers as much as it can, the remainder via
   // card/transfer. When the wallet covers the whole total, no Paystack needed.
@@ -323,7 +326,7 @@ export default function BuyerCartPage() {
                   <div>
                     <h4 className="font-bold text-[#251d18] text-xs">{item.title}</h4>
                     <p className="text-xs font-bold text-[#ef6b3b] mt-1">
-                      ₦{formatNaira(item.price)} x {item.quantity}
+                      ₦{formatNaira(item.price)}{item.unit ? ` / ${item.unit}` : ''} x {item.quantity}
                     </p>
                   </div>
                 </div>
@@ -445,7 +448,7 @@ export default function BuyerCartPage() {
                 <Truck size={16} className="text-[#ef6b3b]" />
                 <p className="text-xs font-bold text-[#251d18] mt-2">Deliver to a place</p>
                 <p className="text-[10px] text-[#c77b22] font-mono mt-0.5">
-                  +₦{DELIVERY_FEE_NGN}
+                  {deliveryFeeKobo > 0 ? `+₦${formatNaira(deliveryFeeKobo)}` : 'FREE'}
                 </p>
               </button>
             </div>
@@ -501,8 +504,13 @@ className={`rounded-2xl border p-4 flex items-start gap-3 text-[11px] font-mono 
                 <span className="flex items-center gap-1">
                   <Truck size={11} className="text-[#c77b22]" /> Delivery fee
                 </span>
-                <span className="text-[#c77b22]">+₦{DELIVERY_FEE_NGN}</span>
+                <span className="text-[#c77b22]">+₦{formatNaira(deliveryFeeKobo)}</span>
               </div>
+            )}
+            {delivery.type === 'delivery' && (
+              <p className="text-[10px] font-mono leading-4 text-[#a3968c]">
+                Delivery is charged once per seller, not per item.
+              </p>
             )}
 
             <div className="flex items-center gap-2 text-[11px] font-mono text-[#81756d] bg-[#faf6f2] border border-[#eee6de] p-3 rounded-xl">

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { rateLimit, PAYMENT_INIT_LIMIT } from '@/utils/rate-limit';
-import { DELIVERY_FEE_KOBO, buyerServiceFeeKobo } from '@/utils/pricing';
+import { buyerServiceFeeKobo, deliveryFeeForSellers } from '@/utils/pricing';
 
 type CartRow = {
   product_id: string;
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
     //       with an explicit query.
     const { data: products, error: productsError } = await supabase
       .from('products')
-      .select('id, title, price, stock, seller_id')
+      .select('*')
       .in('id', productIds);
 
     if (productsError || !products) {
@@ -127,8 +127,10 @@ export async function POST(request: Request) {
     // supabase-js returns as a string to avoid numeric overflow — always coerce
     // with Number() before multiplying. Quantity is multiplied so the charge
     // matches exactly what the buyer ordered — a cart row for quantity 5 must
-    // cost 5 × price, never 1 × price. The flat delivery fee (₦500) is added
-    // only when the buyer chose doorstep delivery rather than campus pickup.
+    // cost 5 × price, never 1 × price.
+    //
+    // Delivery is charged per seller (one fee per seller, not a flat fee), and
+    // the fee always comes from the DATABASE, never the client payload.
     const itemsTotalKobo = (cartItems as CartRow[]).reduce((acc, item) => {
       const unit = priceById.get(item.product_id) ?? 0;
       const qty = Number(item.quantity);
@@ -139,12 +141,19 @@ export async function POST(request: Request) {
       return Number.isSafeInteger(next) ? next : Number.NaN;
     }, 0);
 
-    // Platform earning model: goods + the flat delivery fee (platform handles
-    // this drop) + a tiered buyer service fee on the goods total. The buyer
-    // service fee applies to every order, pickup or delivery.
+    const deliveryFeeKobo = deliveryFeeForSellers(
+      (products ?? []).map((product) => ({
+        seller_id: product.seller_id,
+        delivery_fee_kobo: product.delivery_fee_kobo as number | null,
+      })),
+    );
+
+    // Platform earning model: goods + per-seller delivery (platform handles the
+    // drop) + a tiered buyer service fee on the goods total. The buyer service
+    // fee applies to every order, pickup or delivery.
     const buyerServiceFee = buyerServiceFeeKobo(itemsTotalKobo);
     const trueTotalKobo =
-      itemsTotalKobo + (isPaidDelivery ? DELIVERY_FEE_KOBO : 0) + buyerServiceFee;
+      itemsTotalKobo + (isPaidDelivery ? deliveryFeeKobo : 0) + buyerServiceFee;
 
     if (!Number.isSafeInteger(trueTotalKobo) || trueTotalKobo <= 0) {
       console.error('[paystack] invalid financial amount', {
@@ -211,7 +220,7 @@ export async function POST(request: Request) {
       purpose: 'marketplace_checkout',
       wallet_kobo: walletKobo,
       delivery_type: deliveryType,
-      delivery_fee_kobo: isPaidDelivery ? DELIVERY_FEE_KOBO : 0,
+      delivery_fee_kobo: isPaidDelivery ? deliveryFeeKobo : 0,
       buyer_fee_kobo: buyerServiceFee,
       receiver_name: receiverName,
       receiver_phone: receiverPhone,

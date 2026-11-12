@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { recordOrder } from '@/utils/paystack/recordOrder';
-import { DELIVERY_FEE_KOBO, buyerServiceFeeKobo } from '@/utils/pricing';
+import { buyerServiceFeeKobo, deliveryFeeForSellers } from '@/utils/pricing';
 
 /**
  * Wallet-only checkout: the buyer's wallet balance covers the entire order, so
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
 
     const { data: products, error: productsError } = await supabase
       .from('products')
-      .select('id, title, price, stock, seller_id')
+      .select('*')
       .in('id', productIds);
     if (productsError || !products) {
       return NextResponse.json({ error: 'Internal system pricing error.' }, { status: 500 });
@@ -79,7 +79,15 @@ export async function POST(request: Request) {
       return acc + unit * qty;
     }, 0);
     const buyerFeeKobo = buyerServiceFeeKobo(itemsTotalKobo);
-    const totalKobo = itemsTotalKobo + (isPaidDelivery ? DELIVERY_FEE_KOBO : 0) + buyerFeeKobo;
+    // One delivery charge per seller, priced from the database.
+    const deliveryFeeKobo = deliveryFeeForSellers(
+      (products ?? []).map((product) => ({
+        seller_id: product.seller_id,
+        delivery_fee_kobo: product.delivery_fee_kobo as number | null,
+      })),
+    );
+    const chargedDeliveryKobo = isPaidDelivery ? deliveryFeeKobo : 0;
+    const totalKobo = itemsTotalKobo + chargedDeliveryKobo + buyerFeeKobo;
     if (!Number.isFinite(totalKobo) || totalKobo <= 0) {
       return NextResponse.json({ error: 'Invalid financial amount calculation.' }, { status: 400 });
     }
@@ -105,8 +113,12 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
-    // Fresh wallet reference: unique, so the idempotent wallet debit runs once.
+    // Fresh wallet reference: unique per checkout, so the idempotent wallet
+    // debit runs once and two separate checkouts of the same items cannot
+    // collide into one reference (which would silently skip the second debit
+    // and insert no new order).
     const walletRef = `WAL-${crypto.createHash('sha256').update(JSON.stringify({
+      nonce: crypto.randomUUID(),
       userId: user.id,
       productIds,
       items: (cartItems as { product_id: string; quantity: number }[]).map((item) => ({
@@ -115,6 +127,7 @@ export async function POST(request: Request) {
         unitPriceKobo: priceById.get(item.product_id) ?? 0,
       })),
       deliveryType,
+      deliveryFeeKobo: chargedDeliveryKobo,
       receiverName,
       receiverPhone,
       matricNumber,
@@ -131,7 +144,7 @@ export async function POST(request: Request) {
         unitPriceKobo: priceById.get(item.product_id) ?? 0,
       })),
       deliveryType,
-      deliveryFeeKobo: isPaidDelivery ? DELIVERY_FEE_KOBO : 0,
+      deliveryFeeKobo: chargedDeliveryKobo,
       receiverName,
       receiverPhone,
       matricNumber,

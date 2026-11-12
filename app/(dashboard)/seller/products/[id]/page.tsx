@@ -7,6 +7,7 @@ import { nairaToKobo, koboToNaira } from '@/utils/money';
 import { uploadProductImage, getSellerStorageUsed } from '@/utils/upload';
 import { Package, Loader2, ArrowLeft, UploadCloud, Database } from 'lucide-react';
 import { PRODUCT_CATEGORIES } from '@/utils/categories';
+import { PRODUCT_UNITS } from '@/utils/units';
 
 const CATEGORIES = PRODUCT_CATEGORIES;
 
@@ -24,6 +25,8 @@ export default function EditProductPage() {
   const [category, setCategory] = useState('General');
   const [description, setDescription] = useState('');
   const [stock, setStock] = useState('');
+  const [unit, setUnit] = useState('');
+  const [deliveryFee, setDeliveryFee] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [existingImage, setExistingImage] = useState<string | null>(null);
@@ -69,6 +72,12 @@ export default function EditProductPage() {
         setCategory(data.category || 'General');
         setDescription(data.description || '');
         setStock(data.stock !== null && data.stock !== undefined ? String(data.stock) : '');
+        setUnit(data.unit || '');
+        setDeliveryFee(
+          data.delivery_fee_kobo !== null && data.delivery_fee_kobo !== undefined
+            ? String(koboToNaira(Number(data.delivery_fee_kobo)))
+            : '',
+        );
         setExistingImage(data.image_url || null);
       } finally {
         setLoading(false);
@@ -108,6 +117,16 @@ export default function EditProductPage() {
       stockValue = parsed;
     }
 
+    let deliveryFeeKobo: number | null = null;
+    if (deliveryFee.trim() !== '') {
+      const parsed = Number(deliveryFee);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setError('Delivery fee must be ₦0 or more. Leave it blank for the default.');
+        return;
+      }
+      deliveryFeeKobo = Math.round(parsed * 100);
+    }
+
     setSubmitting(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -137,6 +156,8 @@ export default function EditProductPage() {
           description: description.trim(),
           image_url: imageUrl,
           stock: stockValue,
+          unit: unit.trim() || null,
+          delivery_fee_kobo: deliveryFeeKobo,
         })
         .eq('id', id)
         .eq('seller_id', user.id);
@@ -243,6 +264,40 @@ export default function EditProductPage() {
               onChange={(e) => setStock(e.target.value)}
               className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-600"
             />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-neutral-300">Sold by (unit)</label>
+              <input
+                type="text"
+                list="product-units"
+                placeholder="e.g. cup, congo, kg, piece"
+                value={unit}
+                onChange={(e) => setUnit(e.target.value)}
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-600"
+              />
+              <datalist id="product-units">
+                {PRODUCT_UNITS.map((option) => (
+                  <option key={option} value={option} />
+                ))}
+              </datalist>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-neutral-300">Your delivery fee (₦)</label>
+              <input
+                type="number"
+                min="0"
+                placeholder="Blank = ₦500 default"
+                value={deliveryFee}
+                onChange={(e) => setDeliveryFee(e.target.value)}
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-600"
+              />
+              <p className="text-[10px] text-neutral-500 font-mono">
+                Charged once per seller. Enter 0 for free delivery.
+              </p>
+            </div>
           </div>
 
           <div className="space-y-1.5">

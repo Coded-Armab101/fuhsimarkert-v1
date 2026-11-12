@@ -12,6 +12,8 @@ export interface CartItem {
   image?: string | null;
   image_url?: string | null;
   seller_id?: string | null;
+  unit?: string | null;
+  delivery_fee_kobo?: number | null;
 }
 
 export type AddToCartInput = Omit<CartItem, 'quantity'> & { quantity?: number };

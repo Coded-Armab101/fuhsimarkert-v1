@@ -12,8 +12,39 @@
  *    handles the drop and keeps the fee (sellers do NOT keep it).
  */
 
-/** Cost of a doorstep drop, once per order — in kobo (₦500). */
+/** Cost of a doorstep drop, once per seller, in kobo (₦500). Used as the
+ *  platform default when a seller has not configured a per-product fee. */
 export const DELIVERY_FEE_KOBO = 50000;
+
+/**
+ * Delivery is priced per seller, not flat per order.
+ *
+ * Each product may carry `delivery_fee_kobo`:
+ *   - a positive number → that seller's own delivery charge,
+ *   - 0 → free delivery from that seller,
+ *   - null/undefined → platform default (₦500).
+ *
+ * A combined cart pays one fee per seller (the highest-fee item from that
+ * seller), so buying three items from one vendor is not charged three times.
+ */
+export function deliveryFeeForSellers(
+  items: Array<{ seller_id?: string | null; delivery_fee_kobo?: number | null }>,
+): number {
+  const bySeller = new Map<string, number>();
+  for (const item of items) {
+    const seller = item.seller_id || 'unknown';
+    const raw = item.delivery_fee_kobo;
+    const fee = raw === null || raw === undefined
+      ? DELIVERY_FEE_KOBO
+      : Math.max(0, Math.floor(Number(raw) || 0));
+    bySeller.set(seller, Math.max(bySeller.get(seller) ?? 0, fee));
+  }
+
+  let total = 0;
+  for (const fee of bySeller.values()) total += fee;
+  return total;
+}
+
 
 /** Seller commission, as a whole percent off the goods value. */
 export const SELLER_COMMISSION_PERCENT = 3;

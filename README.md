@@ -41,6 +41,10 @@ Before deploying the hardened build, apply `supabase/migrations/20260923_securit
 
 Also apply `supabase/migrations/20261112_verification_storage.sql`. It sets the private `verification-documents` bucket to a 25MB per-file limit and (re)creates the owner-only storage policies, so seller ID images and selfie videos upload reliably. Without it, a hand-configured 1MB bucket limit still rejects phone photos even though the app allows 10MB.
 
+Then apply `supabase/migrations/20261113_features.sql`. It adds product selling units and per-seller delivery fees, the `search_products` function (so search can match seller names without exposing profiles), the `reviews` table plus public `product_ratings` view, and the `confirm_order_group` / `dispute_order` escrow functions the app already calls. Without it, search falls back to title/description/category, ratings stay blank, and Confirm receipt fails.
+
+For password reset, add `<your site origin>/auth/callback?next=/reset-password` to the Supabase Auth **Redirect URLs** allow-list.
+
 ## Phone alerts for sellers (Web Push)
 
 Sellers can turn on order alerts from **Seller Settings**, or from the bell menu in

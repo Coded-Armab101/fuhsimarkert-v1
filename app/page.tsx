@@ -9,6 +9,7 @@ import { useCart } from '@/context/CartContext';
 import { formatNaira } from '@/utils/money';
 import { FEATURED_CATEGORIES } from '@/utils/categories';
 import { newShuffleSeed, seededShuffle } from '@/utils/shuffle';
+import { productSearchFilter } from '@/utils/search';
 import BrandLogo from '@/components/BrandLogo';
 import {
   ArrowRight,
@@ -39,6 +40,8 @@ type Product = {
   seller_id: string;
   created_at: string;
   stock?: number | null;
+  unit?: string | null;
+  delivery_fee_kobo?: number | null;
 };
 
 const isAvailable = (p: Product) =>
@@ -152,6 +155,9 @@ function ProductCard({
         <div className="mt-auto pt-2">
           <p className="text-base font-black text-[#2C2C2C]">
             ₦{formatNaira(product.price)}
+            {product.unit ? (
+              <span className="text-[11px] font-semibold text-[#81756D]"> / {product.unit}</span>
+            ) : null}
           </p>
 
           {!unavailable &&
@@ -246,16 +252,28 @@ export default function LandingPage() {
       setLoadFailed(false);
 
       try {
-        let query = supabase
-          .from('products')
-          .select('*')
-          .eq('is_available', true);
+        const term = search.trim();
+        let data: Product[] | null = null;
+        let error: { message: string } | null = null;
 
-        if (search.trim()) {
-          query = query.ilike('title', `%${search.trim()}%`);
+        if (term) {
+          const { data: rpcRows, error: rpcError } = await supabase.rpc('search_products', { p_query: term });
+          if (!rpcError && Array.isArray(rpcRows)) {
+            data = rpcRows as Product[];
+          } else {
+            if (rpcError) console.warn('search_products unavailable, using fallback filter:', rpcError.message);
+            let query = supabase.from('products').select('*').eq('is_available', true);
+            const filter = productSearchFilter(term);
+            if (filter) query = query.or(filter);
+            const result = await query;
+            data = (result.data as Product[]) || null;
+            error = result.error;
+          }
+        } else {
+          const result = await supabase.from('products').select('*').eq('is_available', true);
+          data = (result.data as Product[]) || null;
+          error = result.error;
         }
-
-        const { data, error } = await query;
 
         if (cancelled) return;
 
@@ -267,7 +285,7 @@ export default function LandingPage() {
         }
 
         // No demo rows: an empty catalogue stays empty.
-        setProducts((data as Product[]) || []);
+        setProducts(data || []);
       } catch (err) {
         if (cancelled) return;
         console.error('Failed to fetch landing products:', err);
@@ -722,6 +740,9 @@ export default function LandingPage() {
                 </h2>
                 <span className="shrink-0 text-xl font-black text-[#DE6437]">
                   ₦{formatNaira(selected.price)}
+                  {selected.unit ? (
+                    <span className="text-xs font-semibold text-[#81756D]"> / {selected.unit}</span>
+                  ) : null}
                 </span>
               </div>
 

@@ -1,7 +1,25 @@
 import type { Metadata, Viewport } from 'next';
+import { Manrope, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { CartProvider } from '@/context/CartContext';
 import PwaInstall from './PwaInstall';
+
+/**
+ * Manrope is a clean, geometric sans with tall x-height — it keeps the warm
+ * marketplace tone but reads much neater at small sizes than the previous
+ * system-font fallback. Geist Mono is only used for codes, prices and labels.
+ */
+const manrope = Manrope({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-manrope',
+});
+
+const geistMono = Geist_Mono({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-geist-mono',
+});
 
 export const metadata: Metadata = {
   title: {
@@ -46,7 +64,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={`${manrope.variable} ${geistMono.variable}`} suppressHydrationWarning>
       <body className="bg-[#fffdfa] text-[#251d18] antialiased" suppressHydrationWarning>
         {/* CartProvider keeps cart data available for the buyer side */}
         <CartProvider>

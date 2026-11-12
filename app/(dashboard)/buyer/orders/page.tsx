@@ -8,6 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { useCart } from '@/context/CartContext';
 import { formatNaira } from '@/utils/money';
 import DeliveryAnnouncement from '../DeliveryAnnouncement';
+import LeaveReview from '@/components/LeaveReview';
 
 type BuyerOrderRow = {
   id: string;
@@ -476,7 +477,7 @@ export default function OrdersPage() {
         </div>
       ) : (
         <div className="space-y-4 max-w-2xl">
-          {groups.map((group, groupIdx) => {
+          {groups.map((group) => {
             const statusIndex = TRACK_STEPS.indexOf(group.status);
             const isDelivered = ['confirmed', 'delivered', 'completed'].includes(group.status);
             const isDisputed = group.status === 'disputed';
@@ -645,6 +646,22 @@ export default function OrdersPage() {
 {isDelivered && (
                   <div className="p-4 bg-[#e8f7ef] border border-[#cdeeda] text-[#0f6b4a] text-xs rounded-xl text-center font-medium font-mono">
                     <CheckCircle2 size={16} className="inline mr-1" /> You confirmed this order. Payment has been released to the seller.
+                  </div>
+                )}
+                {group.status === 'completed' && (
+                  <div className="space-y-2">
+                    {group.items.map((item) => {
+                      const p = getOrderProduct(item.products);
+                      if (!p?.id) return null;
+                      return (
+                        <LeaveReview
+                          key={item.id}
+                          orderId={item.id}
+                          productId={p.id}
+                          productTitle={p.title || 'this item'}
+                        />
+                      );
+                    })}
                   </div>
                 )}
                 {isDisputed && (
