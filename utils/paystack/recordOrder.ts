@@ -108,11 +108,11 @@ export async function recordOrder(
     // what the buyer paid or what gets escrowed.
     qtyByProduct.set(item.productId, quantity);
 
-    const stock = product.stock;
-    if (stock !== null && stock !== undefined &&
-        (Number(stock) < 1 || quantity > Number(stock))) {
-      throw new Error(`insufficient stock for product ${item.productId}`);
-    }
+    // Stock is checked/decremented atomically AFTER the order rows are written
+    // and only by the call that actually inserted them. Doing it here would
+    // make a webhook/verify retry fail with "insufficient stock" once the first
+    // call had already consumed the last unit — which used to leave a paid
+    // buyer with no visible order and an uncleared cart.
   }
 
   const expectedGoodsKobo = input.items.reduce(
@@ -143,10 +143,24 @@ export async function recordOrder(
     throw new Error('payment amount does not match checkout total');
   }
 
+  // Note whether this reference is already recorded before we debit/upsert.
+  // `.select()` after the upsert is the authoritative idempotency signal, but
+  // this pre-check keeps the wallet debit safe for plain retries regardless of
+  // client-library behaviour. The DB ledger in `debit_wallet` closes the truly
+  // concurrent webhook/verify race.
+  const { data: existingRows } = await supabase
+    .from('orders')
+    .select('id')
+    .eq('order_ref', input.reference)
+    .limit(1);
+  const orderAlreadyExisted = Boolean(existingRows?.length);
+
   // Debit wallet only after the immutable checkout snapshot and payment amount
   // have both been validated. This prevents a malformed/replayed payment from
-  // consuming wallet funds before validation fails.
-  if (walletKobo > 0) {
+  // consuming wallet funds before validation fails. Skip entirely when this
+  // reference is already recorded: a webhook/verify retry must never debit the
+  // buyer a second time.
+  if (walletKobo > 0 && !orderAlreadyExisted) {
     let debited = false;
     try {
       const { data: ok, error: debitError } = await supabase.rpc('debit_wallet', {
@@ -197,39 +211,48 @@ export async function recordOrder(
   // so the buyer and the delivery/admin person hand it over as a single order.
   const deliveryCode = generateDeliveryCode();
 
-  const { error: ordersError } = await supabase.from('orders').upsert(
-    products.map((product) => {
-      const quantity = qtyByProduct.get(product.id) ?? 1;
-      const amountKobo = snapshotById.get(product.id)!.unitPriceKobo * quantity;
-      return {
-        buyer_id: input.buyerId,
-        seller_id: product.seller_id,
-        product_id: product.id,
-        amount_kobo: amountKobo,
-        quantity,
-        order_ref: input.reference,
-        delivery_code: deliveryCode,
-        status: ESCROW_HELD_STATUS,
-        // 3% commission on THIS product's goods; kept by the platform when the
-        // seller is paid `amount - platform_fee` on confirmation.
-        platform_fee_kobo: sellerCommissionKobo(amountKobo),
-        meetup_location:
-          input.deliveryType === 'delivery'
-            ? 'Delivery to buyer'
-            : 'On-campus pickup',
-        meetup_time: meetupTime,
-        delivery_type: input.deliveryType,
-        delivery_fee_kobo: input.deliveryFeeKobo,
-        receiver_name: input.receiverName,
-        receiver_phone: input.receiverPhone,
-        matric_number: input.matricNumber,
-        delivery_address: input.deliveryAddress,
-      };
-    }),
-    { onConflict: 'order_ref,product_id', ignoreDuplicates: true },
-  );
+  // The upsert is also the idempotency boundary for the webhook/verify race:
+  // `.select()` returns ONLY the rows this call actually inserted, so a retry
+  // (or the losing side of the race) gets an empty array. Stock is only
+  // decremented when we won the insert, never twice for one payment.
+  const { data: insertedOrders, error: ordersError } = await supabase
+    .from('orders')
+    .upsert(
+      products.map((product) => {
+        const quantity = qtyByProduct.get(product.id) ?? 1;
+        const amountKobo = snapshotById.get(product.id)!.unitPriceKobo * quantity;
+        return {
+          buyer_id: input.buyerId,
+          seller_id: product.seller_id,
+          product_id: product.id,
+          amount_kobo: amountKobo,
+          quantity,
+          order_ref: input.reference,
+          delivery_code: deliveryCode,
+          status: ESCROW_HELD_STATUS,
+          // 3% commission on THIS product's goods; kept by the platform when the
+          // seller is paid `amount - platform_fee` on confirmation.
+          platform_fee_kobo: sellerCommissionKobo(amountKobo),
+          meetup_location:
+            input.deliveryType === 'delivery'
+              ? 'Delivery to buyer'
+              : 'On-campus pickup',
+          meetup_time: meetupTime,
+          delivery_type: input.deliveryType,
+          delivery_fee_kobo: input.deliveryFeeKobo,
+          receiver_name: input.receiverName,
+          receiver_phone: input.receiverPhone,
+          matric_number: input.matricNumber,
+          delivery_address: input.deliveryAddress,
+        };
+      }),
+      { onConflict: 'order_ref,product_id', ignoreDuplicates: true },
+    )
+    .select('id, seller_id, product_id, amount_kobo');
 
   if (ordersError) throw ordersError;
+
+  const newlyInsertedOrders = insertedOrders ?? [];
 
   // Fetch the rows we just escrowed so we can create matching escrow ledger
   // entries and (later) credit the seller's wallet from them. Upserts do not
@@ -240,44 +263,47 @@ export async function recordOrder(
     .eq('order_ref', input.reference);
   if (createdOrdersError) throw createdOrdersError;
 
-  // Notify each seller only after the paid order rows exist. The unique
-  // (user_id, order_id, type) constraint makes webhook/verify retries safe.
-  if (createdOrders?.length) {
-    const admin = createAdminClient();
-    const notifications = createdOrders.map((order) => ({
-      user_id: order.seller_id,
-      type: 'order_new',
-      title: 'New paid order',
-      message: 'A buyer has paid for your product. Open Sales to prepare the order.',
-      order_id: order.id,
-    }));
-    const { data: insertedNotifications, error: notificationError } = await admin
-      .from('notifications')
-      .upsert(notifications, { onConflict: 'user_id,order_id,type', ignoreDuplicates: true })
-      .select('user_id');
-    if (notificationError) {
-      console.error('[recordOrder] seller notification failed', notificationError);
-    } else if (insertedNotifications?.length) {
-      // Only push for rows that were actually inserted. A webhook/verify retry
-      // returns nothing here, so the seller does not get the same alert twice.
-      const sellerIds = Array.from(
-        new Set(
-          insertedNotifications
-            .map((row) => row.user_id as string | null)
-            .filter((id): id is string => Boolean(id)),
-        ),
-      );
-      try {
-        await sendPushToUsers(admin, sellerIds, {
-          title: 'New paid order',
-          body: 'A buyer has paid for your product. Open Sales to prepare the order.',
-          url: '/seller/orders',
-          tag: `order-${input.reference}`,
-        });
-      } catch (pushError) {
-        // Push is best-effort: never fail a paid order because a phone was offline.
-        console.error('[recordOrder] push notification failed', pushError);
+  // Notify each seller only for rows this call inserted, so the losing side of
+  // the webhook/verify race never sends a duplicate alert. Push is best-effort:
+  // a missing service key or offline phone must never break a paid order.
+  if (newlyInsertedOrders.length > 0) {
+    try {
+      const admin = createAdminClient();
+      const notifications = newlyInsertedOrders.map((order) => ({
+        user_id: order.seller_id,
+        type: 'order_new',
+        title: 'New paid order',
+        message: 'A buyer has paid for your product. Open Sales to prepare the order.',
+        order_id: order.id,
+      }));
+      const { error: notificationError } = await admin
+        .from('notifications')
+        .upsert(notifications, { onConflict: 'user_id,order_id,type', ignoreDuplicates: true });
+      if (notificationError) {
+        console.error('[recordOrder] seller notification failed', notificationError);
+      } else {
+        const sellerIds = Array.from(
+          new Set(
+            newlyInsertedOrders
+              .map((row) => row.seller_id as string | null)
+              .filter((id): id is string => Boolean(id)),
+          ),
+        );
+        try {
+          await sendPushToUsers(admin, sellerIds, {
+            title: 'New paid order',
+            body: 'A buyer has paid for your product. Open Sales to prepare the order.',
+            url: '/seller/orders',
+            tag: `order-${input.reference}`,
+          });
+        } catch (pushError) {
+          // Push is best-effort: never fail a paid order because a phone was offline.
+          console.error('[recordOrder] push notification failed', pushError);
+        }
       }
+    } catch (notifyError) {
+      // Notifications are a side effect — the order is already safely escrowed.
+      console.error('[recordOrder] notification setup failed', notifyError);
     }
   }
 
@@ -352,19 +378,32 @@ export async function recordOrder(
     }
   }
 
-  // Decrement tracked stock atomically in Postgres. The earlier read is only
-  // an informational validation; the RPC is the authoritative concurrency
-  // boundary and refuses the second buyer when stock was consumed meanwhile.
-  for (const product of products) {
-    if (product.stock === null || product.stock === undefined) continue;
-    const qty = qtyByProduct.get(product.id) ?? 1;
-    const { data: remaining, error: stockError } = await supabase.rpc('decrement_product_stock', {
-      p_product_id: product.id,
-      p_quantity: qty,
-    });
-    if (stockError) throw stockError;
-    if (remaining === null || remaining === undefined) {
-      throw new Error(`insufficient stock for product ${product.id}`);
+  // Decrement tracked stock atomically in Postgres — but ONLY for the call that
+  // actually inserted the order rows. The webhook and the browser verify both
+  // call recordOrder for the same reference; without this gate the loser would
+  // decrement a second time (or throw "insufficient stock" when the first call
+  // took the last unit), which is what broke the paid-order return.
+  const shouldDecrementStock =
+    newlyInsertedOrders.length > 0 || (insertedOrders === null && !orderAlreadyExisted);
+
+  if (shouldDecrementStock) {
+    for (const product of products) {
+      if (product.stock === null || product.stock === undefined) continue;
+      const qty = qtyByProduct.get(product.id) ?? 1;
+      const { data: remaining, error: stockError } = await supabase.rpc('decrement_product_stock', {
+        p_product_id: product.id,
+        p_quantity: qty,
+      });
+      if (stockError || remaining === null || remaining === undefined) {
+        // The buyer has already paid and the order rows are safely escrowed, so
+        // never fail the recording over an inventory race. Log it for manual
+        // reconciliation instead.
+        console.error('[recordOrder] stock decrement failed', {
+          productId: product.id,
+          reference: input.reference,
+          error: stockError?.message ?? 'insufficient stock',
+        });
+      }
     }
   }
 

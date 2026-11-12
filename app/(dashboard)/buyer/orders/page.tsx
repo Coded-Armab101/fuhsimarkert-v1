@@ -2,8 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes, ChevronDown, ChevronUp } from 'lucide-react';
+import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { useCart } from '@/context/CartContext';
 import { formatNaira } from '@/utils/money';
 import DeliveryAnnouncement from '../DeliveryAnnouncement';
@@ -29,7 +30,7 @@ type BuyerOrderRow = {
   products?: { id: string; title: string; image_url?: string | null }[] | { id: string; title: string; image_url?: string | null } | null;
 };
 
-function getOrderProduct(products: any): { id?: string; title?: string; image_url?: string | null } | null {
+function getOrderProduct(products: BuyerOrderRow['products']): { id?: string; title?: string; image_url?: string | null } | null {
   if (!products) return null;
   if (Array.isArray(products)) return products[0] || null;
   if (typeof products === 'object') return products;
@@ -66,13 +67,205 @@ const isOldFinishedOrder = (group: OrderGroup) => {
   return finished && Date.now() - new Date(group.created_at).getTime() > 7 * 24 * 60 * 60 * 1000;
 };
 
+type ConfirmResult = {
+  done: boolean;
+  kind: 'success' | 'error';
+  message: string;
+};
+
+/**
+ * Ask the server to verify a Paystack return reference.
+ *
+ * The route both reports the real status AND records the escrow order, so the
+ * order list must not be fetched until this settles — otherwise the buyer lands
+ * on Orders before the row exists and sees "No orders yet".
+ */
+async function confirmPaystackReturn(reference: string): Promise<ConfirmResult> {
+  try {
+    const res = await fetch(`/api/paystack/verify?reference=${encodeURIComponent(reference)}`);
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok && data.status === 'success') {
+      return {
+        done: true,
+        kind: 'success',
+        message: 'Payment confirmed! Your order has been placed into escrow.',
+      };
+    }
+
+    if (res.ok && (data.status === 'failed' || data.status === 'abandoned')) {
+      return {
+        done: true,
+        kind: 'error',
+        message: 'Payment was cancelled or failed. Nothing was charged.',
+      };
+    }
+
+    return {
+      done: false,
+      kind: 'error',
+      message:
+        data?.error ||
+        'We could not confirm this payment yet. If you were charged, tap "Check payment again" in a moment.',
+    };
+  } catch {
+    return {
+      done: false,
+      kind: 'error',
+      message:
+        'Could not reach the server to confirm your payment. Tap "Check payment again" when you are back online.',
+    };
+  }
+}
+
+async function fetchBuyerOrderGroups(
+  supabase: SupabaseClient,
+): Promise<OrderGroup[] | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  let rowsData: BuyerOrderRow[] | null = null;
+
+  const primary = await supabase
+    .from('orders')
+    .select(`
+      id,
+      buyer_id,
+      seller_id,
+      product_id,
+      amount_kobo,
+      delivery_fee_kobo,
+      platform_fee_kobo,
+      quantity,
+      status,
+      order_ref,
+      delivery_code,
+      delivery_type,
+      receiver_name,
+      receiver_phone,
+      matric_number,
+      delivery_address,
+      meetup_location,
+      created_at,
+      products:product_id ( id, title, image_url )
+    `)
+    .eq('buyer_id', user.id)
+    .order('created_at', { ascending: false });
+
+  if (!primary.error && primary.data) {
+    rowsData = primary.data as unknown as BuyerOrderRow[];
+  } else {
+    // The embedded `products` relation can fail depending on how the foreign
+    // key is exposed; retry without it and fill product details separately.
+    const fallback = await supabase
+      .from('orders')
+      .select(`
+        id,
+        buyer_id,
+        seller_id,
+        product_id,
+        amount_kobo,
+        delivery_fee_kobo,
+        platform_fee_kobo,
+        quantity,
+        status,
+        order_ref,
+        delivery_code,
+        delivery_type,
+        receiver_name,
+        receiver_phone,
+        matric_number,
+        delivery_address,
+        meetup_location,
+        created_at
+      `)
+      .eq('buyer_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (!fallback.error && fallback.data) {
+      rowsData = fallback.data as unknown as BuyerOrderRow[];
+    }
+  }
+
+  if (!rowsData) return null;
+
+  const rows = rowsData as (BuyerOrderRow & { product_id?: string })[];
+
+  const missingProductIds = rows
+    .filter((r) => !getOrderProduct(r.products) && r.product_id)
+    .map((r) => r.product_id as string);
+
+  if (missingProductIds.length > 0) {
+    const { data: fetchedProducts } = await supabase
+      .from('products')
+      .select('id, title, image_url')
+      .in('id', missingProductIds);
+
+    if (fetchedProducts) {
+      const productMap = new Map(fetchedProducts.map((p) => [p.id, p]));
+      for (const row of rows) {
+        if (!getOrderProduct(row.products) && row.product_id) {
+          const p = productMap.get(row.product_id);
+          if (p) row.products = [p];
+        }
+      }
+    }
+  }
+
+  const byRef = new Map<string, OrderGroup>();
+  for (const row of rows) {
+    const ref = row.order_ref || row.id;
+    const existing = byRef.get(ref);
+    if (!existing) {
+      byRef.set(ref, {
+        order_ref: ref,
+        delivery_code: row.delivery_code || ref.slice(0, 8).toUpperCase(),
+        status: row.status,
+        delivery_type: row.delivery_type,
+        receiver_name: row.receiver_name,
+        receiver_phone: row.receiver_phone,
+        matric_number: row.matric_number,
+        delivery_address: row.delivery_address,
+        meetup_location: row.meetup_location,
+        created_at: row.created_at,
+        items: [row],
+        totalKobo: row.amount_kobo + (row.delivery_fee_kobo || 0),
+        deliveryFeeKobo: row.delivery_fee_kobo || 0,
+      });
+    } else {
+      existing.items.push(row);
+      existing.totalKobo += row.amount_kobo;
+      // Delivery fee applies once for the whole combined order.
+      existing.deliveryFeeKobo = existing.deliveryFeeKobo || row.delivery_fee_kobo || 0;
+      // The group only advances to a stage once EVERY seller's item has
+      // reached it. Whichever seller is furthest behind sets the tracker.
+      const rank = (s: string) => TRACK_STEPS.indexOf(s);
+      if (rank(row.status) < rank(existing.status)) existing.status = row.status;
+    }
+  }
+
+  // Mark all current order statuses as seen by the buyer so the notification badge clears
+  try {
+    const key = 'fuhsi_order_notifications_buyer';
+    const read = JSON.parse(localStorage.getItem(key) || '{}') as Record<string, string>;
+    for (const row of rows) {
+      read[row.id] = row.status;
+    }
+    localStorage.setItem(key, JSON.stringify(read));
+  } catch { /* ignore storage errors */ }
+
+  // Keep the database record for refunds/support, but keep the buyer's list
+  // tidy: completed, cancelled, and rejected orders leave after seven days.
+  return Array.from(byRef.values()).filter((group) => !isOldFinishedOrder(group));
+}
+
 export default function OrdersPage() {
   const supabase = createClient();
   const { clearCart } = useCart();
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<OrderGroup[]>([]);
   const [updatingRef, setUpdatingRef] = useState<string | null>(null);
-  const [paymentNotice, setPaymentNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
+  const [paymentNotice, setPaymentNotice] = useState<{ kind: 'success' | 'error'; message: string; retry?: boolean } | null>(null);
   const [expandedRefs, setExpandedRefs] = useState<Record<string, boolean>>({});
 
   const toggleExpand = (ref: string) => {
@@ -86,175 +279,99 @@ export default function OrdersPage() {
     return expandedRefs[ref] === true;
   };
 
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    const reference = url.searchParams.get('reference') || url.searchParams.get('trxref');
-    if (!reference) return;
+  const returnedReferenceRef = React.useRef<string | null>(null);
+  const [checkingReturn, setCheckingReturn] = useState(false);
+  // True from mount until any Paystack return reference has been confirmed, so
+  // the list is not fetched before the freshly escrowed order row exists.
+  const [confirmingReturn, setConfirmingReturn] = useState(true);
+  const [returnReference, setReturnReference] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
 
+  // Remove the Paystack return params only after a terminal answer. On a
+  // transient failure the reference stays in the URL so the retry button (or a
+  // page reload) can re-run the idempotent verify.
+  const stripReturnParams = () => {
+    const url = new URL(window.location.href);
     url.searchParams.delete('reference');
     url.searchParams.delete('trxref');
     window.history.replaceState(null, '', url.toString());
+  };
 
-    (async () => {
-      try {
-        const res = await fetch(`/api/paystack/verify?reference=${encodeURIComponent(reference)}`);
-        const data = await res.json();
+  const applyConfirmResult = (result: ConfirmResult) => {
+    // The order is escrowed. Clear the local cart only now, so a failed
+    // verification never loses the basket.
+    if (result.done && result.kind === 'success') clearCart();
+    setPaymentNotice({ kind: result.kind, message: result.message, retry: !result.done });
+  };
 
-        if (res.ok && data.status === 'success') {
-          clearCart();
-          setPaymentNotice({
-            kind: 'success',
-            message: 'Payment confirmed! Your order has been placed into escrow.',
-          });
-        } else if (res.ok && (data.status === 'failed' || data.status === 'abandoned')) {
-          setPaymentNotice({
-            kind: 'error',
-            message: 'Payment was cancelled or failed.',
-          });
-        }
-      } catch {
-        /* ignore network error */
-      }
-    })();
-  }, [clearCart]);
-
+  // Confirm a Paystack return FIRST, then let the fetch effect below run. A
+  // re-render (e.g. from clearing the cart) must not verify the same reference
+  // twice, hence the ref guard.
   useEffect(() => {
-    const fetchBuyerOrders = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        let { data, error } = await supabase
-          .from('orders')
-          .select(`
-            id,
-            buyer_id,
-            seller_id,
-            product_id,
-            amount_kobo,
-            delivery_fee_kobo,
-            platform_fee_kobo,
-            quantity,
-            status,
-            order_ref,
-            delivery_code,
-            delivery_type,
-            receiver_name,
-            receiver_phone,
-            matric_number,
-            delivery_address,
-            meetup_location,
-            created_at,
-            products:product_id ( id, title, image_url )
-          `)
-          .eq('buyer_id', user.id)
-          .order('created_at', { ascending: false });
+    let cancelled = false;
 
-        if (error) {
-          const fallbackRes = await supabase
-            .from('orders')
-            .select(`
-              id,
-              buyer_id,
-              seller_id,
-              product_id,
-              amount_kobo,
-              delivery_fee_kobo,
-              platform_fee_kobo,
-              quantity,
-              status,
-              order_ref,
-              delivery_code,
-              delivery_type,
-              receiver_name,
-              receiver_phone,
-              matric_number,
-              delivery_address,
-              meetup_location,
-              created_at
-            `)
-            .eq('buyer_id', user.id)
-            .order('created_at', { ascending: false });
+    const boot = async () => {
+      const url = new URL(window.location.href);
+      const reference = url.searchParams.get('reference') || url.searchParams.get('trxref');
 
-          if (!fallbackRes.error && fallbackRes.data) {
-            data = fallbackRes.data as any;
-            error = null;
-          }
-        }
-
-        if (!error && data) {
-          const rows = data as (BuyerOrderRow & { product_id?: string })[];
-
-          const missingProductIds = rows
-            .filter((r) => !getOrderProduct(r.products) && r.product_id)
-            .map((r) => r.product_id as string);
-
-          if (missingProductIds.length > 0) {
-            const { data: fetchedProducts } = await supabase
-              .from('products')
-              .select('id, title, image_url')
-              .in('id', missingProductIds);
-
-            if (fetchedProducts) {
-              const productMap = new Map(fetchedProducts.map((p) => [p.id, p]));
-              for (const row of rows) {
-                if (!getOrderProduct(row.products) && row.product_id) {
-                  const p = productMap.get(row.product_id);
-                  if (p) row.products = [p];
-                }
-              }
-            }
-          }
-          const byRef = new Map<string, OrderGroup>();
-          for (const row of rows) {
-            const ref = row.order_ref || row.id;
-            const existing = byRef.get(ref);
-            if (!existing) {
-              byRef.set(ref, {
-                order_ref: ref,
-                delivery_code: row.delivery_code || ref.slice(0, 8).toUpperCase(),
-                status: row.status,
-                delivery_type: row.delivery_type,
-                receiver_name: row.receiver_name,
-                receiver_phone: row.receiver_phone,
-                matric_number: row.matric_number,
-                delivery_address: row.delivery_address,
-                meetup_location: row.meetup_location,
-                created_at: row.created_at,
-                items: [row],
-                totalKobo: row.amount_kobo + (row.delivery_fee_kobo || 0),
-                deliveryFeeKobo: row.delivery_fee_kobo || 0,
-              });
-            } else {
-              existing.items.push(row);
-              existing.totalKobo += row.amount_kobo;
-              // Delivery fee applies once for the whole combined order.
-              existing.deliveryFeeKobo = existing.deliveryFeeKobo || row.delivery_fee_kobo || 0;
-              // The group only advances to a stage once EVERY seller's item has
-              // reached it. Whichever seller is furthest behind sets the tracker.
-              const rank = (s: string) => TRACK_STEPS.indexOf(s);
-              if (rank(row.status) < rank(existing.status)) existing.status = row.status;
-            }
-          }
-          // Mark all current order statuses as seen by the buyer so the notification badge clears
-          try {
-            const key = 'fuhsi_order_notifications_buyer';
-            const read = JSON.parse(localStorage.getItem(key) || '{}') as Record<string, string>;
-            for (const row of rows) {
-              read[row.id] = row.status;
-            }
-            localStorage.setItem(key, JSON.stringify(read));
-          } catch { /* ignore storage errors */ }
-
-          // Keep the database record for refunds/support, but keep the buyer's
-          // list tidy: completed, cancelled, and rejected orders leave this
-          // screen after seven days.
-          setGroups(Array.from(byRef.values()).filter((group) => !isOldFinishedOrder(group)));
-        }
+      if (reference && returnedReferenceRef.current !== reference) {
+        returnedReferenceRef.current = reference;
+        setReturnReference(reference);
+        const result = await confirmPaystackReturn(reference);
+        if (cancelled) return;
+        applyConfirmResult(result);
+        if (result.done) stripReturnParams();
       }
+
+      if (cancelled) return;
+      setConfirmingReturn(false);
+      setRefreshToken((n) => n + 1);
+    };
+
+    void boot();
+    return () => {
+      cancelled = true;
+    };
+    // Run once per mount: the reference comes from the URL (guarded by the ref)
+    // and the helpers only touch stable setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleCheckPaymentAgain = async () => {
+    const url = new URL(window.location.href);
+    const reference = url.searchParams.get('reference') || url.searchParams.get('trxref');
+    setCheckingReturn(true);
+    try {
+      if (reference) {
+        const result = await confirmPaystackReturn(reference);
+        applyConfirmResult(result);
+        if (result.done) stripReturnParams();
+      } else {
+        setPaymentNotice(null);
+      }
+      setRefreshToken((n) => n + 1);
+    } finally {
+      setCheckingReturn(false);
+    }
+  };
+
+  // Fetch (and refetch after confirmation) the buyer's orders.
+  useEffect(() => {
+    if (confirmingReturn) return;
+
+    let cancelled = false;
+    const run = async () => {
+      const nextGroups = await fetchBuyerOrderGroups(supabase);
+      if (cancelled) return;
+      if (nextGroups) setGroups(nextGroups);
       setLoading(false);
     };
 
-    fetchBuyerOrders();
-  }, [supabase]);
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, refreshToken, confirmingReturn]);
 
   const handleGroupComplete = async (group: OrderGroup) => {
     setUpdatingRef(group.order_ref);
@@ -287,6 +404,18 @@ export default function OrdersPage() {
   };
 
   if (loading) {
+    if (returnReference) {
+      return (
+        <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
+          <Loader2 className="animate-spin text-[#ef6b3b]" size={26} />
+          <p className="text-sm font-bold text-[#251d18]">Confirming your payment…</p>
+          <p className="max-w-xs text-xs leading-relaxed text-[#81756d]">
+            This only takes a moment. Please keep this page open — your order will appear
+            here as soon as it is confirmed.
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="space-y-4 animate-pulse pt-3">
         <div className="h-7 w-28 rounded-full bg-[#eee4dc]" />
@@ -303,14 +432,32 @@ export default function OrdersPage() {
       {paymentNotice && (
         <div
           role="status"
-          className={`rounded-2xl border p-4 flex items-center gap-3 text-xs font-mono ${
+          className={`rounded-2xl border p-4 flex flex-wrap items-center gap-3 text-xs font-mono ${
             paymentNotice.kind === 'success'
               ? 'bg-[#e8f7ef] border-[#cdeeda] text-[#0f6b4a]'
               : 'bg-[#fff0e9] border-[#ffd9c4] text-[#b04a27]'
           }`}
         >
-          <CheckCircle2 size={18} className="flex-shrink-0" />
+          {paymentNotice.kind === 'success' ? (
+            <CheckCircle2 size={18} className="flex-shrink-0" />
+          ) : (
+            <AlertTriangle size={18} className="flex-shrink-0" />
+          )}
           <span>{paymentNotice.message}</span>
+          {paymentNotice.retry ? (
+            <button
+              onClick={handleCheckPaymentAgain}
+              disabled={checkingReturn}
+              className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#b04a27]/30 px-3 py-1.5 text-[10px] font-bold disabled:opacity-60"
+            >
+              {checkingReturn ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <RefreshCw size={12} />
+              )}
+              {checkingReturn ? 'Checking…' : 'Check payment again'}
+            </button>
+          ) : null}
         </div>
       )}
 

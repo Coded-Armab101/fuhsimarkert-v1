@@ -56,24 +56,30 @@ export async function GET(request: Request) {
       const metadata = typeof transaction.metadata === 'string'
         ? JSON.parse(transaction.metadata || '{}')
         : transaction.metadata || {};
-      const productIds = Array.isArray(metadata.product_ids) ? metadata.product_ids : [];
-      const items = Array.isArray(metadata.checkout_items) ? metadata.checkout_items.map((item: any) => ({
-        productId: item?.product_id ?? item?.productId,
-        quantity: Number(item?.quantity),
-        unitPriceKobo: Number(item?.unit_price_kobo ?? item?.unitPriceKobo),
-      })) : [];
+      const productIds: string[] = Array.isArray(metadata.product_ids) ? metadata.product_ids : [];
+      type CheckoutItem = { productId: string; quantity: number; unitPriceKobo: number };
+      const items: CheckoutItem[] = Array.isArray(metadata.checkout_items)
+        ? metadata.checkout_items.map((raw: unknown): CheckoutItem => {
+            const item = (raw ?? {}) as Record<string, unknown>;
+            return {
+              productId: String(item.product_id ?? item.productId ?? ''),
+              quantity: Number(item.quantity),
+              unitPriceKobo: Number(item.unit_price_kobo ?? item.unitPriceKobo),
+            };
+          })
+        : [];
       const expectedTotalKobo = Number(metadata.expected_total_kobo);
       const walletKobo = Number(metadata.wallet_kobo) > 0 ? Number(metadata.wallet_kobo) : 0;
 
       if (metadata.purpose !== 'marketplace_checkout' || metadata.currency !== 'NGN' ||
           !Number.isSafeInteger(expectedTotalKobo) || expectedTotalKobo <= 0 ||
-          !Array.isArray(items) || items.length === 0 ||
-          items.some((i: any) => !i.productId || !Number.isSafeInteger(i.quantity) || i.quantity < 1 ||
+          items.length === 0 ||
+          items.some((i) => !i.productId || !Number.isSafeInteger(i.quantity) || i.quantity < 1 ||
             !Number.isSafeInteger(i.unitPriceKobo) || i.unitPriceKobo < 0)) {
         return NextResponse.json({ error: 'Invalid payment checkout metadata.' }, { status: 400 });
       }
 
-      const goodsKobo = items.reduce((sum: number, i: any) => sum + i.quantity * i.unitPriceKobo, 0);
+      const goodsKobo = items.reduce((sum, i) => sum + i.quantity * i.unitPriceKobo, 0);
       const deliveryFeeKobo = Number(metadata.delivery_fee_kobo) > 0 ? Number(metadata.delivery_fee_kobo) : 0;
       const expectedBuyerFeeKobo = buyerServiceFeeKobo(goodsKobo);
       if (goodsKobo + deliveryFeeKobo + expectedBuyerFeeKobo !== expectedTotalKobo ||
@@ -86,7 +92,7 @@ export async function GET(request: Request) {
       const uniqueProductIds = new Set(productIds);
       if (uniqueProductIds.size !== productIds.length ||
           productIds.length !== items.length ||
-          productIds.some((id: string) => !items.some((i: any) => i.productId === id))) {
+          productIds.some((id) => !items.some((i) => i.productId === id))) {
         return NextResponse.json({ error: 'Invalid payment item set.' }, { status: 400 });
       }
 
@@ -107,7 +113,28 @@ export async function GET(request: Request) {
         });
       } catch (err) {
         console.error('[paystack/verify] failed to record order', { reference, err });
-        return NextResponse.json({ error: 'Payment confirmed but the order could not be recorded.' }, { status: 500 });
+
+        // The webhook may have won the race, or a previous attempt may have
+        // written the rows before a later step failed. If the order exists for
+        // this buyer, the payment IS recorded — report success so the browser
+        // clears the cart and shows the order instead of looping on "pending".
+        let orderExists = false;
+        try {
+          const admin = createAdminClient();
+          const { data: existingOrders, error: existingError } = await admin
+            .from('orders')
+            .select('id')
+            .eq('order_ref', reference)
+            .eq('buyer_id', user.id)
+            .limit(1);
+          orderExists = !existingError && Boolean(existingOrders?.length);
+        } catch (lookupError) {
+          console.error('[paystack/verify] order existence check failed', { reference, lookupError });
+        }
+
+        if (!orderExists) {
+          return NextResponse.json({ error: 'Payment confirmed but the order could not be recorded.' }, { status: 500 });
+        }
       }
     }
 
