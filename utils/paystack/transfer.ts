@@ -114,6 +114,7 @@ export type PayoutOutcome =
       retryable: boolean;
       reference?: string;
       transferCode?: string;
+      transferStatus?: string;
     };
 
 /** Paystack transfer states that mean "money is on its way, do not re-send". */
@@ -122,11 +123,15 @@ export function transferIsSettled(status: string): boolean {
 }
 
 export function transferIsPending(status: string): boolean {
-  return ['pending', 'queued', 'processing', 'otp', 'received'].includes(status);
+  return ['pending', 'queued', 'processing', 'received'].includes(status);
 }
 
 export function transferFailed(status: string): boolean {
   return ['failed', 'reversed', 'abandoned'].includes(status);
+}
+
+export function transferNeedsOtp(status: string): boolean {
+  return status === 'otp';
 }
 
 /**
@@ -149,12 +154,20 @@ export async function sendSellerPayout(input: {
     return {
       kind: 'error',
       retryable: false,
+      reference: input.reference,
+      transferStatus: 'not-started',
       message: `Could not match "${input.bankName}" to a Paystack bank. Ask the seller to re-enter their bank from the default list.`,
     };
   }
 
   if (!Number.isSafeInteger(input.amountKobo) || input.amountKobo <= 0) {
-    return { kind: 'error', retryable: false, message: 'Invalid payout amount.' };
+    return {
+      kind: 'error',
+      retryable: false,
+      reference: input.reference,
+      transferStatus: 'not-started',
+      message: 'Invalid payout amount.',
+    };
   }
 
   // Resolve the account name so Paystack receives the name on the account, not
@@ -177,7 +190,13 @@ export async function sendSellerPayout(input: {
     recipientCode = recipient.recipient_code;
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Could not create the Paystack recipient.';
-    return { kind: 'error', retryable: true, message };
+    return {
+      kind: 'error',
+      retryable: true,
+      reference: input.reference,
+      transferStatus: 'not-started',
+      message,
+    };
   }
 
   let transfer: PaystackTransfer;
@@ -193,7 +212,13 @@ export async function sendSellerPayout(input: {
     try {
       transfer = await verifyTransfer(input.reference);
     } catch {
-      return { kind: 'error', retryable: true, message };
+      return {
+        kind: 'error',
+        retryable: true,
+        reference: input.reference,
+        transferStatus: 'unknown',
+        message,
+      };
     }
   }
 
@@ -231,9 +256,10 @@ export async function sendSellerPayout(input: {
 
   return {
     kind: 'error',
-    retryable: true,
+    retryable: status !== 'otp',
     reference: input.reference,
     transferCode: transfer.transfer_code,
+    transferStatus: status,
     message:
       status === 'otp'
         ? 'Paystack requires a transfer OTP. Disable transfer OTP in the Paystack dashboard, then retry.'

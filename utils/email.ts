@@ -50,6 +50,7 @@ export async function sendEmail(message: EmailMessage): Promise<boolean> {
   try {
     const res = await fetch(RESEND_ENDPOINT, {
       method: 'POST',
+      signal: AbortSignal.timeout(8_000),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
@@ -109,13 +110,13 @@ export function emailLayout(options: {
   footnote?: string;
 }): string {
   const lines = options.lines
-    .map((line) => `<p style="margin:0 0 12px;font-size:14px;line-height:22px;color:#4a3f38">${line}</p>`)
+    .map((line) => `<p style="margin:0 0 12px;font-size:14px;line-height:22px;color:#4a3f38">${escapeHtml(line)}</p>`)
     .join('');
   const cta = options.cta
     ? `<p style="margin:22px 0 6px"><a href="${escapeHtml(options.cta.url)}" style="display:inline-block;background:#DE6437;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 20px;border-radius:12px">${escapeHtml(options.cta.label)}</a></p>`
     : '';
   const footnote = options.footnote
-    ? `<p style="margin:18px 0 0;font-size:11px;line-height:18px;color:#9d9188">${options.footnote}</p>`
+    ? `<p style="margin:18px 0 0;font-size:11px;line-height:18px;color:#9d9188">${escapeHtml(options.footnote)}</p>`
     : '';
 
   return `<!doctype html>

@@ -31,6 +31,8 @@ type OrderRow = {
   product_id: string | null;
   status: string;
   refund_card_kobo?: number | string | null;
+  refund_card_status?: string | null;
+  refund_reference?: string | null;
   refunded_at?: string | null;
 };
 
@@ -77,7 +79,7 @@ export async function POST(request: Request) {
     // refundable (or already claimed by a previous unfinished attempt).
     const { data: rows, error: rowsError } = await supabase
       .from('orders')
-      .select('id, seller_id, product_id, status, refund_card_kobo, refunded_at')
+      .select('id, seller_id, product_id, status, refund_card_kobo, refund_card_status, refund_reference, refunded_at')
       .eq('order_ref', orderRef)
       .eq('buyer_id', user.id);
     if (rowsError) throw rowsError;
@@ -128,15 +130,38 @@ export async function POST(request: Request) {
     const expectedCardKobo = Math.max(heldKobo - walletPaidKobo, 0);
 
     let cardKobo = alreadyCardKobo;
+    let cardStatus =
+      group.find((row) => row.refund_card_status)?.refund_card_status || null;
     let cardNote = '';
     let cardFailedReason = '';
+    let refundReference =
+      group.find((row) => row.refund_reference)?.refund_reference || orderRef;
 
     if (alreadyCardKobo === 0 && expectedCardKobo > 0) {
       const cardResult = await refundCardPortion(orderRef, expectedCardKobo);
       if (cardResult.ok) {
         cardKobo = cardResult.amountKobo;
+        cardStatus = cardResult.status;
         cardNote = cardResult.note;
+        refundReference = cardResult.reference || refundReference;
       } else {
+        refundReference = cardResult.reference || refundReference;
+        if (cardResult.uncertain) {
+          // Do not add wallet credit while Paystack might already be processing
+          // the card refund. The deterministic refund reference makes the next
+          // retry safe; release the short claim lock so it can retry now.
+          await admin
+            .from('orders')
+            .update({ refund_claimed_at: null })
+            .eq('order_ref', orderRef)
+            .eq('buyer_id', user.id)
+            .is('refunded_at', null);
+
+          return NextResponse.json({
+            error: 'Paystack did not confirm whether the card refund was queued. No wallet credit was added, so the order cannot be refunded twice. Please retry shortly or check Paystack using the refund reference.',
+            refundReference,
+          }, { status: 502 });
+        }
         cardFailedReason = cardResult.reason;
       }
     }
@@ -148,8 +173,9 @@ export async function POST(request: Request) {
         .from('orders')
         .update({
           refund_card_kobo: cardKobo,
+          refund_card_status: cardStatus || 'pending',
           refund_method: cardKobo >= heldKobo ? 'card' : 'card+wallet',
-          refund_reference: orderRef,
+          refund_reference: refundReference,
         })
         .eq('order_ref', orderRef)
         .eq('buyer_id', user.id);
@@ -171,7 +197,7 @@ export async function POST(request: Request) {
       p_buyer_id: user.id,
       p_wallet_refund_kobo: walletKobo,
       p_refund_method: method,
-      p_refund_reference: orderRef,
+      p_refund_reference: refundReference,
     });
     if (finalizeError) throw finalizeError;
 

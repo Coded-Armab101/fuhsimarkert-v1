@@ -24,7 +24,7 @@ type SellerOrder = {
   products?: { id: string; title: string; image_url?: string | null }[] | { id: string; title: string; image_url?: string | null } | null;
 };
 
-function getOrderProduct(products: any): { id?: string; title?: string; image_url?: string | null } | null {
+function getOrderProduct(products: SellerOrder['products']): { id?: string; title?: string; image_url?: string | null } | null {
   if (!products) return null;
   if (Array.isArray(products)) return products[0] || null;
   if (typeof products === 'object') return products;
@@ -99,7 +99,7 @@ export default function SellerOrdersPage() {
             .order('created_at', { ascending: false });
 
           if (!fallbackRes.error && fallbackRes.data) {
-            data = fallbackRes.data as any;
+            data = fallbackRes.data as unknown as typeof data;
             error = null;
           }
         }

@@ -169,44 +169,20 @@ export async function recordOrder(
   // reference is already recorded: a webhook/verify retry must never debit the
   // buyer a second time.
   if (walletKobo > 0 && !orderAlreadyExisted) {
-    let debited = false;
-    try {
-      const { data: ok, error: debitError } = await supabase.rpc('debit_wallet', {
-        p_user_id: input.buyerId,
-        p_order_ref: input.reference,
-        p_amount_kobo: walletKobo,
-      });
-      if (!debitError && ok === true) {
-        debited = true;
-      }
-    } catch {
-      debited = false;
-    }
+    const { data: ok, error: debitError } = await supabase.rpc('debit_wallet', {
+      p_user_id: input.buyerId,
+      p_order_ref: input.reference,
+      p_amount_kobo: walletKobo,
+    });
 
-    if (!debited) {
-      const { data: wallet, error: walletQueryError } = await supabase
-        .from('wallets')
-        .select('balance')
-        .eq('user_id', input.buyerId)
-        .maybeSingle();
-
-      if (walletQueryError || !wallet) {
-        throw new Error('Wallet balance is insufficient to complete the order.');
-      }
-
-      const currentBalance = Number(wallet.balance) || 0;
-      if (currentBalance < walletKobo) {
-        throw new Error('Wallet balance is insufficient to complete the order.');
-      }
-
-      const { error: updateError } = await supabase
-        .from('wallets')
-        .update({ balance: currentBalance - walletKobo })
-        .eq('user_id', input.buyerId);
-
-      if (updateError) {
-        throw new Error('Wallet balance is insufficient to complete the order.');
-      }
+    // Never fall back to a read-then-update debit here. If the HTTP response
+    // was lost after Postgres committed, that fallback would charge the wallet
+    // twice. The database ledger is the only safe debit boundary; a retry uses
+    // the same order_ref and returns true without subtracting again.
+    if (debitError || ok !== true) {
+      throw new Error(
+        debitError?.message || 'Wallet balance is insufficient to complete the order.',
+      );
     }
   }
 

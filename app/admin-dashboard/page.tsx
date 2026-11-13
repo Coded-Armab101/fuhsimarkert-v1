@@ -38,6 +38,8 @@ type Withdrawal = {
   account_number: string;
   account_name: string;
   status: 'pending' | 'processing' | 'paid' | 'failed' | 'rejected';
+  transfer_status?: string | null;
+  transfer_reference?: string | null;
   request_note?: string | null;
   created_at: string;
   processed_at?: string | null;
@@ -127,6 +129,7 @@ export default function AdminDashboardPage() {
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [wLoading, setWLoading] = useState(true);
   const [wError, setWError] = useState<string | null>(null);
+  const [wMessage, setWMessage] = useState<string | null>(null);
   const [actingId, setActingId] = useState<string | null>(null);
 
   const [sellers, setSellers] = useState<SellerStorage[]>([]);
@@ -289,6 +292,7 @@ setSLoading(false);
   const act = async (action: 'approve' | 'reject', id: string) => {
     setActingId(id);
     setWError(null);
+    setWMessage(null);
     try {
       const res = await fetch('/api/admin/withdrawals', {
         method: 'POST',
@@ -297,6 +301,7 @@ setSLoading(false);
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Action failed');
+      if (data.message) setWMessage(data.message);
       await loadWithdrawals();
     } catch (err) {
       setWError(err instanceof Error ? err.message : 'Action failed');
@@ -478,6 +483,11 @@ setSLoading(false);
             {wError}
           </p>
         )}
+        {tab === 'withdrawals' && wMessage && (
+          <p className="mb-4 rounded-xl border border-emerald-900/50 bg-emerald-950/30 px-3 py-2 text-[11px] font-mono text-emerald-300">
+            {wMessage}
+          </p>
+        )}
 
         {tab === 'overview' ? (
           <OverviewTab
@@ -528,6 +538,12 @@ setSLoading(false);
                   <p className="text-[10px] text-neutral-600 font-mono mt-0.5">
                     requested {new Date(w.created_at).toLocaleString()}
                   </p>
+                  {w.transfer_status && w.status === 'pending' && (
+                    <p className="text-[10px] text-blue-300 font-mono mt-1">
+                      Paystack: {w.transfer_status}
+                      {w.transfer_reference ? ` · ${w.transfer_reference}` : ''}
+                    </p>
+                  )}
                 </div>
                 {w.status === 'pending' && (
                   <div className="flex gap-2">

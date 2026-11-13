@@ -1,5 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { paystackConfigured, refundTransaction, verifyTransaction } from './api';
+import { createHash } from 'crypto';
+import {
+  fetchRefund,
+  paystackConfigured,
+  PaystackRequestError,
+  refundTransaction,
+  verifyTransaction,
+  type PaystackRefund,
+} from './api';
 
 /**
  * Card refunds for disputed orders.
@@ -11,11 +19,55 @@ import { paystackConfigured, refundTransaction, verifyTransaction } from './api'
  */
 
 export type CardRefundResult =
-  | { ok: true; amountKobo: number; reference: string | null; note: string }
-  | { ok: false; amountKobo: 0; reason: string };
+  | { ok: true; amountKobo: number; reference: string | null; status: string; note: string }
+  | { ok: false; amountKobo: 0; reason: string; uncertain?: boolean; reference?: string };
 
 export function isWalletOnlyReference(reference: string): boolean {
   return reference.startsWith('WAL-');
+}
+
+/** Paystack accepts a merchant refund reference once, making retries safe. */
+export function refundReferenceForOrder(orderRef: string): string {
+  const digest = createHash('sha256').update(orderRef).digest('hex').slice(0, 40);
+  return `RF-${digest}`;
+}
+
+function existingRefundResult(
+  refund: PaystackRefund,
+  expectedKobo: number,
+  fallbackReference: string,
+): CardRefundResult {
+  const amountKobo = Math.max(0, Math.floor(Number(refund.amount) || 0));
+  const status = String(refund.status || '').toLowerCase();
+
+  if (status === 'failed') {
+    return {
+      ok: false,
+      amountKobo: 0,
+      reason: 'Paystack reports that the card refund failed.',
+    };
+  }
+
+  // A smaller amount is valid when the checkout was split with the wallet; the
+  // remainder is credited locally. More than expected means we cannot safely
+  // decide how much wallet credit to add without manual reconciliation.
+  if (amountKobo <= 0 || amountKobo > expectedKobo) {
+    return {
+      ok: false,
+      amountKobo: 0,
+      uncertain: true,
+      reference: fallbackReference,
+      reason: 'Paystack has a refund for this order, but its amount does not match the protected order total.',
+    };
+  }
+
+  return {
+    ok: true,
+    amountKobo,
+    reference: refund.reference || fallbackReference,
+    status: status || 'pending',
+    note: `Card refund ${status || 'pending'} at Paystack.`,
+  };
 }
 
 /** Amount a buyer paid with their wallet for this order reference (kobo). */
@@ -48,7 +100,13 @@ export async function refundCardPortion(
   expectedKobo: number,
 ): Promise<CardRefundResult> {
   if (expectedKobo <= 0 || isWalletOnlyReference(reference)) {
-    return { ok: true, amountKobo: 0, reference: null, note: 'No card portion to refund.' };
+    return {
+      ok: true,
+      amountKobo: 0,
+      reference: null,
+      status: 'not-applicable',
+      note: 'No card portion to refund.',
+    };
   }
 
   if (!paystackConfigured()) {
@@ -59,12 +117,28 @@ export async function refundCardPortion(
     };
   }
 
+  const refundReference = refundReferenceForOrder(reference);
+
+  // If a previous request reached Paystack but crashed before saving locally,
+  // recover that exact refund first. This is the distributed idempotency key.
+  try {
+    const existing = await fetchRefund(refundReference);
+    return existingRefundResult(existing, expectedKobo, refundReference);
+  } catch {
+    // Usually a 404 (first attempt). Creation below uses the same unique key,
+    // so even an API/network ambiguity cannot produce a second card refund.
+  }
+
   try {
     const transaction = await verifyTransaction(reference);
     if (transaction.status !== 'success') {
       return {
         ok: false,
         amountKobo: 0,
+        uncertain: ['reversal_pending', 'reversed'].includes(
+          String(transaction.status).toLowerCase(),
+        ),
+        reference: refundReference,
         reason: `Paystack reports the original charge as "${transaction.status}".`,
       };
     }
@@ -76,21 +150,46 @@ export async function refundCardPortion(
         ok: true,
         amountKobo: 0,
         reference: transaction.reference || reference,
+        status: 'not-applicable',
         note: 'The card charge has no refundable balance.',
       };
     }
 
-    const refund = await refundTransaction({ reference, amountKobo });
-    return {
-      ok: true,
-      amountKobo,
-      reference: refund.transaction?.reference || transaction.reference || reference,
-      note: 'Card refund submitted to Paystack.',
-    };
+    try {
+      const refund = await refundTransaction({
+        reference,
+        amountKobo,
+        refundReference,
+      });
+      return existingRefundResult(refund, expectedKobo, refundReference);
+    } catch (createError) {
+      // The request may have timed out after Paystack accepted it. Fetching by
+      // our unique reference tells us whether to resume or report uncertainty.
+      try {
+        const existing = await fetchRefund(refundReference);
+        return existingRefundResult(existing, expectedKobo, refundReference);
+      } catch {
+        const explicitFailure =
+          createError instanceof PaystackRequestError &&
+          [401, 403, 404, 422].includes(createError.statusCode);
+        return {
+          ok: false,
+          amountKobo: 0,
+          uncertain: !explicitFailure,
+          reference: refundReference,
+          reason:
+            createError instanceof Error
+              ? createError.message
+              : 'Paystack rejected the refund.',
+        };
+      }
+    }
   } catch (err) {
     return {
       ok: false,
       amountKobo: 0,
+      uncertain: true,
+      reference: refundReference,
       reason: err instanceof Error ? err.message : 'Paystack rejected the refund.',
     };
   }

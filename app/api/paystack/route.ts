@@ -61,6 +61,11 @@ export async function POST(request: Request) {
     }
 
     const productIds = (cartItems as CartRow[]).map((item) => item.product_id);
+    if (new Set(productIds).size !== productIds.length) {
+      return NextResponse.json({
+        error: 'Your cart contains duplicate product rows. Remove the affected item and add it again.',
+      }, { status: 409 });
+    }
 
     // 2.b. Prices come from the database, never from the client. Fetch the
     //       authoritative unit price AND availability/stock for each product
@@ -73,6 +78,15 @@ export async function POST(request: Request) {
     if (productsError || !products) {
       console.error('[paystack] products query failed', { userId: user.id, productsError: productsError?.message });
       return NextResponse.json({ error: 'Internal system pricing error.' }, { status: 500 });
+    }
+
+    // RLS may hide a product that was removed or made unavailable after the
+    // cart was opened. Never price that missing line as ₦0 and charge the rest:
+    // the immutable checkout snapshot must contain every visible cart product.
+    if (products.length !== productIds.length || products.some((product) => product.is_available === false)) {
+      return NextResponse.json({
+        error: 'One or more products are no longer available. Refresh your cart before paying.',
+      }, { status: 409 });
     }
 
     // Block paying for your own listing BEFORE money leaves the buyer. Otherwise

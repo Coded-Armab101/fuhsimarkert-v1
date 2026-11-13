@@ -21,7 +21,10 @@ export default function SellerVerificationPage() {
     setLoading(false);
   }, [router, supabase]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void refresh(), 0);
+    return () => window.clearTimeout(timer);
+  }, [refresh]);
   useEffect(() => {
     if (profile?.is_admin || profile?.is_approved_seller) router.replace('/seller');
   }, [profile, router]);

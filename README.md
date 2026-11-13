@@ -43,7 +43,9 @@ Also apply `supabase/migrations/20261112_verification_storage.sql`. It sets the 
 
 Then apply `supabase/migrations/20261113_features.sql`. It adds product selling units and per-seller delivery fees, the `search_products` function (so search can match seller names without exposing profiles), the `reviews` table plus public `product_ratings` view, and the `confirm_order_group` / `dispute_order` escrow functions the app already calls. Without it, search falls back to title/description/category, ratings stay blank, and Confirm receipt fails.
 
-Finally apply `supabase/migrations/20261114_ops.sql`. It fixes the multi-item/multi-seller checkout (composite uniqueness on `carts(user_id, product_id)` and `orders(order_ref, product_id)` instead of single-column keys), adds the card-refund columns and the `claim_order_refund` / `finalize_order_refund` functions, adds Paystack transfer fields to `withdrawals`, exposes the public `verified_seller_ids` badge RPC, and raises the `product-images` bucket to 5MB per file. **Without this migration, saving a cart/order with more than one product can fail silently.**
+Then apply `supabase/migrations/20261114_ops.sql`. It fixes the multi-item/multi-seller checkout (composite uniqueness on `carts(user_id, product_id)` and `orders(order_ref, product_id)` instead of single-column keys), adds the card-refund columns and the `claim_order_refund` / `finalize_order_refund` functions, adds Paystack transfer fields to `withdrawals`, exposes the public `verified_seller_ids` badge RPC, and raises the `product-images` bucket to 5MB per file. **Without this migration, saving a cart/order with more than one product can fail silently.**
+
+Finally apply `supabase/migrations/20261115_payout_hardening.sql`. It atomically reserves one Paystack transfer reference per withdrawal (preventing double payouts), blocks an approve/reject race, makes simultaneous withdrawal requests safe, and adds exactly-once wallet fallback bookkeeping for an asynchronous `refund.failed` webhook.
 
 ## Transactional email (Resend)
 
@@ -64,6 +66,7 @@ Approving a withdrawal now sends the money through Paystack instead of only upda
 1. Enable **Transfers** on your Paystack account and keep enough balance in the Paystack wallet.
 2. Disable transfer OTP for API transfers in the Paystack dashboard (Settings → Preferences → Transfer OTP). If OTP is on, approve returns a clear error and the withdrawal stays pending.
 3. Use `PAYSTACK_SECRET_KEY` from the same account that receives checkout payments.
+4. Set the Paystack webhook URL to `https://your-site.example/api/webhooks`. Refund status events use this same signed endpoint; if a queued card refund later fails, its card amount is credited to the buyer's wallet exactly once.
 
 Bank names are resolved against Paystack's live NGN bank list (with aliases such as GTB/UBA). If a seller's bank cannot be matched, the withdrawal stays pending with the reason shown to the admin, and no money moves. A transfer that Paystack reports as `pending`/`queued`/`processing` stays pending until a later Approve verifies it as `success`; only then is the ledger marked `paid` and the seller emailed.
 

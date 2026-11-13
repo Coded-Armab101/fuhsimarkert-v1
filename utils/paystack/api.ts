@@ -17,6 +17,16 @@ type PaystackEnvelope<T> = {
   data?: T;
 };
 
+export class PaystackRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number,
+  ) {
+    super(message);
+    this.name = 'PaystackRequestError';
+  }
+}
+
 async function paystackRequest<T>(
   path: string,
   init: { method?: 'GET' | 'POST'; body?: unknown } = {},
@@ -26,6 +36,7 @@ async function paystackRequest<T>(
 
   const res = await fetch(`${PAYSTACK_BASE}${path}`, {
     method: init.method || 'GET',
+    signal: AbortSignal.timeout(15_000),
     headers: {
       Authorization: `Bearer ${secret}`,
       'Content-Type': 'application/json',
@@ -36,7 +47,10 @@ async function paystackRequest<T>(
 
   const json = (await res.json().catch(() => ({}))) as PaystackEnvelope<T>;
   if (!res.ok || json.status === false || json.data === undefined) {
-    throw new Error(json.message || `Paystack request failed (${res.status})`);
+    throw new PaystackRequestError(
+      json.message || `Paystack request failed (${res.status})`,
+      res.status,
+    );
   }
   return json.data;
 }
@@ -97,7 +111,9 @@ export async function verifyTransaction(reference: string): Promise<PaystackTran
 }
 
 export async function listBanks(currency = 'NGN'): Promise<PaystackBank[]> {
-  return paystackRequest<PaystackBank[]>(`/bank?currency=${encodeURIComponent(currency)}`);
+  return paystackRequest<PaystackBank[]>(
+    `/bank?currency=${encodeURIComponent(currency)}&perPage=200`,
+  );
 }
 
 export async function resolveAccountNumber(
@@ -152,14 +168,20 @@ export async function verifyTransfer(reference: string): Promise<PaystackTransfe
 export async function refundTransaction(input: {
   reference: string;
   amountKobo?: number;
+  refundReference: string;
 }): Promise<PaystackRefund> {
   return paystackRequest<PaystackRefund>('/refund', {
     method: 'POST',
     body: {
       transaction: input.reference,
+      reference: input.refundReference,
       ...(Number.isSafeInteger(input.amountKobo) && (input.amountKobo as number) > 0
         ? { amount: input.amountKobo }
         : {}),
     },
   });
+}
+
+export async function fetchRefund(reference: string): Promise<PaystackRefund> {
+  return paystackRequest<PaystackRefund>(`/refund/${encodeURIComponent(reference)}`);
 }

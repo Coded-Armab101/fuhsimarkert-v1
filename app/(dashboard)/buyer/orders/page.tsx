@@ -554,7 +554,7 @@ export default function OrdersPage() {
             const isDisputed = group.status === 'disputed';
             const isRefunded = group.refunded;
             const canConfirm = group.status === 'ready_for_pickup';
-            const canRefund = !isRefunded && ['in_escrow', 'packing', 'ready_for_pickup', 'confirmed', 'delivered'].includes(group.status);
+            const canRefund = !isRefunded && ['in_escrow', 'packing', 'ready_for_pickup', 'confirmed', 'delivered', 'disputed'].includes(group.status);
             const isTerminal = ['completed', 'confirmed', 'delivered', 'cancelled', 'rejected'].includes(group.status);
             const open = isExpanded(group.order_ref);
             const productNames = group.items
@@ -744,14 +744,18 @@ export default function OrdersPage() {
                     className="w-full border border-[#ffd9c4] bg-[#fff7f2] hover:bg-[#fff0e9] text-[#b04a27] font-bold text-xs py-3 rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 disabled:opacity-60"
                   >
                     {refundingRef === group.order_ref ? <Loader2 size={15} className="animate-spin" /> : <AlertTriangle size={15} />}
-                    {refundingRef === group.order_ref ? 'Starting refund…' : 'Report a problem / Request refund'}
+                    {refundingRef === group.order_ref
+                      ? 'Checking refund…'
+                      : isDisputed
+                        ? 'Retry refund safely'
+                        : 'Report a problem / Request refund'}
                   </button>
                 )}
                 {isRefunded ? (
                   <div className="p-4 bg-[#e8f7ef] border border-[#cdeeda] text-[#0f6b4a] text-xs rounded-xl text-center font-medium font-mono">
                     <CheckCircle2 size={16} className="inline mr-1" />
                     Refund processed.
-                    {group.refundCardKobo > 0
+                    {group.refundMethod !== 'wallet' && group.refundCardKobo > 0
                       ? ` ₦${formatNaira(group.refundCardKobo)} is returning to your card; the rest is in your wallet.`
                       : ' The full amount is in your FuhsiMarket wallet.'}
                   </div>

@@ -20,6 +20,7 @@ export default function SellerPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [productCount, setProductCount] = useState(0);
   const [balanceKobo, setBalanceKobo] = useState(0);
+  const [renderedAt] = useState(() => Date.now());
 
   useEffect(() => {
     const fetchSellerData = async () => {
@@ -126,7 +127,7 @@ export default function SellerPage() {
             : null;
           const isValidDate = expiresAtDate && !Number.isNaN(expiresAtDate.getTime());
           const daysLeft = isValidDate
-            ? Math.ceil((expiresAtDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+            ? Math.ceil((expiresAtDate.getTime() - renderedAt) / (1000 * 60 * 60 * 24))
             : null;
           const isExpiringSoon = daysLeft !== null && daysLeft <= 7;
           const formattedExpiry = isValidDate

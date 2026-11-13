@@ -4,6 +4,8 @@ import { createAdminClient } from '@/utils/supabase/admin';
 import { recordOrder } from '@/utils/paystack/recordOrder';
 import { buyerServiceFeeKobo } from '@/utils/pricing';
 import { recordRoleSubscription } from '@/utils/paystack/recordSubscription';
+import { appLink, sendEmailToUsers } from '@/utils/email';
+import { formatNaira } from '@/utils/money';
 
 /**
  * Paystack webhook — `charge.success` → escrow orders.
@@ -47,8 +49,11 @@ export async function POST(request: Request) {
     event?: string;
     data?: {
       reference?: string;
-      amount?: number;
+      amount?: number | string;
       currency?: string;
+      status?: string;
+      transaction_reference?: string;
+      refund_reference?: string | null;
       metadata?: {
         buyer_id?: string;
         user_id?: string;
@@ -74,7 +79,74 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Malformed payload.' }, { status: 400 });
   }
 
-  // Acknowledge anything we do not handle, so Paystack stops retrying it.
+  // Refunds are asynchronous. Pending/processing/processed update the local
+  // audit state; a terminal failure credits the attempted card amount to the
+  // buyer's wallet exactly once through a database ledger.
+  if (event.event?.startsWith('refund.')) {
+    const eventStatus = event.event.slice('refund.'.length);
+    const status = eventStatus === 'needs_attention' ? 'needs-attention' : eventStatus;
+    const orderRef = event.data?.transaction_reference;
+    const refundReference = event.data?.refund_reference || null;
+    const amountKobo = Math.floor(Number(event.data?.amount) || 0);
+
+    if (
+      !['pending', 'processing', 'processed', 'failed', 'needs-attention'].includes(status) ||
+      !orderRef ||
+      event.data?.currency !== 'NGN' ||
+      amountKobo <= 0
+    ) {
+      console.error('[webhook] invalid refund event', {
+        event: event.event,
+        orderRef,
+        refundReference,
+      });
+      return NextResponse.json({ received: true }, { status: 200 });
+    }
+
+    const admin = createAdminClient();
+    const { data: rows, error } = await admin.rpc('record_paystack_refund_event', {
+      p_order_ref: orderRef,
+      p_refund_reference: refundReference,
+      p_status: status,
+      p_amount_kobo: amountKobo,
+    });
+
+    if (error) {
+      // The RPC is idempotent, so asking Paystack to retry is safe and avoids a
+      // failed card refund being silently lost during a temporary DB outage.
+      console.error('[webhook] failed to record refund event', {
+        event: event.event,
+        orderRef,
+        refundReference,
+        error: error.message,
+      });
+      return NextResponse.json({ error: 'Temporary refund processing failure.' }, { status: 500 });
+    }
+
+    const result = Array.isArray(rows) ? rows[0] : rows;
+    if (status === 'failed' && result?.out_fallback_applied && result?.out_buyer_id) {
+      await sendEmailToUsers(admin, [result.out_buyer_id], {
+        subject: 'Your card refund moved to your FuhsiMarket wallet',
+        heading: 'Refund credited to your wallet',
+        lines: [
+          'Paystack could not complete the refund to your original payment method.',
+          `₦${formatNaira(Number(result.out_amount_kobo) || amountKobo)} has now been credited to your FuhsiMarket wallet instead.`,
+        ],
+        cta: { label: 'Open your wallet', url: appLink('/buyer/profile') },
+      });
+    }
+
+    if (status === 'needs-attention') {
+      console.warn('[webhook] refund needs attention in Paystack', {
+        orderRef,
+        refundReference,
+      });
+    }
+
+    return NextResponse.json({ received: true }, { status: 200 });
+  }
+
+  // Acknowledge anything else we do not handle, so Paystack stops retrying it.
   if (event.event !== 'charge.success') {
     return NextResponse.json({ received: true }, { status: 200 });
   }
