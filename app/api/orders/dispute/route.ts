@@ -211,6 +211,24 @@ export async function POST(request: Request) {
       const sellerIds = Array.from(
         new Set(group.map((row) => row.seller_id).filter(Boolean)),
       );
+
+      const notifications = group.map((row) => ({
+        user_id: row.seller_id,
+        order_id: row.id,
+        type: 'order_refunded',
+        title: 'Order refunded',
+        message: 'The buyer reported a problem and the payment was refunded.',
+      }));
+      const { error: notificationError } = await admin
+        .from('notifications')
+        .upsert(notifications, {
+          onConflict: 'user_id,order_id,type',
+          ignoreDuplicates: true,
+        });
+      if (notificationError) {
+        console.warn('[orders/dispute] notification failed', notificationError);
+      }
+
       const productIds = group
         .map((row) => row.product_id)
         .filter((id): id is string => Boolean(id));

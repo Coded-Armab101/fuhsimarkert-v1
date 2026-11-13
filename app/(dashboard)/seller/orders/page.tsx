@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { formatNaira } from '@/utils/money';
-import { Receipt, Loader2, Package, MapPin, Truck, User, Phone, Hash, CheckCircle2 } from 'lucide-react';
+import { Receipt, Loader2, Package, MapPin, Truck, User, Phone, Hash, CheckCircle2, Clock } from 'lucide-react';
 
 type SellerOrder = {
   id: string;
@@ -208,6 +208,16 @@ export default function SellerOrdersPage() {
             const canReady = order.status === 'packing';
             const fulfilled = order.status === 'ready_for_pickup' || order.status === 'confirmed' || order.status === 'delivered' || order.status === 'completed';
             const grandTotal = order.amount_kobo + (order.delivery_fee_kobo || 0);
+            const orderedAt = new Date(order.created_at);
+            const orderedAtLabel = Number.isNaN(orderedAt.getTime())
+              ? 'Time unavailable'
+              : orderedAt.toLocaleString('en-NG', {
+                  dateStyle: 'medium',
+                  timeStyle: 'short',
+                });
+            const phoneHref = order.receiver_phone
+              ? `tel:${order.receiver_phone.replace(/[^\d+]/g, '')}`
+              : null;
 
             return (
               <div key={order.id} className="bg-neutral-950 border border-neutral-800 rounded-3xl p-5 space-y-4 shadow-xl">
@@ -238,6 +248,9 @@ export default function SellerOrdersPage() {
                       <p className="text-[10px] font-mono text-neutral-600">
                         Ref ID: {order.order_ref || order.id.slice(0, 8)}
                       </p>
+                      <p className="flex items-center gap-1 text-[10px] font-mono text-neutral-400">
+                        <Clock size={11} /> Ordered {orderedAtLabel}
+                      </p>
                     </div>
                   </div>
 
@@ -257,14 +270,20 @@ export default function SellerOrdersPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs border-t border-neutral-900 pt-4">
                   <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-3 space-y-1">
                     <span className="text-[10px] text-neutral-500 uppercase font-mono block">
-                      Receiver ({order.delivery_type === 'delivery' ? 'delivery' : 'pickup'})
+                      Buyer contact ({order.delivery_type === 'delivery' ? 'delivery' : 'pickup'})
                     </span>
                     <p className="font-semibold text-neutral-200 flex items-center gap-1">
                       <User size={12} className="text-neutral-500" /> {order.receiver_name || '—'}
                     </p>
-                    <p className="text-neutral-400 flex items-center gap-1">
-                      <Phone size={11} className="text-neutral-500" /> {order.receiver_phone || '—'}
-                    </p>
+                    {phoneHref ? (
+                      <a href={phoneHref} className="text-sky-300 hover:text-sky-200 flex items-center gap-1 font-semibold">
+                        <Phone size={11} className="text-sky-400" /> {order.receiver_phone}
+                      </a>
+                    ) : (
+                      <p className="text-neutral-400 flex items-center gap-1">
+                        <Phone size={11} className="text-neutral-500" /> —
+                      </p>
+                    )}
                     <p className="text-neutral-400 flex items-center gap-1">
                       <Hash size={11} className="text-neutral-500" /> {order.matric_number || '—'}
                     </p>
@@ -302,7 +321,10 @@ export default function SellerOrdersPage() {
 
                 {fulfilled && (
                   <div className="border-t border-neutral-900 pt-3 text-[11px] font-mono text-emerald-400 flex items-center gap-1">
-                    <CheckCircle2 size={13} /> Ready for the buyer — they will confirm receipt on their end.
+                    <CheckCircle2 size={13} />
+                    {order.status === 'completed'
+                      ? 'Buyer confirmed receipt — payment has been released to your wallet.'
+                      : 'Ready for the buyer — they will confirm receipt on their end.'}
                   </div>
                 )}
               </div>

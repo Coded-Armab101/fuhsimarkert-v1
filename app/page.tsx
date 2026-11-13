@@ -206,7 +206,7 @@ function ProductCard({
 export default function LandingPage() {
   const router = useRouter();
   const supabase = createClient();
-  const { totalItems, addToCartOnce } = useCart();
+  const { totalItems, addToCartOnce, startBuyNow } = useCart();
 
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -407,8 +407,8 @@ export default function LandingPage() {
       return;
     }
     if (selected) {
-      addToCartOnce(selected);
-      router.push('/buyer/cart?checkout=1');
+      startBuyNow(selected);
+      router.push('/buyer/cart?checkout=1&buyNow=1');
     }
   };
 

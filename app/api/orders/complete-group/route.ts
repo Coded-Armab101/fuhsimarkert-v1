@@ -92,6 +92,27 @@ export async function POST(request: Request) {
         if (titles.length > 0) label = titles.join(', ');
       }
 
+      const notifications = rows
+        .filter((row) => Boolean(row.seller_id))
+        .map((row) => ({
+          user_id: row.seller_id,
+          order_id: row.id,
+          type: 'order_completed',
+          title: 'Order completed',
+          message: 'The buyer confirmed receipt. Your wallet has been credited.',
+        }));
+      if (notifications.length > 0) {
+        const { error: notificationError } = await admin
+          .from('notifications')
+          .upsert(notifications, {
+            onConflict: 'user_id,order_id,type',
+            ignoreDuplicates: true,
+          });
+        if (notificationError) {
+          console.warn('[orders/complete-group] notification failed', notificationError);
+        }
+      }
+
       await sendEmailToUsers(admin, [user.id], {
         subject: 'Order completed — thank you!',
         heading: 'Order confirmed',

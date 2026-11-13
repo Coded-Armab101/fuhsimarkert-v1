@@ -20,11 +20,11 @@ export type AddToCartInput = Omit<CartItem, 'quantity'> & { quantity?: number };
 
 interface CartContextType {
   cart: CartItem[];
+  buyNowItem: CartItem | null;
   addToCart: (item: AddToCartInput) => void;
   addToCartOnce: (item: AddToCartInput) => void;
-  /** Replace the whole cart with one item — used by "Buy now" so a previous
-   *  account's saved items can never be charged by accident. */
-  startCartWith: (item: AddToCartInput) => void;
+  startBuyNow: (item: AddToCartInput) => void;
+  clearBuyNow: () => void;
   removeFromCart: (id: string) => void;
   removeItems: (ids: string[]) => void;
   decreaseQuantity: (id: string) => void;
@@ -39,9 +39,11 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 
 const CART_KEY = "cart";
 const CART_OWNER_KEY = "cart_owner_id";
+const BUY_NOW_KEY = "buy_now_item";
 
 export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [buyNowItem, setBuyNowItem] = useState<CartItem | null>(null);
   const supabase = useMemo(() => createClient(), []);
   // Which account the persisted cart belongs to. A shared browser (a seller
   // testing with a second account, or two students on one phone) must never
@@ -54,7 +56,9 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
 
     const clearPersistedCart = () => {
       setCart([]);
+      setBuyNowItem(null);
       localStorage.removeItem(CART_KEY);
+      sessionStorage.removeItem(BUY_NOW_KEY);
     };
 
     const adoptOwner = (userId: string) => {
@@ -74,6 +78,19 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
       const { data: { user } } = await supabase.auth.getUser();
       if (cancelled) return;
       const userId = user?.id ?? "guest";
+
+      try {
+        const savedBuyNow = JSON.parse(
+          sessionStorage.getItem(BUY_NOW_KEY) || 'null',
+        ) as { ownerId?: string; item?: CartItem } | null;
+        if (savedBuyNow?.item && savedBuyNow.ownerId === userId) {
+          setBuyNowItem(savedBuyNow.item);
+        } else {
+          sessionStorage.removeItem(BUY_NOW_KEY);
+        }
+      } catch {
+        sessionStorage.removeItem(BUY_NOW_KEY);
+      }
 
       // A cart tagged with a different signed-in account is stale: drop it.
       // An untagged/guest cart is kept so items added before login survive.
@@ -159,8 +176,18 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  const startCartWith = (item: AddToCartInput) => {
-    saveCart([{ ...item, quantity: item.quantity || 1 }]);
+  const startBuyNow = (item: AddToCartInput) => {
+    const next = { ...item, quantity: item.quantity || 1 };
+    setBuyNowItem(next);
+    sessionStorage.setItem(BUY_NOW_KEY, JSON.stringify({
+      ownerId: ownerRef.current ?? localStorage.getItem(CART_OWNER_KEY) ?? 'guest',
+      item: next,
+    }));
+  };
+
+  const clearBuyNow = () => {
+    setBuyNowItem(null);
+    sessionStorage.removeItem(BUY_NOW_KEY);
   };
 
   const getQuantity = (id: string) => {
@@ -184,9 +211,11 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
     <CartContext.Provider
       value={{
         cart,
+        buyNowItem,
         addToCart,
         addToCartOnce,
-        startCartWith,
+        startBuyNow,
+        clearBuyNow,
         removeFromCart,
         removeItems,
         decreaseQuantity,

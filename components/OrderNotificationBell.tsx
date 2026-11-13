@@ -44,6 +44,7 @@ export default function OrderNotificationBell({ role, className = '' }: Props) {
 
   const storageKey = `fuhsi_order_notifications_${role}`;
   const subscriptionKey = `${storageKey}_subscription_seen`;
+  const clearedKey = `${storageKey}_cleared`;
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -80,26 +81,47 @@ export default function OrderNotificationBell({ role, className = '' }: Props) {
     if (error || !data) return;
 
     const next = data as unknown as OrderNotice[];
-    setOrders(next);
+    let previous: Record<string, string> = {};
+    let storedUnread: string[] = [];
+    let cleared: Record<string, string> = {};
+    try {
+      previous = JSON.parse(localStorage.getItem(`${storageKey}_snapshot`) || '{}');
+      storedUnread = JSON.parse(localStorage.getItem(`${storageKey}_unread`) || '[]');
+      cleared = JSON.parse(localStorage.getItem(clearedKey) || '{}');
+    } catch {
+      // Corrupt browser storage must not break the notification bell.
+    }
 
-    const previous: Record<string, string> = JSON.parse(localStorage.getItem(`${storageKey}_snapshot`) || '{}');
-    const storedUnread: string[] = JSON.parse(localStorage.getItem(`${storageKey}_unread`) || '[]');
     const current: Record<string, string> = {};
     const nextUnread = new Set(storedUnread);
+    const nextCleared: Record<string, string> = {};
     next.forEach(order => {
       current[order.id] = order.status;
+      if (cleared[order.id] === order.status) {
+        nextCleared[order.id] = order.status;
+      }
       // First-seen paid seller orders and every later status transition are
       // notifications. Keep them unread until the user explicitly marks them read.
       if (!(order.id in previous)) {
         if (order.status === 'in_escrow') nextUnread.add(order.id);
       } else if (previous[order.id] !== order.status) {
         nextUnread.add(order.id);
+        // A new status makes a previously cleared order visible again.
+        delete nextCleared[order.id];
       }
     });
-    setUnreadIds(Array.from(nextUnread));
+
+    const visible = next.filter(order => nextCleared[order.id] !== order.status);
+    const visibleIds = new Set(visible.map(order => order.id));
+    setOrders(visible);
+    setUnreadIds(Array.from(nextUnread).filter(id => visibleIds.has(id)));
     localStorage.setItem(`${storageKey}_snapshot`, JSON.stringify(current));
-    localStorage.setItem(`${storageKey}_unread`, JSON.stringify(Array.from(nextUnread)));
-  }, [role, storageKey, subscriptionKey, supabase]);
+    localStorage.setItem(
+      `${storageKey}_unread`,
+      JSON.stringify(Array.from(nextUnread).filter(id => visibleIds.has(id))),
+    );
+    localStorage.setItem(clearedKey, JSON.stringify(nextCleared));
+  }, [clearedKey, role, storageKey, subscriptionKey, supabase]);
 
   useEffect(() => {
     // Kick off the first fetch on the next tick so the bell can paint
@@ -139,17 +161,21 @@ export default function OrderNotificationBell({ role, className = '' }: Props) {
 
   const openNotifications = () => {
     setOpen(v => !v);
-    if (!open) return;
-    setUnreadIds([]);
-    localStorage.setItem(`${storageKey}_unread`, '[]');
   };
 
   const markRead = () => {
-    const snapshot: Record<string, string> = {};
-    orders.forEach(order => { snapshot[order.id] = order.status; });
-    localStorage.setItem(storageKey, JSON.stringify(snapshot));
+    let cleared: Record<string, string> = {};
+    try {
+      cleared = JSON.parse(localStorage.getItem(clearedKey) || '{}');
+    } catch {
+      cleared = {};
+    }
+    orders.forEach(order => { cleared[order.id] = order.status; });
+    localStorage.setItem(clearedKey, JSON.stringify(cleared));
     setUnreadIds([]);
+    setOrders([]);
     localStorage.setItem(`${storageKey}_unread`, '[]');
+    if (showSubscriptionNotice) dismissSubscription();
   };
 
   return (
@@ -162,10 +188,10 @@ export default function OrderNotificationBell({ role, className = '' }: Props) {
         <div className="absolute right-0 top-12 z-[80] w-[min(90vw,340px)] overflow-hidden rounded-2xl border border-[#eee4dc] bg-white shadow-2xl">
           <div className="flex items-center justify-between border-b border-[#f0e9e2] px-4 py-3">
             <div><p className="text-sm font-black text-[#251d18]">Notifications</p><p className="text-[10px] text-[#81756d]">{role === 'seller' ? 'Sales and new paid orders' : 'Your order status updates'}</p></div>
-            <button onClick={markRead} className="text-[10px] font-bold text-[#d8552e] flex items-center gap-1"><CheckCheck size={13}/> Mark read</button>
+            <button onClick={markRead} className="text-[10px] font-bold text-[#d8552e] flex items-center gap-1"><CheckCheck size={13}/> Mark all read</button>
           </div>
           <div className="max-h-80 overflow-y-auto">
-            {role === 'seller' && subscription && (
+            {role === 'seller' && subscription && showSubscriptionNotice && (
               <button
                 onClick={() => {
                   dismissSubscription();
@@ -191,7 +217,7 @@ export default function OrderNotificationBell({ role, className = '' }: Props) {
                 <span className="min-w-0"><span className="block truncate text-xs font-bold text-[#251d18]">{order.products?.[0]?.title || 'Order'}</span><span className="mt-0.5 block text-[10px] leading-4 text-[#81756d]">{statusText[order.status] || order.status.replace(/_/g, ' ')} · {order.order_ref}</span></span>
               </button>
             ))}
-            {orders.length === 0 && <p className="p-6 text-center text-xs text-[#81756d]">No order notifications yet.</p>}
+            {orders.length === 0 && !showSubscriptionNotice && <p className="p-6 text-center text-xs text-[#81756d]">No new notifications.</p>}
           </div>
           {role === 'seller' && <PushNotificationToggle variant="inline" />}
         </div>

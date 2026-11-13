@@ -201,26 +201,29 @@ export default function ProfilePage() {
     }
 
     setUpdating(true);
-
-    const { error } = await supabase
-      .from('profiles')
-      .upsert({
-        id: userAuth.id,
-        full_name: profileData.fullName,
-        matric_no: profileData.matricNo,
-        hostel: profileData.hostel,
-        dob: profileData.dob, 
-        bank_name: profileData.bankName,
-        account_number: profileData.accountNumber,
-        updated_at: new Date().toISOString()
+    try {
+      const response = await fetch('/api/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: profileData.fullName,
+          matricNo: profileData.matricNo,
+          hostel: profileData.hostel,
+          dob: profileData.dob || null,
+          bankName: profileData.bankName,
+          accountNumber: profileData.accountNumber,
+        }),
       });
-
-    setUpdating(false);
-    if (!error) {
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result?.error || 'Could not update your profile.');
+      }
       alert('Your profile has been saved.');
-    } else {
+    } catch (error) {
       console.error('Failed to update profile:', error);
-      alert('Could not update your profile. Please try again.');
+      alert(error instanceof Error ? error.message : 'Could not update your profile. Please try again.');
+    } finally {
+      setUpdating(false);
     }
   };
 

@@ -245,13 +245,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ received: true }, { status: 200 });
   } catch (err) {
-    // Log server-side with the reference so it can be reconciled by hand; never
-    // return the database error to the caller.
+    // recordOrder is idempotent on the Paystack reference, so webhook retries
+    // are safe and can recover a temporary database/network failure.
     console.error('[webhook] failed to record escrow order', { reference, err });
-
-    // 200, not 500: the signature was valid and the payload was understood, so
-    // Paystack retrying will not help. Reconcile from the log instead of
-    // accumulating retries.
-    return NextResponse.json({ received: true }, { status: 200 });
+    return NextResponse.json({ error: 'Temporary order recording failure.' }, { status: 500 });
   }
 }

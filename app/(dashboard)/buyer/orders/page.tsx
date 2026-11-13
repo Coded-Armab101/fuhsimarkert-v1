@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
+import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes, ChevronDown, ChevronUp, RefreshCw, Clock } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { useCart } from '@/context/CartContext';
@@ -12,6 +12,7 @@ import LeaveReview from '@/components/LeaveReview';
 
 type BuyerOrderRow = {
   id: string;
+  product_id?: string | null;
   buyer_id: string;
   seller_id: string;
   amount_kobo: number;
@@ -78,6 +79,7 @@ type ConfirmResult = {
   done: boolean;
   kind: 'success' | 'error';
   message: string;
+  buyNow: boolean;
 };
 
 /**
@@ -97,6 +99,7 @@ async function confirmPaystackReturn(reference: string): Promise<ConfirmResult> 
         done: true,
         kind: 'success',
         message: 'Payment confirmed! Your order has been placed into escrow.',
+        buyNow: data.checkout_mode === 'buy_now',
       };
     }
 
@@ -105,12 +108,14 @@ async function confirmPaystackReturn(reference: string): Promise<ConfirmResult> 
         done: true,
         kind: 'error',
         message: 'Payment was cancelled or failed. Nothing was charged.',
+        buyNow: data.checkout_mode === 'buy_now',
       };
     }
 
     return {
       done: false,
       kind: 'error',
+      buyNow: false,
       message:
         data?.error ||
         'We could not confirm this payment yet. If you were charged, tap "Check payment again" in a moment.',
@@ -119,6 +124,7 @@ async function confirmPaystackReturn(reference: string): Promise<ConfirmResult> 
     return {
       done: false,
       kind: 'error',
+      buyNow: false,
       message:
         'Could not reach the server to confirm your payment. Tap "Check payment again" when you are back online.',
     };
@@ -282,7 +288,7 @@ async function fetchBuyerOrderGroups(
 
 export default function OrdersPage() {
   const supabase = createClient();
-  const { clearCart } = useCart();
+  const { clearCart, clearBuyNow } = useCart();
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<OrderGroup[]>([]);
   const [updatingRef, setUpdatingRef] = useState<string | null>(null);
@@ -316,13 +322,20 @@ export default function OrdersPage() {
     const url = new URL(window.location.href);
     url.searchParams.delete('reference');
     url.searchParams.delete('trxref');
+    url.searchParams.delete('buyNow');
     window.history.replaceState(null, '', url.toString());
   };
 
   const applyConfirmResult = (result: ConfirmResult) => {
     // The order is escrowed. Clear the local cart only now, so a failed
     // verification never loses the basket.
-    if (result.done && result.kind === 'success') clearCart();
+    if (result.done) {
+      const isBuyNow =
+        result.buyNow ||
+        new URL(window.location.href).searchParams.get('buyNow') === '1';
+      if (isBuyNow) clearBuyNow();
+      else if (result.kind === 'success') clearCart();
+    }
     setPaymentNotice({ kind: result.kind, message: result.message, retry: !result.done });
   };
 
@@ -538,7 +551,7 @@ export default function OrdersPage() {
           <CreditCard className="text-[#ef6b3b]" /> Your orders
         </h1>
         <p className="text-xs text-[#81756d] mt-1">
-          Items from different sellers are shown together here. Show the code when your order arrives, then tap “Confirm received” once you have everything.
+          Items from different sellers are shown together here. Show the code when your order arrives, then tap “Confirm received” once you have everything. Completed orders show a “Review items” button for rating each product.
         </p>
       </div>
 
@@ -583,7 +596,7 @@ export default function OrdersPage() {
                         className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#faf6f2] hover:bg-[#fff0e9] text-[11px] font-bold text-[#d8552e] border border-[#eee4dc] transition-all cursor-pointer"
                         aria-label={open ? 'Hide order details' : 'Show order details'}
                       >
-                        <span>{open ? 'Hide order details' : 'Order details'}</span>
+                        <span>{open ? 'Hide order details' : group.status === 'completed' ? 'Review items' : 'Order details'}</span>
                         {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                       </button>
                     </div>
@@ -604,6 +617,9 @@ export default function OrdersPage() {
 
                     <p className="text-[10px] font-mono text-[#9d9188] mt-0.5">
                       {group.items.length} item{group.items.length === 1 ? '' : 's'} · Order ID: {group.order_ref?.slice(0, 8)}
+                    </p>
+                    <p className="mt-1 flex items-center gap-1 text-[10px] font-mono text-[#81756d]">
+                      <Clock size={11} /> Ordered {new Date(group.created_at).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })}
                     </p>
                   </div>
 
@@ -725,13 +741,14 @@ export default function OrdersPage() {
                   <div className="space-y-2">
                     {group.items.map((item) => {
                       const p = getOrderProduct(item.products);
-                      if (!p?.id) return null;
+                      const productId = p?.id || item.product_id;
+                      if (!productId) return null;
                       return (
                         <LeaveReview
                           key={item.id}
                           orderId={item.id}
-                          productId={p.id}
-                          productTitle={p.title || 'this item'}
+                          productId={productId}
+                          productTitle={p?.title || 'this item'}
                         />
                       );
                     })}

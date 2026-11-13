@@ -4,6 +4,10 @@ import { createAdminClient } from '@/utils/supabase/admin';
 import { recordOrder } from '@/utils/paystack/recordOrder';
 import { buyerServiceFeeKobo } from '@/utils/pricing';
 
+function metadataText(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
 /**
  * Verify a Paystack transaction by reference.
  *
@@ -48,14 +52,21 @@ export async function GET(request: Request) {
     }
 
     const transaction = body.data;
-    if (transaction.metadata?.buyer_id !== user.id) {
+    let transactionMetadata: Record<string, unknown> = {};
+    try {
+      transactionMetadata = typeof transaction.metadata === 'string'
+        ? JSON.parse(transaction.metadata || '{}')
+        : transaction.metadata || {};
+    } catch {
+      return NextResponse.json({ error: 'Invalid payment metadata.' }, { status: 400 });
+    }
+
+    if (transactionMetadata.buyer_id !== user.id) {
       return NextResponse.json({ error: 'Transaction does not belong to this account.' }, { status: 403 });
     }
 
     if (transaction.status === 'success') {
-      const metadata = typeof transaction.metadata === 'string'
-        ? JSON.parse(transaction.metadata || '{}')
-        : transaction.metadata || {};
+      const metadata = transactionMetadata;
       const productIds: string[] = Array.isArray(metadata.product_ids) ? metadata.product_ids : [];
       type CheckoutItem = { productId: string; quantity: number; unitPriceKobo: number };
       const items: CheckoutItem[] = Array.isArray(metadata.checkout_items)
@@ -96,21 +107,23 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'Invalid payment item set.' }, { status: 400 });
       }
 
+      const recordInput = {
+        buyerId: user.id,
+        reference,
+        productIds,
+        items,
+        deliveryType: metadata.delivery_type === 'delivery' ? 'delivery' as const : 'pickup' as const,
+        deliveryFeeKobo,
+        receiverName: metadataText(metadata.receiver_name),
+        receiverPhone: metadataText(metadata.receiver_phone),
+        matricNumber: metadataText(metadata.matric_number),
+        deliveryAddress: metadataText(metadata.delivery_address),
+        walletKobo,
+        gatewayAmountKobo: Number(transaction.amount),
+      };
+
       try {
-        await recordOrder(createAdminClient(), {
-          buyerId: user.id,
-          reference,
-          productIds,
-          items,
-          deliveryType: metadata.delivery_type === 'delivery' ? 'delivery' : 'pickup',
-          deliveryFeeKobo,
-          receiverName: metadata.receiver_name ?? null,
-          receiverPhone: metadata.receiver_phone ?? null,
-          matricNumber: metadata.matric_number ?? null,
-          deliveryAddress: metadata.delivery_address ?? null,
-          walletKobo,
-          gatewayAmountKobo: Number(transaction.amount),
-        });
+        await recordOrder(createAdminClient(), recordInput);
       } catch (err) {
         // Log structured fields: many log viewers render an Error object as {}
         // and lose the Postgres code/hint, which makes a paid-but-unrecorded
@@ -129,28 +142,64 @@ export async function GET(request: Request) {
           hint: recordError?.hint,
         });
 
-        // The webhook may have won the race, or a previous attempt may have
-        // written the rows before a later step failed. If the order exists for
-        // this buyer, the payment IS recorded — report success so the browser
-        // clears the cart and shows the order instead of looping on "pending".
-        let orderExists = false;
+        // Retry once. If the first call inserted the order rows but failed on a
+        // later escrow/cart step, recordOrder's reference-based idempotency fills
+        // the missing pieces without charging the wallet or stock twice.
+        let orderComplete = false;
         try {
           const admin = createAdminClient();
-          const { data: existingOrders, error: existingError } = await admin
-            .from('orders')
-            .select('id')
-            .eq('order_ref', reference)
-            .eq('buyer_id', user.id)
-            .limit(1);
-          orderExists = !existingError && Boolean(existingOrders?.length);
-        } catch (lookupError) {
-          console.error('[paystack/verify] order existence check failed', {
+          await recordOrder(admin, recordInput);
+          orderComplete = true;
+        } catch (retryError) {
+          console.error('[paystack/verify] order recording retry failed', {
             reference,
-            message: lookupError instanceof Error ? lookupError.message : String(lookupError),
+            message: retryError instanceof Error ? retryError.message : String(retryError),
           });
         }
 
-        if (!orderExists) {
+        // A webhook can win the race. Treat it as success only when EVERY paid
+        // product row and every expected escrow row exists—not merely one row of
+        // a multi-product order.
+        if (!orderComplete) {
+          try {
+            const admin = createAdminClient();
+            const { data: existingOrders, error: existingError } = await admin
+              .from('orders')
+              .select('id, product_id')
+              .eq('order_ref', reference)
+              .eq('buyer_id', user.id);
+
+            const recordedProducts = new Set(
+              (existingOrders || []).map((order) => order.product_id).filter(Boolean),
+            );
+            const allOrdersExist =
+              !existingError &&
+              existingOrders?.length === productIds.length &&
+              productIds.every((id) => recordedProducts.has(id));
+
+            if (allOrdersExist) {
+              const expectedEscrowRefs = [
+                ...productIds.map((id) => `${reference}:P${id}`),
+                ...(deliveryFeeKobo > 0 ? [`${reference}:DELIVERY`] : []),
+                ...(expectedBuyerFeeKobo > 0 ? [`${reference}:FEES`] : []),
+              ];
+              const { data: escrows, error: escrowError } = await admin
+                .from('escrow_transactions')
+                .select('gateway_ref')
+                .in('gateway_ref', expectedEscrowRefs);
+              const escrowRefs = new Set((escrows || []).map((row) => row.gateway_ref));
+              orderComplete =
+                !escrowError && expectedEscrowRefs.every((gatewayRef) => escrowRefs.has(gatewayRef));
+            }
+          } catch (lookupError) {
+            console.error('[paystack/verify] order existence check failed', {
+              reference,
+              message: lookupError instanceof Error ? lookupError.message : String(lookupError),
+            });
+          }
+        }
+
+        if (!orderComplete) {
           // Surface the known, actionable causes to the buyer instead of a
           // generic dead end. Unknown database errors stay generic (and are in
           // the server log above).
@@ -174,6 +223,7 @@ export async function GET(request: Request) {
       status: transaction.status,
       reference: transaction.reference,
       amount_kobo: transaction.amount,
+      checkout_mode: transactionMetadata.checkout_mode === 'buy_now' ? 'buy_now' : 'cart',
     });
   } catch (err) {
     console.error('[paystack/verify] error:', err);

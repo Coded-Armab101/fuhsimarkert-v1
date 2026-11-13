@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { createAdminClient } from '@/utils/supabase/admin';
 import { rateLimit, PAYMENT_INIT_LIMIT } from '@/utils/rate-limit';
 import { buyerServiceFeeKobo, deliveryFeeForSellers } from '@/utils/pricing';
+import { checkoutDatabaseReady } from '@/utils/paystack/checkoutReady';
 
 type CartRow = {
   product_id: string;
@@ -15,10 +17,12 @@ export async function POST(request: Request) {
     //    delivery fee is a fixed constant, never taken from the client.
     let delivery;
     let walletFirst = false;
+    let buyNow = false;
     try {
       const body = await request.json();
       delivery = body?.delivery ?? {};
       walletFirst = body?.walletFirst === true;
+      buyNow = body?.buyNow === true;
     } catch {
       delivery = {};
     }
@@ -35,6 +39,16 @@ export async function POST(request: Request) {
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized system access request.' }, { status: 401 });
+    }
+
+    // Never take a Paystack payment when the database still has the legacy
+    // one-product constraints or is missing the reliability migration.
+    const checkoutReady = await checkoutDatabaseReady(createAdminClient());
+    if (!checkoutReady.ready) {
+      console.error('[paystack] checkout database is not ready', checkoutReady.reason);
+      return NextResponse.json({
+        error: 'Checkout is temporarily unavailable while the order database is being updated. No payment was taken.',
+      }, { status: 503 });
     }
 
     const limit = rateLimit({ key: `cart-checkout:${user.id}`, ...PAYMENT_INIT_LIMIT });
@@ -232,6 +246,7 @@ export async function POST(request: Request) {
       expected_total_kobo: trueTotalKobo,
       currency: 'NGN',
       purpose: 'marketplace_checkout',
+      checkout_mode: buyNow ? 'buy_now' : 'cart',
       wallet_kobo: walletKobo,
       delivery_type: deliveryType,
       delivery_fee_kobo: isPaidDelivery ? deliveryFeeKobo : 0,

@@ -45,7 +45,9 @@ Then apply `supabase/migrations/20261113_features.sql`. It adds product selling 
 
 Then apply `supabase/migrations/20261114_ops.sql`. It fixes the multi-item/multi-seller checkout (composite uniqueness on `carts(user_id, product_id)` and `orders(order_ref, product_id)` instead of single-column keys), adds the card-refund columns and the `claim_order_refund` / `finalize_order_refund` functions, adds Paystack transfer fields to `withdrawals`, exposes the public `verified_seller_ids` badge RPC, and raises the `product-images` bucket to 5MB per file. **Without this migration, saving a cart/order with more than one product can fail silently.**
 
-Finally apply `supabase/migrations/20261115_payout_hardening.sql`. It atomically reserves one Paystack transfer reference per withdrawal (preventing double payouts), blocks an approve/reject race, makes simultaneous withdrawal requests safe, and adds exactly-once wallet fallback bookkeeping for an asynchronous `refund.failed` webhook.
+Next apply `supabase/migrations/20261115_payout_hardening.sql`. It atomically reserves one Paystack transfer reference per withdrawal (preventing double payouts), blocks an approve/reject race, makes simultaneous withdrawal requests safe, and adds exactly-once wallet fallback bookkeeping for an asynchronous `refund.failed` webhook.
+
+Finally apply `supabase/migrations/20261116_order_reliability.sql`. It removes notification side effects from escrow release/refund transactions, adds the order status/timestamp fields used by the UI, and exposes a service-only checkout preflight. Card and wallet checkout now stop before moving money if the database still has legacy single-item constraints.
 
 ## Transactional email (Resend)
 

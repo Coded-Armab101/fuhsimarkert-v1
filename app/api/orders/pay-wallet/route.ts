@@ -4,6 +4,9 @@ import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { recordOrder } from '@/utils/paystack/recordOrder';
 import { buyerServiceFeeKobo, deliveryFeeForSellers } from '@/utils/pricing';
+import { checkoutDatabaseReady } from '@/utils/paystack/checkoutReady';
+
+type CartRow = { product_id: string; quantity: number };
 
 /**
  * Wallet-only checkout: the buyer's wallet balance covers the entire order, so
@@ -37,6 +40,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized system access request.' }, { status: 401 });
     }
 
+    const admin = createAdminClient();
+    const checkoutReady = await checkoutDatabaseReady(admin);
+    if (!checkoutReady.ready) {
+      console.error('[orders/pay-wallet] checkout database is not ready', checkoutReady.reason);
+      return NextResponse.json({
+        error: 'Checkout is temporarily unavailable while the order database is being updated. Your wallet was not charged.',
+      }, { status: 503 });
+    }
+
     const { data: cartItems, error: cartError } = await supabase
       .from('carts')
       .select('product_id, quantity')
@@ -44,7 +56,13 @@ export async function POST(request: Request) {
     if (cartError || !cartItems || cartItems.length === 0) {
       return NextResponse.json({ error: 'Shopping cart ledger is empty.' }, { status: 400 });
     }
-    const productIds = (cartItems as { product_id: string; quantity: number }[]).map((i) => i.product_id);
+    const typedCartItems = cartItems as CartRow[];
+    const productIds = typedCartItems.map((item) => item.product_id);
+    if (new Set(productIds).size !== productIds.length) {
+      return NextResponse.json({
+        error: 'Your cart contains duplicate product rows. Remove the affected item and add it again.',
+      }, { status: 409 });
+    }
 
     const { data: products, error: productsError } = await supabase
       .from('products')
@@ -52,6 +70,28 @@ export async function POST(request: Request) {
       .in('id', productIds);
     if (productsError || !products) {
       return NextResponse.json({ error: 'Internal system pricing error.' }, { status: 500 });
+    }
+    if (products.length !== productIds.length || products.some((product) => product.is_available === false)) {
+      return NextResponse.json({
+        error: 'One or more products are no longer available. Refresh your cart before paying.',
+      }, { status: 409 });
+    }
+
+    const productById = new Map(products.map((product) => [product.id, product]));
+    for (const item of typedCartItems) {
+      const quantity = Number(item.quantity);
+      const product = productById.get(item.product_id);
+      const stock = product?.stock === null || product?.stock === undefined
+        ? null
+        : Number(product.stock);
+      if (!product || !Number.isSafeInteger(quantity) || quantity < 1) {
+        return NextResponse.json({ error: 'Invalid cart quantity.' }, { status: 400 });
+      }
+      if (stock !== null && (!Number.isSafeInteger(stock) || stock < quantity)) {
+        return NextResponse.json({
+          error: 'One item has sold out or does not have enough stock. Refresh your cart and try again.',
+        }, { status: 409 });
+      }
     }
 
     // Same guard as the card route: refuse a self-purchase before the wallet is
@@ -73,10 +113,12 @@ export async function POST(request: Request) {
 
     const priceById = new Map((products ?? []).map((p) => [p.id, Number(p.price) || 0]));
 
-    const itemsTotalKobo = (cartItems as { product_id: string; quantity: number }[]).reduce((acc, item) => {
+    const itemsTotalKobo = typedCartItems.reduce((acc, item) => {
       const unit = priceById.get(item.product_id) ?? 0;
-      const qty = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
-      return acc + unit * qty;
+      const quantity = Number(item.quantity);
+      const line = unit * quantity;
+      const next = acc + line;
+      return Number.isSafeInteger(line) && Number.isSafeInteger(next) ? next : Number.NaN;
     }, 0);
     const buyerFeeKobo = buyerServiceFeeKobo(itemsTotalKobo);
     // One delivery charge per seller, priced from the database.
@@ -88,11 +130,9 @@ export async function POST(request: Request) {
     );
     const chargedDeliveryKobo = isPaidDelivery ? deliveryFeeKobo : 0;
     const totalKobo = itemsTotalKobo + chargedDeliveryKobo + buyerFeeKobo;
-    if (!Number.isFinite(totalKobo) || totalKobo <= 0) {
+    if (!Number.isSafeInteger(totalKobo) || totalKobo <= 0) {
       return NextResponse.json({ error: 'Invalid financial amount calculation.' }, { status: 400 });
     }
-
-    const admin = createAdminClient();
 
     let { data: wallet } = await supabase
       .from('wallets')
@@ -121,9 +161,9 @@ export async function POST(request: Request) {
       nonce: crypto.randomUUID(),
       userId: user.id,
       productIds,
-      items: (cartItems as { product_id: string; quantity: number }[]).map((item) => ({
-        productId: item.product_id,
-        quantity: Number(item.quantity) > 0 ? Number(item.quantity) : 1,
+       items: typedCartItems.map((item) => ({
+         productId: item.product_id,
+         quantity: Number(item.quantity),
         unitPriceKobo: priceById.get(item.product_id) ?? 0,
       })),
       deliveryType,
@@ -138,9 +178,9 @@ export async function POST(request: Request) {
       buyerId: user.id,
       reference: walletRef,
       productIds,
-      items: (cartItems as { product_id: string; quantity: number }[]).map((item) => ({
+      items: typedCartItems.map((item) => ({
         productId: item.product_id,
-        quantity: Number(item.quantity) > 0 ? Number(item.quantity) : 1,
+        quantity: Number(item.quantity),
         unitPriceKobo: priceById.get(item.product_id) ?? 0,
       })),
       deliveryType,

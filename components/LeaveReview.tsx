@@ -109,7 +109,7 @@ export default function LeaveReview({ orderId, productId, productTitle }: Props)
 
   return (
     <form onSubmit={submit} className="rounded-2xl border border-[#eee4dc] bg-white p-3">
-      <p className="text-[11px] font-bold text-[#251d18]">Rate {productTitle}</p>
+      <p className="text-[11px] font-bold text-[#251d18]">Leave a review for {productTitle}</p>
       <div className="mt-1 flex items-center gap-1" onMouseLeave={() => setHovered(0)}>
         {[1, 2, 3, 4, 5].map((value) => (
           <button

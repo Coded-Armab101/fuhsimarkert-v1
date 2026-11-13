@@ -12,7 +12,15 @@ import { ShoppingBag, Trash2, ArrowLeft, ShieldCheck, Plus, Minus, Loader2, Truc
 export default function BuyerCartPage() {
   const router = useRouter();
   const supabase = createClient();
-  const { cart, addToCart, decreaseQuantity, removeFromCart, clearCart, totalAmount } = useCart();
+  const {
+    cart,
+    buyNowItem,
+    addToCart,
+    decreaseQuantity,
+    removeFromCart,
+    clearCart,
+    clearBuyNow,
+  } = useCart();
   const [checkingOut, setCheckingOut] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState(0);
@@ -22,17 +30,22 @@ export default function BuyerCartPage() {
     message: string;
   } | null>(null);
   const [checkoutStage, setCheckoutStage] = useState<'items' | 'checkout'>('items');
+  const [isBuyNowCheckout, setIsBuyNowCheckout] = useState(false);
 
   // Product-detail Buy now enters the same secure checkout, skipping the
   // intermediate cart-review stage. Payment completion still returns to Orders.
   useEffect(() => {
     const url = new URL(window.location.href);
-    if (url.searchParams.get('checkout') === '1') {
+    const buyNow = url.searchParams.get('buyNow') === '1';
+    if (url.searchParams.get('checkout') === '1' || buyNow) {
       url.searchParams.delete('checkout');
       window.history.replaceState(null, '', url.toString());
       // Defer the state write to a callback so React does not cascade renders
       // from the effect body (react-hooks/set-state-in-effect).
-      const timer = window.setTimeout(() => setCheckoutStage('checkout'), 0);
+      const timer = window.setTimeout(() => {
+        setIsBuyNowCheckout(buyNow);
+        setCheckoutStage('checkout');
+      }, 0);
       return () => window.clearTimeout(timer);
     }
   }, []);
@@ -73,11 +86,20 @@ export default function BuyerCartPage() {
     prefill();
   }, [supabase]);
 
-  const buyerFeeKobo = buyerServiceFeeKobo(totalAmount);
+  const checkoutItems = isBuyNowCheckout
+    ? (buyNowItem ? [buyNowItem] : [])
+    : cart;
+  const checkoutItemsTotalKobo = checkoutItems.reduce(
+    (sum, item) => sum + item.price * item.quantity,
+    0,
+  );
+  const buyerFeeKobo = buyerServiceFeeKobo(checkoutItemsTotalKobo);
   // One delivery charge per seller, taken from each product's configured fee.
-  const deliveryFeeKobo = deliveryFeeForSellers(cart);
+  const deliveryFeeKobo = deliveryFeeForSellers(checkoutItems);
   const grandTotalKobo =
-    totalAmount + (delivery.type === 'delivery' ? deliveryFeeKobo : 0) + buyerFeeKobo;
+    checkoutItemsTotalKobo +
+    (delivery.type === 'delivery' ? deliveryFeeKobo : 0) +
+    buyerFeeKobo;
 
   // Wallet-first split: wallet covers as much as it can, the remainder via
   // card/transfer. When the wallet covers the whole total, no Paystack needed.
@@ -94,6 +116,7 @@ export default function BuyerCartPage() {
     const url = new URL(window.location.href);
     const reference = url.searchParams.get('reference') || url.searchParams.get('trxref');
     if (!reference) return;
+    const returnedBuyNow = url.searchParams.get('buyNow') === '1';
 
     url.searchParams.delete('reference');
     url.searchParams.delete('trxref');
@@ -108,13 +131,20 @@ export default function BuyerCartPage() {
           // Payment confirmed. Clear the paid items and send the buyer straight
           // to their orders page to see the live tracking. We only redirect
           // here (not on failure) so a cancelled pay keeps the cart intact.
-          clearCart();
+          if (returnedBuyNow) clearBuyNow();
+          else clearCart();
           router.replace('/buyer/orders');
           return;
         } else if (res.ok && (data.status === 'failed' || data.status === 'abandoned')) {
+          if (returnedBuyNow) {
+            clearBuyNow();
+            setIsBuyNowCheckout(false);
+            url.searchParams.delete('buyNow');
+            window.history.replaceState(null, '', url.toString());
+          }
           setPaymentNotice({
             kind: 'error',
-            message: 'Payment was cancelled or failed. Nothing was charged and your cart is untouched.',
+            message: 'Payment was cancelled or failed. Nothing was charged and your saved cart is untouched.',
           });
         } else {
           setPaymentNotice({
@@ -129,7 +159,7 @@ export default function BuyerCartPage() {
         });
       }
     })();
-  }, [clearCart, router]);
+  }, [clearBuyNow, clearCart, router]);
 
   /**
    * Proceeds to Paystack escrow checkout.
@@ -141,7 +171,7 @@ export default function BuyerCartPage() {
    * that return handler (above) clears the cart only if payment succeeded.
    */
   const handleCheckout = async () => {
-    if (cart.length === 0) return;
+    if (checkoutItems.length === 0) return;
 
     // Validate the delivery form before starting the transaction.
     if (!delivery.name.trim()) {
@@ -191,7 +221,7 @@ export default function BuyerCartPage() {
       if (clearError) throw clearError;
 
       const { error: syncError } = await supabase.from('carts').insert(
-        cart.map((item) => ({
+        checkoutItems.map((item) => ({
           user_id: user.id,
           product_id: item.id,
           quantity: item.quantity,
@@ -222,7 +252,8 @@ export default function BuyerCartPage() {
         });
         const walletData = await walletRes.json();
         if (walletRes.ok && walletData.ok) {
-          clearCart();
+          if (isBuyNowCheckout) clearBuyNow();
+          else clearCart();
           router.replace('/buyer/orders');
           return;
         }
@@ -236,6 +267,7 @@ export default function BuyerCartPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           walletFirst: paymentMethod === 'wallet',
+          buyNow: isBuyNowCheckout,
           delivery: deliveryPayload,
         }),
       });
@@ -265,16 +297,26 @@ export default function BuyerCartPage() {
 
   return (
     <div className="buyer-secondary max-w-3xl mx-auto py-3 px-1 space-y-5 pb-28">
-      <Link href="/buyer" className="inline-flex items-center gap-2 text-xs font-bold text-[#81756d] hover:text-[#d8552e] transition-colors">
+      <Link
+        href="/buyer"
+        onClick={() => { if (isBuyNowCheckout) clearBuyNow(); }}
+        className="inline-flex items-center gap-2 text-xs font-bold text-[#81756d] hover:text-[#d8552e] transition-colors"
+      >
         <ArrowLeft size={14} /> Back to home
       </Link>
 
 <div className="flex items-center justify-between px-1">
         <div className="space-y-0.5">
-          <h1 className="text-xl font-black text-[#251d18]">Your cart</h1>
-          <p className="text-xs text-[#81756d]">Check your items before you pay.</p>
+          <h1 className="text-xl font-black text-[#251d18]">
+            {isBuyNowCheckout ? 'Buy now' : 'Your cart'}
+          </h1>
+          <p className="text-xs text-[#81756d]">
+            {isBuyNowCheckout
+              ? 'This checkout contains only the selected item. Your saved cart is untouched.'
+              : 'Check your items before you pay.'}
+          </p>
         </div>
-        {cart.length > 0 && (
+        {!isBuyNowCheckout && cart.length > 0 && (
           <button
             onClick={clearCart}
             className="text-xs font-bold text-[#81756d] hover:text-[#d8552e] transition-colors cursor-pointer"
@@ -284,17 +326,20 @@ export default function BuyerCartPage() {
         )}
       </div>
 
-      {cart.length === 0 ? (
+      {checkoutItems.length === 0 ? (
         <div className="rounded-3xl bg-white p-12 text-center space-y-4">
           <ShoppingBag size={40} className="mx-auto text-[#e7ddd4]" />
           <div className="space-y-1">
-            <h3 className="text-sm font-bold text-[#251d18]">Your cart is empty</h3>
+            <h3 className="text-sm font-bold text-[#251d18]">
+              {isBuyNowCheckout ? 'This Buy Now item is no longer available' : 'Your cart is empty'}
+            </h3>
             <p className="text-xs text-[#81756d]">
               Explore the market and add something you like.
             </p>
           </div>
           <Link
             href="/buyer"
+            onClick={() => { if (isBuyNowCheckout) clearBuyNow(); }}
             className="inline-block bg-[#2e2520] hover:bg-black text-white font-bold text-xs py-2.5 px-6 rounded-xl transition-all"
           >
             Explore market
@@ -308,7 +353,7 @@ export default function BuyerCartPage() {
             <span className={checkoutStage === 'checkout' ? 'rounded-full bg-[#ef6b3b] px-2.5 py-1 text-white' : 'text-[#9d9188]'}>3. Delivery</span>
           </div>
           <div className="space-y-3">
-            {cart.map((item) => (
+            {checkoutItems.map((item) => (
               <div
                 key={item.id}
                 className="bg-white border border-[#f0e9e2] p-4 rounded-2xl flex items-center justify-between gap-4"
@@ -331,7 +376,7 @@ export default function BuyerCartPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
+                {!isBuyNowCheckout && <div className="flex items-center gap-3">
                   {/* QUANTITY STEPPER */}
                   <div className="flex items-center gap-1.5 bg-[#fff0e9] border border-[#ffe0cf] rounded-xl px-1 py-1">
                     <button
@@ -360,7 +405,7 @@ export default function BuyerCartPage() {
                   >
                     <Trash2 size={16} />
                   </button>
-                </div>
+                </div>}
               </div>
             ))}
           </div>
@@ -496,7 +541,7 @@ className={`rounded-2xl border p-4 flex items-start gap-3 text-[11px] font-mono 
             {delivery.type === 'delivery' && (
               <div className="flex justify-between items-center text-[11px] font-mono text-[#81756d] border-b border-[#f0e9e2] pb-2">
                 <span>Items subtotal</span>
-                <span>₦{formatNaira(totalAmount)}</span>
+                <span>₦{formatNaira(checkoutItemsTotalKobo)}</span>
               </div>
             )}
             {delivery.type === 'delivery' && (
