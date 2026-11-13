@@ -11,6 +11,7 @@ import { activeRole, hasLapsedRole } from '@/utils/roles';
 import { formatNaira } from '@/utils/money';
 import { uploadStudentId, uploadVerificationVideo } from '@/utils/verify';
 import VerificationRecorder from '../VerificationRecorder';
+import ProfileInstallApp from '@/components/ProfileInstallApp';
 
 // Comprehensive list of Nigerian Banks for Paystack settlement routing
 const NIGERIAN_BANKS = [
@@ -496,6 +497,8 @@ export default function ProfilePage() {
           <span>Logout</span>
         </button>
       </div>
+
+      <ProfileInstallApp />
 
       <section className="rounded-[1.75rem] bg-white p-4 shadow-sm">
         <p className="text-xs font-bold text-[#251d18]">Choose your profile icon</p>
