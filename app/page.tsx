@@ -28,6 +28,7 @@ import {
   User,
   X,
 } from 'lucide-react';
+import { safeImageSrc } from '@/utils/safeImage';
 
 type Product = {
   id: string;
@@ -103,10 +104,10 @@ function ProductCard({
         className="relative aspect-[4/5] w-full cursor-pointer overflow-hidden bg-[#F5F1EC]"
         onClick={onOpen}
       >
-        {product.image_url ? (
+        {safeImageSrc(product.image_url) ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={product.image_url}
+            src={safeImageSrc(product.image_url) ?? undefined}
             alt={product.title}
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
             loading="lazy"
@@ -737,10 +738,10 @@ export default function LandingPage() {
             className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-[2rem] bg-[#FAFAFA] p-5 shadow-2xl sm:rounded-[2rem]"
           >
             <div className="relative aspect-square w-full overflow-hidden rounded-[1.5rem] bg-[#F1ECE6]">
-              {selected.image_url ? (
+              {safeImageSrc(selected.image_url) ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={selected.image_url}
+                  src={safeImageSrc(selected.image_url) ?? undefined}
                   alt={selected.title}
                   className="h-full w-full object-cover"
                 />

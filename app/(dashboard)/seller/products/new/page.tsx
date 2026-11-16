@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { nairaToKobo } from '@/utils/money';
 import { uploadProductImage, getSellerStorageUsed } from '@/utils/upload';
+import { productImageFileError, revokePreviewUrl, safeImageSrc } from '@/utils/safeImage';
 import { PackagePlus, Loader2, ArrowLeft, UploadCloud, Database } from 'lucide-react';
 import { PRODUCT_CATEGORIES } from '@/utils/categories';
 import { PRODUCT_UNITS } from '@/utils/units';
@@ -24,6 +25,7 @@ export default function AddProductPage() {
   const [deliveryFee, setDeliveryFee] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [storageQuota, setStorageQuota] = useState<number | null>(null);
@@ -47,14 +49,30 @@ export default function AddProductPage() {
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
-    setImageFile(file);
     setError(null);
-    if (file) {
-      setPreviewUrl(URL.createObjectURL(file));
-    } else {
+
+    // Validate before creating a preview so a disguised (non-image) file is
+    // never rendered or uploaded.
+    const fileError = file ? productImageFileError(file) : null;
+    if (fileError) {
+      e.target.value = '';
+      setImageFile(null);
+      revokePreviewUrl(previewUrlRef.current);
+      previewUrlRef.current = null;
       setPreviewUrl(null);
+      setError(fileError);
+      return;
     }
+
+    setImageFile(file);
+    revokePreviewUrl(previewUrlRef.current);
+    const next = file ? URL.createObjectURL(file) : null;
+    previewUrlRef.current = next;
+    setPreviewUrl(next);
   };
+
+  // Release the last preview blob when the page unmounts.
+  useEffect(() => () => revokePreviewUrl(previewUrlRef.current), []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -260,7 +278,7 @@ export default function AddProductPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-mono text-neutral-300">Product Image (JPG/PNG/WEBP/GIF, max 2MB)</label>
+            <label className="text-xs font-mono text-neutral-300">Product Image (JPG/PNG/WEBP/GIF, max 5MB)</label>
 
             {storageQuota !== null && (
               <div className="flex items-center gap-2 text-[11px] font-mono text-neutral-400 bg-neutral-900/60 border border-neutral-800 p-3 rounded-xl">
@@ -280,8 +298,8 @@ export default function AddProductPage() {
               </div>
             )}
 
-            {previewUrl && (
-              <img src={previewUrl} alt="Preview" className="w-full h-44 object-cover rounded-xl border border-neutral-800" />
+            {safeImageSrc(previewUrl) && (
+              <img src={safeImageSrc(previewUrl) ?? undefined} alt="Selected product preview" className="w-full h-44 object-cover rounded-xl border border-neutral-800" />
             )}
             <label className="flex items-center justify-center gap-2 border border-dashed border-neutral-700 hover:border-red-600 bg-neutral-900 rounded-xl px-4 py-6 text-xs text-neutral-400 cursor-pointer transition-all">
               <UploadCloud size={16} />
@@ -289,7 +307,7 @@ export default function AddProductPage() {
               <input type="file" accept="image/*" onChange={handleFile} className="hidden" />
             </label>
             <p className="text-[10px] text-neutral-500 font-mono">
-              Tip: compress your photos (many phone cameras are {'>'}2MB) — you have a set storage allowance per seller.
+              Tip: compress your photos (many phone camera images are larger than 5MB) — you have a set storage allowance per seller.
             </p>
           </div>
 

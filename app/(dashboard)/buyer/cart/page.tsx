@@ -8,6 +8,7 @@ import { useCart } from '@/context/CartContext';
 import { formatNaira } from '@/utils/money';
 import { buyerServiceFeeKobo, deliveryFeeForSellers } from '@/utils/pricing';
 import { ShoppingBag, Trash2, ArrowLeft, ShieldCheck, Plus, Minus, Loader2, Truck, Store, User, Phone, Hash, Wallet } from 'lucide-react';
+import { safeImageSrc } from '@/utils/safeImage';
 
 export default function BuyerCartPage() {
   const router = useRouter();
@@ -361,7 +362,7 @@ export default function BuyerCartPage() {
                 <div className="flex items-center gap-3">
                   <div className="w-14 h-14 bg-[#f3eee8] rounded-xl overflow-hidden flex-shrink-0">
                     {item.image_url ? (
-                      <img src={item.image_url} alt={item.title} className="w-full h-full object-cover" />
+                      <img src={safeImageSrc(item.image_url) ?? undefined} alt={item.title} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-[#c9bfb2]">
                         <ShoppingBag size={18} />

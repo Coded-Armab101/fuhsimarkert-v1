@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { nairaToKobo, koboToNaira } from '@/utils/money';
 import { uploadProductImage, getSellerStorageUsed } from '@/utils/upload';
+import { productImageFileError, revokePreviewUrl, safeImageSrc } from '@/utils/safeImage';
 import { Package, Loader2, ArrowLeft, UploadCloud, Database } from 'lucide-react';
 import { PRODUCT_CATEGORIES } from '@/utils/categories';
 import { PRODUCT_UNITS } from '@/utils/units';
@@ -29,6 +30,7 @@ export default function EditProductPage() {
   const [deliveryFee, setDeliveryFee] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
   const [existingImage, setExistingImage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +80,7 @@ export default function EditProductPage() {
             ? String(koboToNaira(Number(data.delivery_fee_kobo)))
             : '',
         );
-        setExistingImage(data.image_url || null);
+        setExistingImage(safeImageSrc(data.image_url));
       } finally {
         setLoading(false);
       }
@@ -88,14 +90,29 @@ export default function EditProductPage() {
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
-    setImageFile(file);
     setError(null);
-    if (file) {
-      setPreviewUrl(URL.createObjectURL(file));
-    } else {
+
+    // Reject disguised/non-image or oversized files before rendering a preview.
+    const fileError = file ? productImageFileError(file) : null;
+    if (fileError) {
+      e.target.value = '';
+      setImageFile(null);
+      revokePreviewUrl(previewUrlRef.current);
+      previewUrlRef.current = null;
       setPreviewUrl(null);
+      setError(fileError);
+      return;
     }
+
+    setImageFile(file);
+    revokePreviewUrl(previewUrlRef.current);
+    const next = file ? URL.createObjectURL(file) : null;
+    previewUrlRef.current = next;
+    setPreviewUrl(next);
   };
+
+  // Release the last preview blob when the page unmounts.
+  useEffect(() => () => revokePreviewUrl(previewUrlRef.current), []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -310,7 +327,7 @@ export default function EditProductPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-mono text-neutral-300">Product Image (JPG/PNG/WEBP/GIF, max 2MB)</label>
+            <label className="text-xs font-mono text-neutral-300">Product Image (JPG/PNG/WEBP/GIF, max 5MB)</label>
             {storageQuota !== null && (
               <div className="flex items-center gap-2 text-[11px] font-mono text-neutral-400 bg-neutral-900/60 border border-neutral-800 p-3 rounded-xl">
                 <Database size={13} className="text-red-500 shrink-0" />
@@ -328,10 +345,10 @@ export default function EditProductPage() {
                 </div>
               </div>
             )}
-            {(previewUrl || existingImage) && (
+            {(safeImageSrc(previewUrl) || safeImageSrc(existingImage)) && (
               <img
-                src={previewUrl || existingImage || ''}
-                alt="Preview"
+                src={(safeImageSrc(previewUrl) || safeImageSrc(existingImage)) ?? undefined}
+                alt="Product image preview"
                 className="w-full h-44 object-cover rounded-xl border border-neutral-800"
               />
             )}

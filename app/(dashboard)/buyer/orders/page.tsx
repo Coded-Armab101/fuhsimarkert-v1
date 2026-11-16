@@ -9,6 +9,7 @@ import { useCart } from '@/context/CartContext';
 import { formatNaira } from '@/utils/money';
 import DeliveryAnnouncement from '../DeliveryAnnouncement';
 import LeaveReview from '@/components/LeaveReview';
+import { safeImageSrc } from '@/utils/safeImage';
 
 type BuyerOrderRow = {
   id: string;
@@ -648,7 +649,7 @@ export default function OrdersPage() {
                     return (
                       <div key={item.id} className="flex items-center gap-3 bg-[#faf6f2] border border-[#eee4dc] rounded-2xl p-3">
                         {product?.image_url ? (
-                          <img src={product.image_url} alt={product.title || ''} className="w-12 h-12 rounded-lg object-cover" />
+                          <img src={safeImageSrc(product.image_url) ?? undefined} alt={product.title || ''} className="w-12 h-12 rounded-lg object-cover" />
                         ) : (
 <div className="w-12 h-12 rounded-lg bg-[#f3eee8] flex items-center justify-center">
                             <Package size={18} className="text-[#c9bfb2]" />

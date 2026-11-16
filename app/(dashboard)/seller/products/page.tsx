@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { formatNaira } from '@/utils/money';
 import { Package, Plus, Trash2, Pencil, Image as ImageIcon } from 'lucide-react';
+import { safeImageSrc } from '@/utils/safeImage';
 
 type Product = {
   id: string;
@@ -99,8 +100,8 @@ export default function SellerProductsPage() {
             <div key={item.id} className="bg-neutral-950 border border-neutral-800 p-4 rounded-2xl flex flex-col justify-between gap-4">
               <div className="space-y-2">
                 <div className="relative">
-                  {item.image_url ? (
-                    <img src={item.image_url} alt={item.title} className="w-full h-40 object-cover rounded-xl" />
+                  {safeImageSrc(item.image_url) ? (
+                    <img src={safeImageSrc(item.image_url) ?? undefined} alt={item.title} className="w-full h-40 object-cover rounded-xl" />
                   ) : (
                     <div className="w-full h-40 bg-neutral-900 rounded-xl flex items-center justify-center text-neutral-700">
                       <ImageIcon size={28} />

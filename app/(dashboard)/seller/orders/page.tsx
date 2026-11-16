@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { formatNaira } from '@/utils/money';
 import { Receipt, Loader2, Package, MapPin, Truck, User, Phone, Hash, CheckCircle2, Clock } from 'lucide-react';
+import { safeImageSrc } from '@/utils/safeImage';
 
 type SellerOrder = {
   id: string;
@@ -225,7 +226,7 @@ export default function SellerOrdersPage() {
                   <div className="flex items-center gap-4">
                     <div className="w-16 h-16 bg-neutral-900 rounded-2xl overflow-hidden flex-shrink-0">
                       {product?.image_url ? (
-                        <img src={product.image_url} alt={product.title} className="w-full h-full object-cover" />
+                        <img src={safeImageSrc(product.image_url) ?? undefined} alt={product.title} className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-neutral-700">
                           <Package size={22} />
