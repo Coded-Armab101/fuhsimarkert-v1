@@ -6,6 +6,7 @@ import { createClient } from '@/utils/supabase';
 import { formatNaira } from '@/utils/money';
 import { Receipt, Loader2, Package, MapPin, Truck, User, Phone, Hash, CheckCircle2, Clock } from 'lucide-react';
 import { safeImageSrc } from '@/utils/safeImage';
+import { variantLabel } from '@/utils/variants';
 
 type SellerOrder = {
   id: string;
@@ -14,6 +15,9 @@ type SellerOrder = {
   quantity: number;
   status: string;
   order_ref: string;
+  size?: string | null;
+  color?: string | null;
+  variant_key?: string | null;
   delivery_code?: string | null;
   delivery_type: string;
   receiver_name?: string | null;
@@ -59,6 +63,9 @@ export default function SellerOrdersPage() {
             quantity,
             status,
             order_ref,
+            size,
+            color,
+            variant_key,
             delivery_code,
             delivery_type,
             receiver_name,
@@ -87,6 +94,9 @@ export default function SellerOrdersPage() {
               quantity,
               status,
               order_ref,
+              size,
+              color,
+              variant_key,
               delivery_code,
               delivery_type,
               receiver_name,
@@ -243,6 +253,11 @@ export default function SellerOrdersPage() {
                           </span>
                         )}
                       </h3>
+                      {variantLabel(order.size, order.color) && (
+                        <p className="inline-flex rounded-full border border-neutral-800 bg-neutral-900 px-2 py-0.5 text-[10px] font-bold text-neutral-300">
+                          {variantLabel(order.size, order.color)}
+                        </p>
+                      )}
                       <p className="text-[11px] font-mono text-neutral-500">
                         Order: <span className="text-white font-bold tracking-wider">{order.delivery_code || order.order_ref}</span>
                       </p>

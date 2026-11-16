@@ -5,6 +5,7 @@ import { Download, Share2, Smartphone, X } from 'lucide-react';
 import {
   clearPwaInstallPrompt,
   getPwaInstallPrompt,
+  installGuide,
   isIosBrowser,
   pwaIsInstalled,
   subscribeToPwaInstallPrompt,
@@ -27,7 +28,11 @@ export default function ProfileInstallApp() {
 
     const initialState = window.setTimeout(() => {
       refreshInstalledState();
-      setIos(isIosBrowser());
+      const isIos = isIosBrowser();
+      setIos(isIos);
+      // iOS never fires `beforeinstallprompt`, so show the Safari steps
+      // immediately instead of making the buyer guess.
+      if (isIos) setShowSteps(true);
       setPromptEvent(getPwaInstallPrompt());
     }, 0);
 
@@ -54,15 +59,25 @@ export default function ProfileInstallApp() {
       return;
     }
 
-    await promptEvent.prompt();
-    const choice = await promptEvent.userChoice;
-    clearPwaInstallPrompt();
-    setPromptEvent(null);
-    if (choice.outcome === 'accepted') setInstalled(true);
-    else setShowSteps(true);
+    try {
+      await promptEvent.prompt();
+      const choice = await promptEvent.userChoice;
+      clearPwaInstallPrompt();
+      setPromptEvent(null);
+      if (choice.outcome === 'accepted') setInstalled(true);
+      else setShowSteps(true);
+    } catch {
+      // Some browsers reject prompt() when it is not tied to a user gesture or
+      // the install criteria changed. Fall back to the written steps.
+      clearPwaInstallPrompt();
+      setPromptEvent(null);
+      setShowSteps(true);
+    }
   };
 
   if (!checked || installed) return null;
+
+  const guide = installGuide();
 
   return (
     <section className="rounded-[1.75rem] border border-[#ffd9c4] bg-gradient-to-br from-[#fff7f2] to-white p-5 shadow-sm">
@@ -73,7 +88,9 @@ export default function ProfileInstallApp() {
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-black text-[#251d18]">Install FuhsiMarket</h2>
           <p className="mt-1 text-[11px] leading-5 text-[#81756d]">
-            Add the marketplace to your home screen for faster access, offline fallback and phone notifications.
+            {ios
+              ? 'iPhone and iPad need a few Safari steps. Follow the guide below.'
+              : 'Tap once and your browser will install the marketplace for faster access, offline fallback and phone notifications.'}
           </p>
           <button
             type="button"
@@ -81,7 +98,7 @@ export default function ProfileInstallApp() {
             className="mt-3 inline-flex items-center gap-2 rounded-xl bg-[#ef6b3b] px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-[#d8552e]"
           >
             <Download size={15} />
-            {promptEvent ? 'Install app' : 'Show install steps'}
+            {promptEvent ? 'Install now' : ios ? 'Show iPhone steps' : 'Show install steps'}
           </button>
         </div>
       </div>
@@ -98,13 +115,19 @@ export default function ProfileInstallApp() {
           </button>
           <p className="flex items-center gap-1.5 font-bold text-[#251d18]">
             <Share2 size={14} className="text-[#ef6b3b]" />
-            {ios ? 'Install on iPhone or iPad' : 'Install from your browser'}
+            {guide.title}
           </p>
-          <p className="mt-1">
-            {ios
-              ? 'Open this page in Safari, tap Share, scroll down, then choose “Add to Home Screen” and confirm Add.'
-              : 'Open your browser menu and choose “Install app” or “Add to Home screen”. Chrome may also show an install icon in the address bar.'}
-          </p>
+          <p className="mt-1 text-[#81756d]">{guide.intro}</p>
+          <ol className="mt-2 list-decimal space-y-1 pl-4">
+            {guide.steps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+          {!ios && (
+            <p className="mt-2 text-[10px] text-[#9d9188]">
+              If the install option is missing, this browser may not support installing apps. Try Chrome, Edge or Safari.
+            </p>
+          )}
         </div>
       )}
     </section>

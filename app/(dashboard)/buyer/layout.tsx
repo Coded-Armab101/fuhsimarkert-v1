@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { Home, ShoppingCart, Clock, User, Heart } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { createClient } from '@/utils/supabase';
+import OnboardingGuide from '@/components/OnboardingGuide';
 
 export default function BuyerLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -71,6 +72,7 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
           );
         })}
       </nav>
+      <OnboardingGuide role="buyer" />
     </div>
   );
 }

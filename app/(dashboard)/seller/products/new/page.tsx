@@ -9,6 +9,8 @@ import { productImageFileError, revokePreviewUrl, safeImageSrc } from '@/utils/s
 import { PackagePlus, Loader2, ArrowLeft, UploadCloud, Database } from 'lucide-react';
 import { PRODUCT_CATEGORIES } from '@/utils/categories';
 import { PRODUCT_UNITS } from '@/utils/units';
+import OptionTagInput from '@/components/OptionTagInput';
+import { optionList } from '@/utils/variants';
 
 const CATEGORIES = PRODUCT_CATEGORIES;
 
@@ -23,6 +25,8 @@ export default function AddProductPage() {
   const [stock, setStock] = useState('');
   const [unit, setUnit] = useState('');
   const [deliveryFee, setDeliveryFee] = useState('');
+  const [sizes, setSizes] = useState<string[]>([]);
+  const [colors, setColors] = useState<string[]>([]);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const previewUrlRef = useRef<string | null>(null);
@@ -140,6 +144,8 @@ export default function AddProductPage() {
           stock: stockValue,
           unit: unit.trim() || null,
           delivery_fee_kobo: deliveryFeeKobo,
+          sizes: optionList(sizes),
+          colors: optionList(colors),
           is_available: true,
         },
       ]);
@@ -227,6 +233,29 @@ export default function AddProductPage() {
               value={stock}
               onChange={(e) => setStock(e.target.value)}
               className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-600"
+            />
+          </div>
+
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 space-y-4">
+            <div>
+              <p className="text-xs font-bold text-white">Options (optional)</p>
+              <p className="mt-0.5 text-[10px] font-mono text-neutral-500">
+                Add sizes or colours only if this product has them. Buyers must choose one before adding it to the cart.
+              </p>
+            </div>
+            <OptionTagInput
+              label="Sizes"
+              placeholder="e.g. S, M, L, XL"
+              hint="Examples: S/M/L, 128GB/256GB, 1kg/2kg. Leave empty if not applicable."
+              value={sizes}
+              onChange={setSizes}
+            />
+            <OptionTagInput
+              label="Colours"
+              placeholder="e.g. Black, White, Navy"
+              hint="Leave empty if the item has no colour choice."
+              value={colors}
+              onChange={setColors}
             />
           </div>
 

@@ -4,9 +4,21 @@ import { createAdminClient } from '@/utils/supabase/admin';
 import { rateLimit, PAYMENT_INIT_LIMIT } from '@/utils/rate-limit';
 import { buyerServiceFeeKobo, deliveryFeeForSellers } from '@/utils/pricing';
 import { checkoutDatabaseReady } from '@/utils/paystack/checkoutReady';
+import { cleanOption, normalizeVariantKey, resolveProductOptions } from '@/utils/variants';
 
 type CartRow = {
   product_id: string;
+  quantity: number;
+  size?: string | null;
+  color?: string | null;
+  variant_key?: string | null;
+};
+
+type CartLine = {
+  productId: string;
+  variantKey: string;
+  size: string | null;
+  color: string | null;
   quantity: number;
 };
 
@@ -66,7 +78,7 @@ export async function POST(request: Request) {
     //       the buyer's SELECT rights on products.
     const { data: cartItems, error: cartError } = await supabase
       .from('carts')
-      .select('product_id, quantity')
+      .select('product_id, quantity, size, color, variant_key')
       .eq('user_id', user.id);
 
     if (cartError || !cartItems || cartItems.length === 0) {
@@ -74,12 +86,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Shopping cart ledger is empty.' }, { status: 400 });
     }
 
-    const productIds = (cartItems as CartRow[]).map((item) => item.product_id);
-    if (new Set(productIds).size !== productIds.length) {
-      return NextResponse.json({
-        error: 'Your cart contains duplicate product rows. Remove the affected item and add it again.',
-      }, { status: 409 });
-    }
+    const cartLines: CartLine[] = (cartItems as CartRow[]).map((item) => {
+      const size = cleanOption(item.size) || null;
+      const color = cleanOption(item.color) || null;
+      const variantKey =
+        typeof item.variant_key === 'string'
+          ? item.variant_key
+          : normalizeVariantKey(size, color);
+      return {
+        productId: item.product_id,
+        variantKey,
+        size,
+        color,
+        quantity: Number(item.quantity),
+      };
+    });
+
+    const productIds = [...new Set(cartLines.map((line) => line.productId))];
 
     // 2.b. Prices come from the database, never from the client. Fetch the
     //       authoritative unit price AND availability/stock for each product
@@ -126,19 +149,50 @@ export async function POST(request: Request) {
       (products ?? []).map((p) => [p.id, p]),
     );
 
+    // A cart row is user-controlled data. Resolve each selection against the
+    // seller's current per-product lists before money can leave the buyer.
+    // This also catches a stale cart after a seller removes an option.
+    for (const line of cartLines) {
+      const product = productById.get(line.productId);
+      const resolved = product
+        ? resolveProductOptions(product, line.size, line.color)
+        : null;
+      if (!resolved || line.variantKey !== resolved.variantKey) {
+        return NextResponse.json({
+          error: 'A product option in your cart is no longer available. Remove that item, choose its size or colour again, and retry.',
+        }, { status: 409 });
+      }
+      line.size = resolved.size;
+      line.color = resolved.color;
+      line.variantKey = resolved.variantKey;
+    }
+
+    const lineKeys = cartLines.map((line) => `${line.productId}::${line.variantKey}`);
+    if (new Set(lineKeys).size !== lineKeys.length) {
+      return NextResponse.json({
+        error: 'Your cart contains duplicate product options. Remove the duplicate item and try again.',
+      }, { status: 409 });
+    }
+
     // 2.c. Stock guard: never let a buyer pay for more units than are in stock,
     //       or for an item that has gone out of stock since they browsed.
-    for (const item of cartItems as CartRow[]) {
-      const product = productById.get(item.product_id);
+    const qtyByProduct = new Map<string, number>();
+    for (const line of cartLines) {
+      if (!Number.isSafeInteger(line.quantity) || line.quantity < 1) {
+        return NextResponse.json({ error: 'Invalid cart quantity.' }, { status: 400 });
+      }
+      qtyByProduct.set(
+        line.productId,
+        (qtyByProduct.get(line.productId) ?? 0) + line.quantity,
+      );
+    }
+
+    for (const [productId, qty] of qtyByProduct) {
+      const product = productById.get(productId);
       if (!product) continue; // queried above, should not happen
       const stock = product.stock === null || product.stock === undefined
         ? null // untracked → unlimited
         : Number(product.stock);
-      const rawQty = Number(item.quantity);
-      if (!Number.isSafeInteger(rawQty) || rawQty < 1) {
-        return NextResponse.json({ error: 'Invalid cart quantity.' }, { status: 400 });
-      }
-      const qty = rawQty;
       if (stock !== null && (!Number.isSafeInteger(stock) || stock < 1 || qty > stock)) {
         return NextResponse.json({
           error: `One of your items is out of stock or exceeds available quantity. Please update your cart.`,
@@ -159,9 +213,9 @@ export async function POST(request: Request) {
     //
     // Delivery is charged per seller (one fee per seller, not a flat fee), and
     // the fee always comes from the DATABASE, never the client payload.
-    const itemsTotalKobo = (cartItems as CartRow[]).reduce((acc, item) => {
-      const unit = priceById.get(item.product_id) ?? 0;
-      const qty = Number(item.quantity);
+    const itemsTotalKobo = cartLines.reduce((acc, item) => {
+      const unit = priceById.get(item.productId) ?? 0;
+      const qty = item.quantity;
       if (!Number.isSafeInteger(unit) || unit < 0 || !Number.isSafeInteger(qty) || qty < 1) return Number.NaN;
       const line = unit * qty;
       if (!Number.isSafeInteger(line)) return Number.NaN;
@@ -238,10 +292,13 @@ export async function POST(request: Request) {
     metadata: {
       buyer_id: user.id,
       product_ids: productIds, // Array of IDs being purchased
-      checkout_items: (cartItems as CartRow[]).map((item) => ({
-        product_id: item.product_id,
-        quantity: Number(item.quantity) > 0 ? Number(item.quantity) : 1,
-        unit_price_kobo: priceById.get(item.product_id) ?? 0,
+      checkout_items: cartLines.map((item) => ({
+        product_id: item.productId,
+        variant_key: item.variantKey,
+        size: item.size,
+        color: item.color,
+        quantity: item.quantity > 0 ? item.quantity : 1,
+        unit_price_kobo: priceById.get(item.productId) ?? 0,
       })),
       expected_total_kobo: trueTotalKobo,
       currency: 'NGN',

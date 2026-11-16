@@ -7,6 +7,7 @@ import {
   capturePwaInstallPrompt,
   clearPwaInstallPrompt,
   getPwaInstallPrompt,
+  installGuide,
   pwaIsInstalled,
   subscribeToPwaInstallPrompt,
   type PwaInstallPromptEvent,
@@ -61,11 +62,16 @@ export default function PwaInstall() {
       return;
     }
 
-    await promptEvent.prompt();
-    const choice = await promptEvent.userChoice;
-    clearPwaInstallPrompt();
-    if (choice.outcome === 'accepted') setInstalled(true);
-    else setDismissed(true);
+    try {
+      await promptEvent.prompt();
+      const choice = await promptEvent.userChoice;
+      clearPwaInstallPrompt();
+      if (choice.outcome === 'accepted') setInstalled(true);
+      else setDismissed(true);
+    } catch {
+      clearPwaInstallPrompt();
+      setShowInstallHelp(true);
+    }
   };
 
   if (!checked || installed || signedIn !== false) return null;
@@ -106,9 +112,15 @@ export default function PwaInstall() {
         {promptEvent ? 'Install app' : 'How to install'}
       </button>
       {showInstallHelp && !promptEvent && (
-        <p className="mt-3 text-[11px] leading-5 text-white/75">
-          On iPhone, open Safari, tap Share, then “Add to Home Screen”. On Android or desktop, open the browser menu and choose “Install app”.
-        </p>
+        <div className="mt-3 rounded-xl bg-white/10 p-3 text-[11px] leading-5 text-white/80">
+          <p className="font-bold text-white">{installGuide().title}</p>
+          <p className="mt-0.5 text-white/65">{installGuide().intro}</p>
+          <ol className="mt-1.5 list-decimal space-y-1 pl-4">
+            {installGuide().steps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+        </div>
       )}
     </div>
   );

@@ -9,6 +9,7 @@ import { formatNaira } from '@/utils/money';
 import { buyerServiceFeeKobo, deliveryFeeForSellers } from '@/utils/pricing';
 import { ShoppingBag, Trash2, ArrowLeft, ShieldCheck, Plus, Minus, Loader2, Truck, Store, User, Phone, Hash, Wallet } from 'lucide-react';
 import { safeImageSrc } from '@/utils/safeImage';
+import { cartLineKey, normalizeVariantKey, variantLabel } from '@/utils/variants';
 
 export default function BuyerCartPage() {
   const router = useRouter();
@@ -226,6 +227,9 @@ export default function BuyerCartPage() {
           user_id: user.id,
           product_id: item.id,
           quantity: item.quantity,
+          size: item.size || null,
+          color: item.color || null,
+          variant_key: normalizeVariantKey(item.size, item.color),
           created_at: new Date().toISOString(),
         })),
       );
@@ -356,7 +360,7 @@ export default function BuyerCartPage() {
           <div className="space-y-3">
             {checkoutItems.map((item) => (
               <div
-                key={item.id}
+                key={cartLineKey(item)}
                 className="bg-white border border-[#f0e9e2] p-4 rounded-2xl flex items-center justify-between gap-4"
               >
                 <div className="flex items-center gap-3">
@@ -371,6 +375,11 @@ export default function BuyerCartPage() {
                   </div>
                   <div>
                     <h4 className="font-bold text-[#251d18] text-xs">{item.title}</h4>
+                    {variantLabel(item.size, item.color) && (
+                      <p className="mt-0.5 inline-flex rounded-full bg-[#f3eee8] px-2 py-0.5 text-[10px] font-bold text-[#6f625a]">
+                        {variantLabel(item.size, item.color)}
+                      </p>
+                    )}
                     <p className="text-xs font-bold text-[#ef6b3b] mt-1">
                       ₦{formatNaira(item.price)}{item.unit ? ` / ${item.unit}` : ''} x {item.quantity}
                     </p>
@@ -381,7 +390,7 @@ export default function BuyerCartPage() {
                   {/* QUANTITY STEPPER */}
                   <div className="flex items-center gap-1.5 bg-[#fff0e9] border border-[#ffe0cf] rounded-xl px-1 py-1">
                     <button
-                      onClick={() => decreaseQuantity(item.id)}
+                      onClick={() => decreaseQuantity(cartLineKey(item))}
                       className="p-1.5 rounded-lg text-[#c9552e] hover:text-[#a04523] hover:bg-[#ffe2d2] transition-all cursor-pointer"
                       aria-label={`Decrease ${item.title}`}
                     >
@@ -391,7 +400,7 @@ export default function BuyerCartPage() {
                       {item.quantity}
                     </span>
                     <button
-                      onClick={() => addToCart(item)}
+                      onClick={() => addToCart({ ...item, quantity: 1 })}
                       className="p-1.5 rounded-lg text-[#c9552e] hover:text-[#a04523] hover:bg-[#ffe2d2] transition-all cursor-pointer"
                       aria-label={`Increase ${item.title}`}
                     >
@@ -400,7 +409,7 @@ export default function BuyerCartPage() {
                   </div>
 
                   <button
-                    onClick={() => removeFromCart(item.id)}
+                    onClick={() => removeFromCart(cartLineKey(item))}
                     className="p-2 text-[#b4aaa2] hover:text-[#d8552e] transition-colors cursor-pointer"
                     aria-label={`Remove ${item.title}`}
                   >

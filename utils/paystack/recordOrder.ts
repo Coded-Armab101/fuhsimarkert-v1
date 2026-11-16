@@ -5,24 +5,23 @@ import { createAdminClient } from '@/utils/supabase/admin';
 import { sendPushToUsers } from '@/utils/push';
 import { appLink, sendEmailToUsers } from '@/utils/email';
 import { formatNaira } from '@/utils/money';
+import { cleanOption, normalizeVariantKey } from '@/utils/variants';
 
 /**
  * Shared order-creation routine for a successful Paystack payment.
  *
  * Both the inbound webhook (`/api/webhooks`) and the active confirmation
  * (`/api/paystack/verify`, run by the buyer's browser) end up calling this. The
- * webhook uses a service-role client (no user session); the verify route uses
- * the cookie client for the authenticated buyer, which is still able to write
- * thanks to RLS. It computes prices from the database and quantity from the
- * buyer's cart rows — never from the (spoofable) payment payload — so escrowing
- * quantity N charges N × price.
+ * Both callers use a service-role client after authenticating either the
+ * Paystack signature or the signed-in buyer. Prices and quantities come from
+ * the immutable, server-created checkout metadata, so a later cart or catalogue
+ * edit cannot change what was paid.
  *
  * Invariants:
- *  - One `orders` row per (order_ref, product_id) — the unique index makes a
- *    retry or a webhook+verify race a no-op instead of a duplicate. Therefore it
- *    is safe to call from both paths.
- *  - Only the products represented in `productIds` are cleared from the cart, so
- *    anything the buyer added after checkout is preserved.
+ *  - One `orders` row per (order_ref, product_id, variant_key) — the unique
+ *    index makes a retry or a webhook+verify race a no-op instead of a duplicate.
+ *  - Only the exact product-option lines represented in the snapshot are
+ *    cleared from the cart, so anything added after checkout is preserved.
  */
 export const ESCROW_HELD_STATUS = 'in_escrow';
 
@@ -36,12 +35,23 @@ export function generateDeliveryCode(): string {
   return `FHSI-${code}`;
 }
 
+export interface RecordOrderLine {
+  productId: string;
+  /** `size::color` (empty when the product has no options). */
+  variantKey: string;
+  size: string | null;
+  color: string | null;
+  quantity: number;
+  unitPriceKobo: number;
+}
+
 export interface RecordOrderInput {
   buyerId: string;
   reference: string;
+  /** Unique product ids (each product may appear once per variant). */
   productIds: string[];
   /** Frozen checkout snapshot created server-side before payment. */
-  items: Array<{ productId: string; quantity: number; unitPriceKobo: number }>;
+  items: RecordOrderLine[];
   deliveryType: 'pickup' | 'delivery';
   deliveryFeeKobo: number;
   receiverName: string | null;
@@ -60,6 +70,29 @@ export interface RecordOrderInput {
   gatewayAmountKobo: number;
 }
 
+/**
+ * Deterministic escrow reference for one product-variant line. Variant lines
+ * need their own suffix because `gateway_ref` is UNIQUE system-wide and one
+ * combined order can contain the same product in two sizes.
+ */
+export function productEscrowRef(
+  reference: string,
+  productId: string,
+  variantKey: string,
+): string {
+  if (!variantKey) return `${reference}:P${productId}`;
+  const suffix = crypto
+    .createHash('sha1')
+    .update(`${productId}::${variantKey}`)
+    .digest('hex')
+    .slice(0, 16);
+  return `${reference}:P${productId}:${suffix}`;
+}
+
+function checkoutLineKey(item: { productId: string; variantKey: string }): string {
+  return `${item.productId}::${item.variantKey}`;
+}
+
 export async function recordOrder(
   supabase: SupabaseClient,
   input: RecordOrderInput,
@@ -68,14 +101,16 @@ export async function recordOrder(
   // Never derive paid quantities/prices from the current cart here: the cart may
   // have changed after payment initialization. We still re-read product identity,
   // seller and stock from the database.
-  const snapshotById = new Map(
-    input.items.map((item) => [item.productId, item]),
+  const snapshotByLine = new Map(
+    input.items.map((item) => [checkoutLineKey(item), item]),
   );
-  const snapshotIds = [...snapshotById.keys()];
+  const snapshotIds = [...new Set(input.items.map((item) => item.productId))];
   const uniqueProductIds = new Set(input.productIds);
-  if (snapshotIds.length === 0 || uniqueProductIds.size !== input.productIds.length ||
+  if (input.items.length === 0 ||
+      snapshotByLine.size !== input.items.length ||
+      uniqueProductIds.size !== input.productIds.length ||
       snapshotIds.length !== input.productIds.length ||
-      input.productIds.some((id) => !snapshotById.has(id))) {
+      input.productIds.some((id) => !snapshotIds.includes(id))) {
     throw new Error('invalid checkout snapshot');
   }
 
@@ -104,8 +139,12 @@ export async function recordOrder(
   for (const item of input.items) {
     const quantity = Number(item.quantity);
     const unitPrice = Number(item.unitPriceKobo);
+    const size = cleanOption(item.size) || null;
+    const color = cleanOption(item.color) || null;
     if (!Number.isSafeInteger(quantity) || quantity < 1 ||
-        !Number.isSafeInteger(unitPrice) || unitPrice < 0) {
+        !Number.isSafeInteger(unitPrice) || unitPrice < 0 ||
+        item.size !== size || item.color !== color ||
+        item.variantKey !== normalizeVariantKey(size, color)) {
       throw new Error('invalid checkout snapshot values');
     }
 
@@ -114,7 +153,10 @@ export async function recordOrder(
 
     // Price is frozen at checkout. A later catalog-price change must not alter
     // what the buyer paid or what gets escrowed.
-    qtyByProduct.set(item.productId, quantity);
+    qtyByProduct.set(
+      item.productId,
+      (qtyByProduct.get(item.productId) ?? 0) + quantity,
+    );
 
     // Stock is checked/decremented atomically AFTER the order rows are written
     // and only by the call that actually inserted them. Doing it here would
@@ -202,15 +244,18 @@ export async function recordOrder(
   const { data: insertedOrders, error: ordersError } = await supabase
     .from('orders')
     .upsert(
-      products.map((product) => {
-        const quantity = qtyByProduct.get(product.id) ?? 1;
-        const amountKobo = snapshotById.get(product.id)!.unitPriceKobo * quantity;
+      input.items.map((item) => {
+        const product = productById.get(item.productId)!;
+        const amountKobo = item.unitPriceKobo * item.quantity;
         return {
           buyer_id: input.buyerId,
           seller_id: product.seller_id,
-          product_id: product.id,
+          product_id: item.productId,
+          size: item.size,
+          color: item.color,
+          variant_key: item.variantKey,
           amount_kobo: amountKobo,
-          quantity,
+          quantity: item.quantity,
           order_ref: input.reference,
           delivery_code: deliveryCode,
           status: ESCROW_HELD_STATUS,
@@ -230,9 +275,9 @@ export async function recordOrder(
           delivery_address: input.deliveryAddress,
         };
       }),
-      { onConflict: 'order_ref,product_id', ignoreDuplicates: true },
+      { onConflict: 'order_ref,product_id,variant_key', ignoreDuplicates: true },
     )
-    .select('id, seller_id, product_id, amount_kobo');
+    .select('id, seller_id, product_id, variant_key, amount_kobo');
 
   if (ordersError) throw ordersError;
 
@@ -243,7 +288,7 @@ export async function recordOrder(
   // return the new IDs, so read them back by reference.
   const { data: createdOrders, error: createdOrdersError } = await supabase
     .from('orders')
-    .select('id, seller_id, product_id, amount_kobo')
+    .select('id, seller_id, product_id, variant_key, amount_kobo')
     .eq('order_ref', input.reference);
   if (createdOrdersError) throw createdOrdersError;
 
@@ -301,7 +346,11 @@ export async function recordOrder(
       createdOrders.map((order) => ({
         order_id: order.id,
         payment_gateway: 'paystack',
-        gateway_ref: `${input.reference}:P${order.product_id}`,
+        gateway_ref: productEscrowRef(
+          input.reference,
+          order.product_id,
+          (order.variant_key as string | null) ?? '',
+        ),
         webhook_event: 'charge.success',
         amount_kobo: order.amount_kobo,
         status: 'held',
@@ -391,13 +440,17 @@ export async function recordOrder(
     }
   }
 
-  // Only clear what was actually bought, not the whole cart.
-  const { error: cartError } = await supabase
-    .from('carts')
-    .delete()
-    .eq('user_id', input.buyerId)
-    .in('product_id', products.map((product) => product.id));
-  if (cartError) throw cartError;
+  // Only clear the exact lines that were bought. Deleting all rows for a product
+  // would also remove a different size/colour the buyer added after checkout.
+  for (const item of input.items) {
+    const { error: cartError } = await supabase
+      .from('carts')
+      .delete()
+      .eq('user_id', input.buyerId)
+      .eq('product_id', item.productId)
+      .eq('variant_key', item.variantKey);
+    if (cartError) throw cartError;
+  }
 
   // Transactional email is a best-effort side effect, exactly like push. It runs
   // last so a slow provider can never delay the order/escrow write. Only the

@@ -66,7 +66,14 @@ export async function POST(request: Request) {
         matric_number?: string;
         delivery_address?: string | null;
         wallet_kobo?: number;
-        checkout_items?: Array<{ product_id?: string; quantity?: number; unit_price_kobo?: number }>;
+        checkout_items?: Array<{
+          product_id?: string;
+          variant_key?: string;
+          size?: string | null;
+          color?: string | null;
+          quantity?: number;
+          unit_price_kobo?: number;
+        }>;
         expected_total_kobo?: number;
         purpose?: string;
         currency?: string;
@@ -190,6 +197,9 @@ export async function POST(request: Request) {
   const checkoutItems = Array.isArray(event.data?.metadata?.checkout_items)
     ? event.data!.metadata!.checkout_items.map((item) => ({
         productId: item?.product_id as string,
+        variantKey: typeof item?.variant_key === 'string' ? item.variant_key : '',
+        size: typeof item?.size === 'string' && item.size ? item.size : null,
+        color: typeof item?.color === 'string' && item.color ? item.color : null,
         quantity: Number(item?.quantity),
         unitPriceKobo: Number(item?.unit_price_kobo),
       }))
@@ -210,7 +220,9 @@ export async function POST(request: Request) {
       !Number.isSafeInteger(expectedTotalKobo) || expectedTotalKobo <= 0 ||
       !Number.isSafeInteger(gatewayAmountKobo) || gatewayAmountKobo < 0 ||
       new Set(productIds).size !== productIds.length ||
-      checkoutItems.length !== productIds.length ||
+      new Set(checkoutItems.map((i) => `${i.productId}::${i.variantKey}`)).size !== checkoutItems.length ||
+      new Set(checkoutItems.map((i) => i.productId)).size !== productIds.length ||
+      productIds.some((id) => !checkoutItems.some((i) => i.productId === id)) ||
       checkoutItems.some((i) => !i.productId || !Number.isSafeInteger(i.quantity) || i.quantity < 1 ||
         !Number.isSafeInteger(i.unitPriceKobo) || i.unitPriceKobo < 0)) {
     console.error('[webhook] payment integrity metadata mismatch', { reference });

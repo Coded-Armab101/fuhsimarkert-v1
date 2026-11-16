@@ -17,6 +17,7 @@ export type AdminTab =
   | 'withdrawals'
   | 'verifications'
   | 'fulfilment'
+  | 'broadcasts'
   | 'storage';
 
 export type AdminAlertLevel = 'danger' | 'warn' | 'info';

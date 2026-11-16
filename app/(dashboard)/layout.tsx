@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/utils/supabase/server';
+import BroadcastModal from '@/components/BroadcastModal';
 
 /**
  * Server-side auth gate for every dashboard route.
@@ -29,5 +30,10 @@ export default async function DashboardLayout({
     redirect('/login');
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      <BroadcastModal />
+    </>
+  );
 }

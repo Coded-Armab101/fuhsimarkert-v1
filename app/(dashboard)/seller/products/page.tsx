@@ -6,6 +6,7 @@ import { createClient } from '@/utils/supabase';
 import { formatNaira } from '@/utils/money';
 import { Package, Plus, Trash2, Pencil, Image as ImageIcon } from 'lucide-react';
 import { safeImageSrc } from '@/utils/safeImage';
+import { optionList } from '@/utils/variants';
 
 type Product = {
   id: string;
@@ -14,6 +15,8 @@ type Product = {
   price: number;
   image_url?: string | null;
   stock?: number | null;
+  sizes?: string[] | null;
+  colors?: string[] | null;
 };
 
 export default function SellerProductsPage() {
@@ -119,6 +122,20 @@ export default function SellerProductsPage() {
                 </div>
                 <h4 className="font-bold text-white text-sm line-clamp-1">{item.title}</h4>
                 <p className="text-xs text-neutral-400 line-clamp-2">{item.description}</p>
+                {(optionList(item.sizes).length > 0 || optionList(item.colors).length > 0) && (
+                  <div className="flex flex-wrap gap-1">
+                    {optionList(item.sizes).map((size) => (
+                      <span key={`size-${size}`} className="rounded-full border border-neutral-800 bg-neutral-900 px-2 py-0.5 text-[9px] font-bold text-neutral-400">
+                        Size {size}
+                      </span>
+                    ))}
+                    {optionList(item.colors).map((color) => (
+                      <span key={`color-${color}`} className="rounded-full border border-neutral-800 bg-neutral-900 px-2 py-0.5 text-[9px] font-bold text-neutral-400">
+                        {color}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="text-red-500 font-bold font-mono text-sm">₦{formatNaira(item.price)}</div>
               </div>
 

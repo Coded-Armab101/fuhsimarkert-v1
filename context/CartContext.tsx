@@ -3,6 +3,7 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/utils/supabase";
+import { cartLineKey, normalizeVariantKey } from "@/utils/variants";
 
 export interface CartItem {
   id: string;
@@ -14,6 +15,11 @@ export interface CartItem {
   seller_id?: string | null;
   unit?: string | null;
   delivery_fee_kobo?: number | null;
+  /** Per-product options chosen by the buyer. */
+  size?: string | null;
+  color?: string | null;
+  /** Canonical line identity: `size::color` (empty when no options). */
+  variant_key?: string | null;
 }
 
 export type AddToCartInput = Omit<CartItem, 'quantity'> & { quantity?: number };
@@ -132,23 +138,31 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
 
   const addToCart = (item: AddToCartInput) => {
     const qty = item.quantity || 1;
-    const existingIndex = cart.findIndex((i) => i.id === item.id);
+    const normalized: CartItem = {
+      ...item,
+      quantity: qty,
+      variant_key: normalizeVariantKey(item.size, item.color),
+    };
+    const lineKey = cartLineKey(normalized);
+    const existingIndex = cart.findIndex((i) => cartLineKey(i) === lineKey);
     if (existingIndex > -1) {
       const updated = [...cart];
       updated[existingIndex].quantity += qty;
       saveCart(updated);
     } else {
-      saveCart([...cart, { ...item, quantity: qty }]);
+      saveCart([...cart, normalized]);
     }
   };
 
   const removeFromCart = (id: string) => {
-    saveCart(cart.filter((item) => item.id !== id));
+    // `id` is the line key from cartLineKey(), not necessarily the product id:
+    // a product may appear twice with different sizes/colours.
+    saveCart(cart.filter((item) => cartLineKey(item) !== id));
   };
 
   const removeItems = (ids: string[]) => {
-    const updated = cart.filter((item) => !ids.includes(item.id));
-    saveCart(updated);
+    const removed = new Set(ids);
+    saveCart(cart.filter((item) => !removed.has(cartLineKey(item))));
   };
 
   const updateQuantity = (id: string, quantity: number) => {
@@ -157,27 +171,37 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
     const updated = cart.map((item) =>
-      item.id === id ? { ...item, quantity } : item
+      cartLineKey(item) === id ? { ...item, quantity } : item
     );
     saveCart(updated);
   };
 
   const decreaseQuantity = (id: string) => {
-    const item = cart.find((i) => i.id === id);
+    const item = cart.find((i) => cartLineKey(i) === id);
     if (item) {
       updateQuantity(id, item.quantity - 1);
     }
   };
 
   const addToCartOnce = (item: AddToCartInput) => {
-    const existing = cart.find((i) => i.id === item.id);
+    const normalized: CartItem = {
+      ...item,
+      quantity: 1,
+      variant_key: normalizeVariantKey(item.size, item.color),
+    };
+    const lineKey = cartLineKey(normalized);
+    const existing = cart.find((i) => cartLineKey(i) === lineKey);
     if (!existing) {
-      saveCart([...cart, { ...item, quantity: 1 }]);
+      saveCart([...cart, normalized]);
     }
   };
 
   const startBuyNow = (item: AddToCartInput) => {
-    const next = { ...item, quantity: item.quantity || 1 };
+    const next = {
+      ...item,
+      quantity: item.quantity || 1,
+      variant_key: normalizeVariantKey(item.size, item.color),
+    };
     setBuyNowItem(next);
     sessionStorage.setItem(BUY_NOW_KEY, JSON.stringify({
       ownerId: ownerRef.current ?? localStorage.getItem(CART_OWNER_KEY) ?? 'guest',
@@ -191,7 +215,7 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const getQuantity = (id: string) => {
-    const item = cart.find((i) => i.id === id);
+    const item = cart.find((i) => cartLineKey(i) === id);
     return item ? item.quantity : 0;
   };
 

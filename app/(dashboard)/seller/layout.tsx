@@ -7,6 +7,7 @@ import { LayoutDashboard, Package, ShoppingBag, Settings, Wallet, Clock, Trendin
 import OrderNotificationBell from '@/components/OrderNotificationBell';
 import { createClient } from '@/utils/supabase';
 import SellerVerificationGate, { type SellerGateProfile } from '../SellerVerificationGate';
+import OnboardingGuide from '@/components/OnboardingGuide';
 
 export default function SellerLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -146,6 +147,7 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
           })}
         </nav>
       )}
+      {!isPaywall && <OnboardingGuide role="seller" />}
     </div>
   );
 }

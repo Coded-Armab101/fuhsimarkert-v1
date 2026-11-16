@@ -24,11 +24,14 @@ import {
   Sun,
   Moon,
   Wallet,
+  Megaphone,
 } from 'lucide-react';
 import OverviewTab from './_components/OverviewTab';
 import MoneyTab from './_components/MoneyTab';
 import PeopleTab from './_components/PeopleTab';
 import type { AdminOverview, AdminTab } from '@/utils/admin/metrics';
+import { variantLabel } from '@/utils/variants';
+import BroadcastsTab from './_components/BroadcastsTab';
 
 type Withdrawal = {
   id: string;
@@ -75,6 +78,9 @@ type FulfilmentItem = {
   statusChangedAt: string | null;
   createdAt: string;
   slow: boolean;
+  size?: string | null;
+  color?: string | null;
+  variantKey?: string | null;
 };
 
 type FulfilmentGroup = {
@@ -364,6 +370,7 @@ setSLoading(false);
     { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={14} />, badge: dangerAlerts, danger: true },
     { id: 'money', label: 'Money', icon: <Wallet size={14} /> },
     { id: 'people', label: 'People', icon: <Users size={14} /> },
+    { id: 'broadcasts', label: 'Broadcasts', icon: <Megaphone size={14} /> },
     { id: 'withdrawals', label: 'Payouts', icon: <Banknote size={14} />, badge: pendingCount },
     { id: 'verifications', label: 'Verifications', icon: <IdCard size={14} />, badge: pendingVerifications },
     { id: 'fulfilment', label: 'Fulfilment', icon: <Package size={14} />, badge: slowSellerCount, danger: true },
@@ -506,6 +513,8 @@ setSLoading(false);
           />
         ) : tab === 'people' ? (
           <PeopleTab onOpenTab={setTab} refreshToken={refreshToken} />
+        ) : tab === 'broadcasts' ? (
+          <BroadcastsTab refreshToken={refreshToken} />
         ) : tab === 'withdrawals' ? (
         <div className="space-y-3">
           {wLoading ? (
@@ -686,6 +695,7 @@ setSLoading(false);
                           )}
                         </div>
                         <p className="text-[10px] text-neutral-500 font-mono truncate">
+                          {variantLabel(i.size, i.color) ? `${variantLabel(i.size, i.color)} · ` : ''}
                           {i.sellerName} · ₦{formatNaira(i.amountKobo)}
                           {i.deliveryFeeKobo > 0 ? ` + ₦${formatNaira(i.deliveryFeeKobo)} fee` : ''}
                         </p>

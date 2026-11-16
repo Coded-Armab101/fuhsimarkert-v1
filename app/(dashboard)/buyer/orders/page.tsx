@@ -10,6 +10,7 @@ import { formatNaira } from '@/utils/money';
 import DeliveryAnnouncement from '../DeliveryAnnouncement';
 import LeaveReview from '@/components/LeaveReview';
 import { safeImageSrc } from '@/utils/safeImage';
+import { variantLabel } from '@/utils/variants';
 
 type BuyerOrderRow = {
   id: string;
@@ -22,6 +23,9 @@ type BuyerOrderRow = {
   quantity: number;
   status: string;
   order_ref: string;
+  size?: string | null;
+  color?: string | null;
+  variant_key?: string | null;
   delivery_code?: string | null;
   delivery_type: string;
   receiver_name?: string | null;
@@ -153,6 +157,9 @@ async function fetchBuyerOrderGroups(
       quantity,
       status,
       order_ref,
+      size,
+      color,
+      variant_key,
       delivery_code,
       delivery_type,
       receiver_name,
@@ -187,6 +194,9 @@ async function fetchBuyerOrderGroups(
         quantity,
         status,
         order_ref,
+        size,
+        color,
+        variant_key,
         delivery_code,
         delivery_type,
         receiver_name,
@@ -657,6 +667,11 @@ export default function OrdersPage() {
                         )}
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-semibold text-[#251d18] truncate">{product?.title || 'Campus purchase'}</p>
+                          {variantLabel(item.size, item.color) && (
+                            <p className="mt-0.5 inline-flex rounded-full bg-[#f3eee8] px-2 py-0.5 text-[9px] font-bold text-[#6f625a]">
+                              {variantLabel(item.size, item.color)}
+                            </p>
+                          )}
                           <p className="text-[10px] font-mono text-[#81756d]">
                             {item.quantity > 1 ? `x${item.quantity} · ` : ''}₦{formatNaira(item.amount_kobo)}
                           </p>

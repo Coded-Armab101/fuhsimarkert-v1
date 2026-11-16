@@ -63,6 +63,9 @@ export async function GET() {
         quantity,
         status,
         order_ref,
+        size,
+        color,
+        variant_key,
         delivery_code,
         delivery_type,
         receiver_name,
@@ -106,6 +109,9 @@ export async function GET() {
       quantity: number;
       status: string;
       order_ref: string | null;
+      size?: string | null;
+      color?: string | null;
+      variant_key?: string | null;
       delivery_code: string | null;
       created_at: string | null;
       status_changed_at: string | null;
@@ -123,6 +129,9 @@ export async function GET() {
       statusChangedAt: string | null;
       createdAt: string;
       slow: boolean;
+      size: string | null;
+      color: string | null;
+      variantKey: string | null;
     };
     type GroupEntry = {
       order_ref: string;
@@ -159,6 +168,9 @@ export async function GET() {
         statusChangedAt: raw.status_changed_at,
         createdAt: raw.created_at || '',
         slow: isSlow(raw.status, raw.status_changed_at),
+        size: raw.size || null,
+        color: raw.color || null,
+        variantKey: raw.variant_key || null,
       });
       if (rank(raw.status) < rank(g.groupStatus)) g.groupStatus = raw.status;
     }

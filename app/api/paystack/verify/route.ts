@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
-import { recordOrder } from '@/utils/paystack/recordOrder';
+import { recordOrder, productEscrowRef } from '@/utils/paystack/recordOrder';
 import { buyerServiceFeeKobo } from '@/utils/pricing';
 
 function metadataText(value: unknown): string | null {
@@ -68,12 +68,22 @@ export async function GET(request: Request) {
     if (transaction.status === 'success') {
       const metadata = transactionMetadata;
       const productIds: string[] = Array.isArray(metadata.product_ids) ? metadata.product_ids : [];
-      type CheckoutItem = { productId: string; quantity: number; unitPriceKobo: number };
+      type CheckoutItem = {
+        productId: string;
+        variantKey: string;
+        size: string | null;
+        color: string | null;
+        quantity: number;
+        unitPriceKobo: number;
+      };
       const items: CheckoutItem[] = Array.isArray(metadata.checkout_items)
         ? metadata.checkout_items.map((raw: unknown): CheckoutItem => {
             const item = (raw ?? {}) as Record<string, unknown>;
             return {
               productId: String(item.product_id ?? item.productId ?? ''),
+              variantKey: typeof item.variant_key === 'string' ? item.variant_key : '',
+              size: typeof item.size === 'string' && item.size ? item.size : null,
+              color: typeof item.color === 'string' && item.color ? item.color : null,
               quantity: Number(item.quantity),
               unitPriceKobo: Number(item.unit_price_kobo ?? item.unitPriceKobo),
             };
@@ -100,17 +110,20 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'Payment amount could not be validated.' }, { status: 400 });
       }
 
-      const uniqueProductIds = new Set(productIds);
-      if (uniqueProductIds.size !== productIds.length ||
-          productIds.length !== items.length ||
-          productIds.some((id) => !items.some((i) => i.productId === id))) {
+      const lineKeys = items.map((item) => `${item.productId}::${item.variantKey}`);
+      const derivedProductIds = [...new Set(items.map((item) => item.productId))];
+      const metaProductIds = new Set(productIds);
+      if (metaProductIds.size !== productIds.length ||
+          metaProductIds.size !== derivedProductIds.length ||
+          derivedProductIds.some((id) => !metaProductIds.has(id)) ||
+          new Set(lineKeys).size !== items.length) {
         return NextResponse.json({ error: 'Invalid payment item set.' }, { status: 400 });
       }
 
       const recordInput = {
         buyerId: user.id,
         reference,
-        productIds,
+        productIds: derivedProductIds,
         items,
         deliveryType: metadata.delivery_type === 'delivery' ? 'delivery' as const : 'pickup' as const,
         deliveryFeeKobo,
@@ -165,21 +178,23 @@ export async function GET(request: Request) {
             const admin = createAdminClient();
             const { data: existingOrders, error: existingError } = await admin
               .from('orders')
-              .select('id, product_id')
+              .select('id, product_id, variant_key')
               .eq('order_ref', reference)
               .eq('buyer_id', user.id);
 
-            const recordedProducts = new Set(
-              (existingOrders || []).map((order) => order.product_id).filter(Boolean),
+            const recordedLines = new Set(
+              (existingOrders || [])
+                .map((order) => `${order.product_id}::${order.variant_key ?? ''}`)
+                .filter(Boolean),
             );
             const allOrdersExist =
               !existingError &&
-              existingOrders?.length === productIds.length &&
-              productIds.every((id) => recordedProducts.has(id));
+              existingOrders?.length === items.length &&
+              lineKeys.every((key) => recordedLines.has(key));
 
             if (allOrdersExist) {
               const expectedEscrowRefs = [
-                ...productIds.map((id) => `${reference}:P${id}`),
+                ...items.map((item) => productEscrowRef(reference, item.productId, item.variantKey)),
                 ...(deliveryFeeKobo > 0 ? [`${reference}:DELIVERY`] : []),
                 ...(expectedBuyerFeeKobo > 0 ? [`${reference}:FEES`] : []),
               ];

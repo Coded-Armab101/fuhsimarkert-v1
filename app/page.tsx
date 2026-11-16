@@ -29,6 +29,7 @@ import {
   X,
 } from 'lucide-react';
 import { safeImageSrc } from '@/utils/safeImage';
+import { hasProductOptions, optionList } from '@/utils/variants';
 
 type Product = {
   id: string;
@@ -44,6 +45,8 @@ type Product = {
   unit?: string | null;
   delivery_fee_kobo?: number | null;
   verified?: boolean | null;
+  sizes?: string[] | null;
+  colors?: string[] | null;
 };
 
 const isAvailable = (p: Product) =>
@@ -70,6 +73,7 @@ function ProductCard({
   const { addToCart, addToCartOnce, decreaseQuantity, getQuantity } = useCart();
   const quantity = getQuantity(product.id);
   const unavailable = !isAvailable(product);
+  const hasOptions = hasProductOptions(product);
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -170,7 +174,17 @@ function ProductCard({
           </p>
 
           {!unavailable &&
-            (quantity > 0 ? (
+            (hasOptions ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpen();
+                }}
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full border border-[#DE6437] py-2.5 text-[11px] font-bold text-[#C9511F] transition-colors hover:bg-[#FDF0EA]"
+              >
+                <span>Choose options</span>
+              </button>
+            ) : quantity > 0 ? (
               <div className="mt-2 flex items-center justify-between rounded-full bg-[#FDF0EA] px-2 py-1 text-xs font-bold text-[#DE6437]">
                 <button
                   onClick={handleDecrease}
@@ -215,6 +229,8 @@ export default function LandingPage() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
   const [selected, setSelected] = useState<Product | null>(null);
+  const [selectedSize, setSelectedSize] = useState('');
+  const [selectedColor, setSelectedColor] = useState('');
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [wishlistIds, setWishlistIds] = useState<Record<string, string>>({});
   // A fresh seed per visit keeps the catalogue from freezing into the same
@@ -402,13 +418,27 @@ export default function LandingPage() {
     }
   };
 
+  const openProduct = (product: Product) => {
+    // Do not silently choose the seller's first option. An explicit selection
+    // prevents accidental orders for the wrong size or colour.
+    setSelectedSize('');
+    setSelectedColor('');
+    setSelected(product);
+  };
+
+  const selectedSizes = optionList(selected?.sizes);
+  const selectedColors = optionList(selected?.colors);
+  const optionsReady =
+    (!selectedSizes.length || Boolean(selectedSize)) &&
+    (!selectedColors.length || Boolean(selectedColor));
+
   const handleBuyNowModal = () => {
     if (!user) {
       requireAuth();
       return;
     }
-    if (selected) {
-      startBuyNow(selected);
+    if (selected && optionsReady) {
+      startBuyNow({ ...selected, size: selectedSize || null, color: selectedColor || null });
       router.push('/buyer/cart?checkout=1&buyNow=1');
     }
   };
@@ -581,7 +611,7 @@ export default function LandingPage() {
                   product={p}
                   saved={!!wishlistIds[p.id]}
                   onSave={() => toggleWishlist(p.id)}
-                  onOpen={() => setSelected(p)}
+                  onOpen={() => openProduct(p)}
                   onRequireAuth={requireAuth}
                   userAuthenticated={!!user}
                 />
@@ -793,6 +823,55 @@ export default function LandingPage() {
               </div>
             </div>
 
+            {(selectedSizes.length > 0 || selectedColors.length > 0) && (
+              <div className="mt-4 space-y-3">
+                {selectedSizes.length > 0 && (
+                  <div>
+                    <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-[#81756D]">Size</p>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedSizes.map((size) => (
+                        <button
+                          key={size}
+                          type="button"
+                          onClick={() => setSelectedSize(size)}
+                          aria-pressed={selectedSize === size}
+                          className={`rounded-xl border px-3 py-2 text-xs font-bold transition-colors ${
+                            selectedSize === size
+                              ? 'border-[#DE6437] bg-[#FDF0EA] text-[#C9511F]'
+                              : 'border-[#ECE5DE] bg-white text-[#5F5650]'
+                          }`}
+                        >
+                          {size}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {selectedColors.length > 0 && (
+                  <div>
+                    <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-[#81756D]">Colour</p>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedColors.map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          onClick={() => setSelectedColor(color)}
+                          aria-pressed={selectedColor === color}
+                          className={`rounded-xl border px-3 py-2 text-xs font-bold transition-colors ${
+                            selectedColor === color
+                              ? 'border-[#DE6437] bg-[#FDF0EA] text-[#C9511F]'
+                              : 'border-[#ECE5DE] bg-white text-[#5F5650]'
+                          }`}
+                        >
+                          {color}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="mt-4 flex items-center gap-3">
               {!user ? (
                 <button
@@ -806,16 +885,23 @@ export default function LandingPage() {
                 <>
                   <button
                     onClick={() => {
-                      addToCartOnce(selected);
+                      if (!optionsReady) return;
+                      addToCartOnce({
+                        ...selected,
+                        size: selectedSize || null,
+                        color: selectedColor || null,
+                      });
                       setSelected(null);
                     }}
-                    className="flex-1 rounded-full bg-[#DE6437] py-3.5 text-sm font-bold text-white shadow-md transition-colors hover:bg-[#C9511F]"
+                    disabled={!isAvailable(selected) || !optionsReady}
+                    className="flex-1 rounded-full bg-[#DE6437] py-3.5 text-sm font-bold text-white shadow-md transition-colors hover:bg-[#C9511F] disabled:bg-[#CFC5BA]"
                   >
-                    Add to cart
+                    {!isAvailable(selected) ? 'Sold out' : optionsReady ? 'Add to cart' : 'Choose options'}
                   </button>
                   <button
                     onClick={handleBuyNowModal}
-                    className="flex-1 rounded-full bg-[#2C2C2C] py-3.5 text-sm font-bold text-white shadow-md transition-colors hover:bg-black"
+                    disabled={!isAvailable(selected) || !optionsReady}
+                    className="flex-1 rounded-full bg-[#2C2C2C] py-3.5 text-sm font-bold text-white shadow-md transition-colors hover:bg-black disabled:bg-[#CFC5BA]"
                   >
                     Buy now
                   </button>
