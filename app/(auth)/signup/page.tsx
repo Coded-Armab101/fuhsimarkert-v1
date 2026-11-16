@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { createClient } from '@/utils/supabase';
 import BrandLogo from '@/components/BrandLogo';
 import { User, Mail, Lock, Loader2, AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react';
+import { LEGAL_TERMS_VERSION } from '@/utils/legal';
 
 const GoogleIcon = ({ size = 16 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -36,6 +37,7 @@ export default function SignUpPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGoogle, setIsGoogle] = useState(false);
+  const [acceptedLegal, setAcceptedLegal] = useState(false);
   const [uiStatus, setUiStatus] = useState({ type: '', text: '' });
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -45,12 +47,20 @@ export default function SignUpPage() {
       setUiStatus({ type: 'error', text: 'Please fill out all required fields.' });
       return;
     }
+    if (!acceptedLegal) {
+      setUiStatus({
+        type: 'error',
+        text: 'Please agree to the Terms, Privacy, Refund and Escrow policies before creating an account.',
+      });
+      return;
+    }
 
     setIsSubmitting(true);
     setUiStatus({ type: '', text: '' });
 
     try {
       // Execute the signup request to Supabase Auth
+      const acceptedAt = new Date().toISOString();
       const { error } = await supabase.auth.signUp({
         email,
         password,
@@ -64,6 +74,8 @@ export default function SignUpPage() {
           // The user metadata maps directly to our public profile trigger!
           data: {
             full_name: fullName,
+            legal_accepted_at: acceptedAt,
+            legal_version: LEGAL_TERMS_VERSION,
           },
         },
       });
@@ -79,6 +91,7 @@ export default function SignUpPage() {
       setFullName('');
       setEmail('');
       setPassword('');
+      setAcceptedLegal(false);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'An error occurred during account registration.';
@@ -89,6 +102,13 @@ export default function SignUpPage() {
   };
 
   const handleGoogle = async () => {
+    if (!acceptedLegal) {
+      setUiStatus({
+        type: 'error',
+        text: 'Please agree to the Terms, Privacy, Refund and Escrow policies before continuing with Google.',
+      });
+      return;
+    }
     setIsGoogle(true);
     setUiStatus({ type: '', text: '' });
     try {
@@ -99,7 +119,7 @@ export default function SignUpPage() {
           // `/auth/callback` exchanges for a session cookie before landing the
           // user on `/buyer`. Redirecting straight to a protected route would
           // never exchange the code, so no session is created.
-          redirectTo: `${window.location.origin}/auth/callback?next=/buyer`,
+          redirectTo: `${window.location.origin}/auth/callback?next=/buyer&legal=${encodeURIComponent(LEGAL_TERMS_VERSION)}`,
         },
       });
       if (error) throw error;
@@ -189,6 +209,35 @@ export default function SignUpPage() {
               <p className="mt-1.5 text-[10px] text-[#A79C92]">At least 6 characters.</p>
             </div>
 
+            <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-[#E7E0D8] bg-[#FAFAFA] p-4 text-xs leading-relaxed text-[#5F5650] transition-colors hover:border-[#DE6437]/50">
+              <input
+                type="checkbox"
+                checked={acceptedLegal}
+                onChange={(event) => setAcceptedLegal(event.target.checked)}
+                required
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[#DE6437]"
+              />
+              <span>
+                I agree to the{' '}
+                <Link href="/terms" target="_blank" className="font-bold text-[#DE6437] hover:underline">
+                  Terms of Service
+                </Link>
+                ,{' '}
+                <Link href="/privacy" target="_blank" className="font-bold text-[#DE6437] hover:underline">
+                  Privacy Policy
+                </Link>
+                ,{' '}
+                <Link href="/refund-policy" target="_blank" className="font-bold text-[#DE6437] hover:underline">
+                  Refund Policy
+                </Link>{' '}
+                and{' '}
+                <Link href="/escrow-policy" target="_blank" className="font-bold text-[#DE6437] hover:underline">
+                  Escrow Policy
+                </Link>
+                .
+              </span>
+            </label>
+
             {uiStatus.text && (
               <div
                 className={`flex items-start gap-2 rounded-2xl p-4 text-sm ${
@@ -208,7 +257,7 @@ export default function SignUpPage() {
 
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !acceptedLegal}
               className="flex w-full items-center justify-center gap-2 rounded-full bg-[#DE6437] py-4 text-sm font-bold text-white shadow-[0_10px_24px_rgba(222,100,55,0.25)] transition-colors hover:bg-[#C9511F] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <span>Create account</span>}
@@ -227,7 +276,7 @@ export default function SignUpPage() {
           <button
             type="button"
             onClick={handleGoogle}
-            disabled={isGoogle}
+            disabled={isGoogle || !acceptedLegal}
             className="flex w-full items-center justify-center gap-2 rounded-full border border-[#E7E0D8] bg-white py-3.5 text-sm font-semibold text-[#2C2C2C] transition-colors hover:bg-[#FAFAFA] disabled:cursor-not-allowed disabled:opacity-70"
           >
             {isGoogle ? <Loader2 className="animate-spin" size={18} /> : <GoogleIcon />}
@@ -253,6 +302,14 @@ export default function SignUpPage() {
           <span className="mx-2">·</span>
           <Link href="/privacy" className="hover:text-[#DE6437]">
             Privacy
+          </Link>
+          <span className="mx-2">·</span>
+          <Link href="/refund-policy" className="hover:text-[#DE6437]">
+            Refunds
+          </Link>
+          <span className="mx-2">·</span>
+          <Link href="/escrow-policy" className="hover:text-[#DE6437]">
+            Escrow
           </Link>
         </p>
       </div>

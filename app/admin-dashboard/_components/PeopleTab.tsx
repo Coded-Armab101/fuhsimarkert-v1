@@ -10,6 +10,8 @@ import {
   ShieldCheck,
   Store,
   TriangleAlert,
+  UserCheck,
+  UserX,
   Users,
   Wallet,
 } from 'lucide-react';
@@ -23,23 +25,26 @@ import {
   PanelHeader,
   StatusPill,
 } from './ui';
+import { useNotifications } from '@/components/NotificationProvider';
 
 type Props = {
   onOpenTab: (tab: AdminTab) => void;
   refreshToken: number;
 };
 
-type Filter = 'all' | 'buyers' | 'sellers' | 'pending' | 'admins';
+type Filter = 'all' | 'buyers' | 'sellers' | 'pending' | 'suspended' | 'admins';
 
 const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: 'all', label: 'Everyone' },
   { id: 'buyers', label: 'Buyers' },
   { id: 'sellers', label: 'Sellers' },
   { id: 'pending', label: 'Pending review' },
+  { id: 'suspended', label: 'Suspended' },
   { id: 'admins', label: 'Admins' },
 ];
 
 export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
+  const { notify } = useNotifications();
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -47,6 +52,9 @@ export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [reloadKey, setReloadKey] = useState(0);
+  const [moderationTarget, setModerationTarget] = useState<AdminUserRow | null>(null);
+  const [moderationReason, setModerationReason] = useState('');
+  const [savingModeration, setSavingModeration] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -82,6 +90,7 @@ export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
       if (filter === 'buyers') return user.persona === 'buyer' && !user.isSeller;
       if (filter === 'sellers') return user.isSeller;
       if (filter === 'pending') return user.verificationStatus === 'pending';
+      if (filter === 'suspended') return user.isSuspended;
       if (filter === 'admins') return user.isAdmin;
       return true;
     });
@@ -93,8 +102,51 @@ export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
       approved: users.filter((user) => user.isApprovedSeller).length,
       pending: users.filter((user) => user.verificationStatus === 'pending').length,
       wallet: users.reduce((sum, user) => sum + user.walletKobo, 0),
+      suspended: users.filter((user) => user.isSuspended).length,
     };
   }, [users]);
+
+  const openModeration = (user: AdminUserRow) => {
+    setModerationTarget(user);
+    setModerationReason('');
+  };
+
+  const saveModeration = async () => {
+    if (!moderationTarget) return;
+    if (moderationReason.trim().length < 5) {
+      notify('Enter a clear reason of at least 5 characters.', { tone: 'warning' });
+      return;
+    }
+
+    const action = moderationTarget.isSuspended ? 'restore' : 'suspend';
+    setSavingModeration(true);
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: moderationTarget.id,
+          action,
+          reason: moderationReason.trim(),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Could not update this account.');
+      notify(
+        action === 'suspend'
+          ? `${moderationTarget.fullName} has been suspended.`
+          : `${moderationTarget.fullName} has been restored.`,
+        { tone: 'success' },
+      );
+      setModerationTarget(null);
+      setModerationReason('');
+      setReloadKey((key) => key + 1);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not update this account.', { tone: 'error' });
+    } finally {
+      setSavingModeration(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -102,7 +154,7 @@ export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
         {[
           { label: 'People shown', value: filtered.length.toLocaleString(), hint: `${total} matching profiles`, icon: <Users size={15} /> },
           { label: 'Sellers', value: summary.sellers.toLocaleString(), hint: `${summary.approved} approved`, icon: <Store size={15} /> },
-          { label: 'Pending review', value: summary.pending.toLocaleString(), hint: 'verification submissions', icon: <ShieldCheck size={15} /> },
+          { label: 'Pending review', value: summary.pending.toLocaleString(), hint: `${summary.suspended} account${summary.suspended === 1 ? '' : 's'} suspended`, icon: <ShieldCheck size={15} /> },
           { label: 'Wallet float', value: compactNaira(summary.wallet), hint: 'balances in these accounts', icon: <Wallet size={15} /> },
         ].map((item) => (
           <div key={item.label} className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
@@ -209,6 +261,7 @@ export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
                         <p className="truncate text-xs font-bold text-white">{user.fullName}</p>
                         {user.isAdmin ? <StatusPill status="admin" /> : null}
                         <StatusPill status={user.isSeller ? 'seller' : 'buyer'} />
+                        {user.isSuspended ? <StatusPill status="suspended" /> : null}
                         {verification ? <StatusPill status={verification} /> : null}
                       </div>
                       <p className="mt-0.5 truncate font-mono text-[9px] text-neutral-600">
@@ -238,26 +291,39 @@ export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
                     </p>
                   </div>
 
-                  <div className="flex justify-start md:justify-end">
-                    {user.verificationStatus === 'pending' ? (
+                  <div className="flex flex-wrap justify-start gap-1.5 md:justify-end">
+                    {user.verificationStatus === 'pending' && !user.isSuspended ? (
                       <button
                         onClick={() => onOpenTab('verifications')}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[10px] font-bold text-amber-300 transition-colors hover:bg-amber-500/20"
                       >
                         Review <ArrowRight size={11} />
                       </button>
-                    ) : user.isSeller ? (
+                    ) : user.isSeller && !user.isSuspended ? (
                       <button
                         onClick={() => onOpenTab('storage')}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-bold text-neutral-300 transition-colors hover:bg-white/10 hover:text-white"
                       >
                         Storage <ArrowRight size={11} />
                       </button>
-                    ) : (
+                    ) : !user.isSuspended ? (
                       <span className="inline-flex items-center gap-1 text-[10px] font-mono text-neutral-600">
                         <CheckCircle2 size={11} /> active
                       </span>
-                    )}
+                    ) : null}
+                    {!user.isAdmin ? (
+                      <button
+                        onClick={() => openModeration(user)}
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-bold transition-colors ${
+                          user.isSuspended
+                            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                            : 'border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20'
+                        }`}
+                      >
+                        {user.isSuspended ? <UserCheck size={11} /> : <UserX size={11} />}
+                        {user.isSuspended ? 'Restore' : 'Suspend'}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               );
@@ -271,6 +337,66 @@ export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
           </p>
         ) : null}
       </Panel>
+
+      {moderationTarget ? (
+        <div className="fixed inset-0 z-[110] grid place-items-center bg-black/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-neutral-950 p-6 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl ${moderationTarget.isSuspended ? 'bg-emerald-500/10 text-emerald-300' : 'bg-red-500/10 text-red-300'}`}>
+                {moderationTarget.isSuspended ? <UserCheck size={20} /> : <UserX size={20} />}
+              </div>
+              <div>
+                <h2 className="text-base font-black text-white">
+                  {moderationTarget.isSuspended ? 'Restore account' : 'Suspend account'}
+                </h2>
+                <p className="mt-1 text-xs leading-relaxed text-neutral-400">
+                  {moderationTarget.isSuspended
+                    ? `Restore access for ${moderationTarget.fullName}. The reason is kept in the moderation audit history.`
+                    : `Block ${moderationTarget.fullName} from signing in or using buyer/seller tools while illegal activity is investigated.`}
+                </p>
+              </div>
+            </div>
+
+            {moderationTarget.isSuspended && moderationTarget.suspensionReason ? (
+              <p className="mt-4 rounded-xl border border-red-500/20 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-200">
+                Current reason: {moderationTarget.suspensionReason}
+              </p>
+            ) : null}
+
+            <label className="mt-5 block text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+              {moderationTarget.isSuspended ? 'Reason for restoring' : 'Reason and evidence summary'}
+              <textarea
+                value={moderationReason}
+                onChange={(event) => setModerationReason(event.target.value)}
+                maxLength={500}
+                rows={4}
+                placeholder={moderationTarget.isSuspended ? 'e.g. Investigation completed; account cleared' : 'e.g. Confirmed prohibited-item listing and off-platform fraud attempt'}
+                className="mt-2 w-full resize-none rounded-xl border border-white/10 bg-neutral-900 px-3 py-2.5 text-xs normal-case tracking-normal text-white outline-none focus:border-[#DE6437]"
+              />
+            </label>
+
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setModerationTarget(null)}
+                disabled={savingModeration}
+                className="rounded-xl border border-white/10 bg-white/5 py-3 text-xs font-bold text-neutral-300 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveModeration}
+                disabled={savingModeration}
+                className={`inline-flex items-center justify-center gap-2 rounded-xl py-3 text-xs font-bold text-white disabled:opacity-50 ${moderationTarget.isSuspended ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-red-600 hover:bg-red-500'}`}
+              >
+                {savingModeration ? <Loader2 size={13} className="animate-spin" /> : moderationTarget.isSuspended ? <UserCheck size={13} /> : <UserX size={13} />}
+                {savingModeration ? 'Saving…' : moderationTarget.isSuspended ? 'Restore access' : 'Suspend access'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

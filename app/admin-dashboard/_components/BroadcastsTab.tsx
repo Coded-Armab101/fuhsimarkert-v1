@@ -13,6 +13,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { useNotifications } from '@/components/NotificationProvider';
 
 type Audience = 'all' | 'buyers' | 'sellers';
 type BroadcastStatus = 'draft' | 'scheduled' | 'live' | 'ended';
@@ -57,6 +58,7 @@ function freshStart(): string {
 }
 
 export default function BroadcastsTab({ refreshToken = 0 }: { refreshToken?: number }) {
+  const { confirm } = useNotifications();
   const [rows, setRows] = useState<BroadcastRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -180,7 +182,13 @@ export default function BroadcastsTab({ refreshToken = 0 }: { refreshToken?: num
   };
 
   const remove = async (row: BroadcastRow) => {
-    if (!window.confirm(`Delete “${row.title}”? This cannot be undone.`)) return;
+    const accepted = await confirm({
+      title: 'Delete announcement?',
+      message: `Delete “${row.title}”? This cannot be undone.`,
+      confirmLabel: 'Delete announcement',
+      tone: 'danger',
+    });
+    if (!accepted) return;
     setActingId(row.id);
     setError(null);
     setSuccess(null);

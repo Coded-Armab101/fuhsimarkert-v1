@@ -51,6 +51,7 @@ export type AdminOverview = {
     pendingSellers: number;
     rejectedSellers: number;
     admins: number;
+    suspended: number;
     activeSubscriptions: number;
   };
   orders: {
@@ -120,6 +121,9 @@ export type AdminUserRow = {
   isApprovedSeller: boolean;
   verificationStatus: string | null;
   isAdmin: boolean;
+  isSuspended: boolean;
+  suspensionReason: string | null;
+  suspendedAt: string | null;
   createdAt: string;
   walletKobo: number;
   buyerOrders: number;
@@ -136,6 +140,9 @@ type ProfileRow = {
   is_approved_seller: boolean | null;
   verification_status: string | null;
   is_admin: boolean | null;
+  is_suspended?: boolean | null;
+  suspension_reason?: string | null;
+  suspended_at?: string | null;
   /**
    * Not every deployment has a timestamp on `profiles` (the original schema
    * only guaranteed `updated_at`), so this is optional and only used as a
@@ -636,6 +643,7 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
         (profile) => profile.verification_status === 'rejected',
       ).length,
       admins: profiles.filter((profile) => profile.is_admin === true).length,
+      suspended: profiles.filter((profile) => profile.is_suspended === true).length,
       activeSubscriptions: activeSubscriptionUsers.size,
     },
     orders: {
@@ -757,6 +765,9 @@ export async function loadAdminUsers(
       isApprovedSeller: profile.is_approved_seller === true,
       verificationStatus: profile.verification_status,
       isAdmin: profile.is_admin === true,
+      isSuspended: profile.is_suspended === true,
+      suspensionReason: profile.suspension_reason || null,
+      suspendedAt: profile.suspended_at || null,
       createdAt: joinedAt,
       walletKobo: walletByUser.get(profile.id) ?? 0,
       buyerOrders: buyerRefs.get(profile.id)?.size ?? 0,

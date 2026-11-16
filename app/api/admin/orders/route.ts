@@ -73,6 +73,11 @@ export async function GET() {
         matric_number,
         created_at,
         status_changed_at,
+        dispute_reason,
+        dispute_opened_at,
+        return_required,
+        return_received_at,
+        return_confirmation_source,
         products ( id, title, image_url )
       `)
       .order('created_at', { ascending: false })
@@ -115,6 +120,11 @@ export async function GET() {
       delivery_code: string | null;
       created_at: string | null;
       status_changed_at: string | null;
+      dispute_reason?: string | null;
+      dispute_opened_at?: string | null;
+      return_required?: boolean | null;
+      return_received_at?: string | null;
+      return_confirmation_source?: string | null;
       products?: { id: string; title: string; image_url?: string | null }[] | null;
     };
     type SellerEntry = {
@@ -132,6 +142,11 @@ export async function GET() {
       size: string | null;
       color: string | null;
       variantKey: string | null;
+      disputeReason: string | null;
+      disputeOpenedAt: string | null;
+      returnRequired: boolean;
+      returnReceivedAt: string | null;
+      returnConfirmationSource: string | null;
     };
     type GroupEntry = {
       order_ref: string;
@@ -171,6 +186,11 @@ export async function GET() {
         size: raw.size || null,
         color: raw.color || null,
         variantKey: raw.variant_key || null,
+        disputeReason: raw.dispute_reason || null,
+        disputeOpenedAt: raw.dispute_opened_at || null,
+        returnRequired: raw.return_required === true,
+        returnReceivedAt: raw.return_received_at || null,
+        returnConfirmationSource: raw.return_confirmation_source || null,
       });
       if (rank(raw.status) < rank(g.groupStatus)) g.groupStatus = raw.status;
     }
@@ -183,6 +203,89 @@ export async function GET() {
   } catch (err) {
     console.error('[admin/orders] failed', err);
     return NextResponse.json({ error: 'Could not load orders.' }, { status: 500 });
+  }
+}
+
+/** Administrator return override after reviewing offline handover evidence. */
+export async function POST(request: Request) {
+  try {
+    let body: { action?: unknown; orderId?: unknown; reason?: unknown };
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Malformed order action.' }, { status: 400 });
+    }
+    const action = String(body.action ?? '');
+    const orderId = String(body.orderId ?? '').trim();
+    const reason = String(body.reason ?? '').trim().slice(0, 500);
+    if (action !== 'confirm_return' || !orderId || reason.length < 10) {
+      return NextResponse.json({
+        error: 'A return override requires an order and an evidence note of at least 10 characters.',
+      }, { status: 400 });
+    }
+
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+    }
+
+    const admin = createAdminClient();
+    const { data: adminProfile } = await admin
+      .from('profiles')
+      .select('is_admin')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (adminProfile?.is_admin !== true) {
+      return NextResponse.json({ error: 'Forbidden.' }, { status: 403 });
+    }
+
+    const { data: order, error: orderError } = await admin
+      .from('orders')
+      .select('id, seller_id, buyer_id, status, return_required, return_received_at')
+      .eq('id', orderId)
+      .maybeSingle();
+    if (orderError) throw orderError;
+    if (!order) return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
+    if (order.status !== 'disputed' || order.return_required !== true) {
+      return NextResponse.json({ error: 'This order is not awaiting a return.' }, { status: 409 });
+    }
+
+    const { data: confirmed, error: confirmError } = await admin.rpc('confirm_order_return', {
+      p_order_id: order.id,
+      p_seller_id: order.seller_id,
+      p_confirmed_by: user.id,
+      p_source: 'admin',
+    });
+    if (confirmError) throw confirmError;
+    if (confirmed !== true) {
+      return NextResponse.json({ error: 'The return could not be confirmed.' }, { status: 409 });
+    }
+
+    const { error: eventError } = await admin.from('order_dispute_events').insert({
+      order_id: order.id,
+      actor_id: user.id,
+      actor_role: 'admin',
+      event_type: 'return_overridden',
+      note: reason,
+    });
+    if (eventError) console.error('[admin/orders] return override audit failed', eventError);
+
+    await admin.from('notifications').upsert({
+      user_id: order.buyer_id,
+      order_id: order.id,
+      type: 'order_return_received',
+      title: 'Return confirmed by support',
+      message: 'An administrator verified the return evidence. Open the disputed order to continue the protected refund.',
+    }, {
+      onConflict: 'user_id,order_id,type',
+      ignoreDuplicates: true,
+    });
+
+    return NextResponse.json({ ok: true, returnReceivedAt: new Date().toISOString() });
+  } catch (error) {
+    console.error('[admin/orders] action failed', error);
+    return NextResponse.json({ error: 'Could not update the disputed return.' }, { status: 500 });
   }
 }
 

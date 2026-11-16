@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createClient } from '@/utils/supabase/server';
+import { createAdminClient } from '@/utils/supabase/admin';
+import { LEGAL_TERMS_VERSION } from '@/utils/legal';
 import {
   SESSION_NONCE_COOKIE,
   SESSION_NONCE_COOKIE_MAX_AGE,
@@ -20,7 +22,11 @@ import {
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get('code');
-  const next = searchParams.get('next') ?? '/buyer';
+  const requestedNext = searchParams.get('next') ?? '/buyer';
+  const next = requestedNext.startsWith('/') && !requestedNext.startsWith('//')
+    ? requestedNext
+    : '/buyer';
+  const legalAccepted = searchParams.get('legal') === LEGAL_TERMS_VERSION;
 
   if (!code) {
     return NextResponse.redirect(new URL('/login?error=oauth_missing_code', request.nextUrl.origin));
@@ -52,8 +58,9 @@ export async function GET(request: NextRequest) {
   }
 
   if (user) {
+    const admin = createAdminClient();
     // Auto-create default buyer profile for first-time Google sign-ups/logins
-    const { data: existingProfile } = await supabase
+    const { data: existingProfile } = await admin
       .from('profiles')
       .select('id, user_persona')
       .eq('id', user.id)
@@ -66,16 +73,32 @@ export async function GET(request: NextRequest) {
         user.email?.split('@')[0] ||
         'Campus Student';
 
-      await supabase.from('profiles').upsert(
+      await admin.from('profiles').upsert(
         {
           id: user.id,
           full_name: fullName,
           user_persona: 'buyer',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
+          ...(legalAccepted
+            ? {
+                legal_accepted_at: new Date().toISOString(),
+                legal_version: LEGAL_TERMS_VERSION,
+              }
+            : {}),
         },
         { onConflict: 'id' },
       );
+    } else if (legalAccepted) {
+      // A returning OAuth user may have started from the sign-up screen. Keep
+      // the explicit acceptance as an auditable profile record as well.
+      await admin
+        .from('profiles')
+        .update({
+          legal_accepted_at: new Date().toISOString(),
+          legal_version: LEGAL_TERMS_VERSION,
+        })
+        .eq('id', user.id);
     }
 
     const nonce = await rotateSessionNonce(supabase, user.id);

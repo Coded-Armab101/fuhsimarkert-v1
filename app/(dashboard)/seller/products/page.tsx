@@ -7,6 +7,7 @@ import { formatNaira } from '@/utils/money';
 import { Package, Plus, Trash2, Pencil, Image as ImageIcon } from 'lucide-react';
 import { safeImageSrc } from '@/utils/safeImage';
 import { optionList } from '@/utils/variants';
+import { useNotifications } from '@/components/NotificationProvider';
 
 type Product = {
   id: string;
@@ -22,6 +23,7 @@ type Product = {
 export default function SellerProductsPage() {
   const router = useRouter();
   const supabase = createClient();
+  const { notify, confirm } = useNotifications();
 
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
@@ -53,13 +55,19 @@ export default function SellerProductsPage() {
   }, [router, supabase]);
 
   const handleDeleteProduct = async (productId: string) => {
-    if (!confirm('Are you sure you want to delete this listing?')) return;
+    const accepted = await confirm({
+      title: 'Delete this listing?',
+      message: 'This removes the product from your inventory. Existing order records are kept.',
+      confirmLabel: 'Delete listing',
+      tone: 'danger',
+    });
+    if (!accepted) return;
 
     const { error } = await supabase.from('products').delete().eq('id', productId);
     if (!error) {
       setProducts((prev) => prev.filter((p) => p.id !== productId));
     } else {
-      alert('Failed to delete product.');
+      notify('Failed to delete product.', { tone: 'error' });
     }
   };
 

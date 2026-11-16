@@ -709,6 +709,12 @@ export default function LandingPage() {
             <Link href="/privacy" className="hover:text-[#DE6437]">
               Privacy
             </Link>
+            <Link href="/refund-policy" className="hover:text-[#DE6437]">
+              Refunds
+            </Link>
+            <Link href="/escrow-policy" className="hover:text-[#DE6437]">
+              Escrow
+            </Link>
             <Link href="/marketplace" className="hover:text-[#DE6437]">
               Marketplace
             </Link>

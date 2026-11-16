@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes, ChevronDown, ChevronUp, RefreshCw, Clock } from 'lucide-react';
+import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes, ChevronDown, ChevronUp, RefreshCw, Clock, X } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { useCart } from '@/context/CartContext';
@@ -11,6 +11,7 @@ import DeliveryAnnouncement from '../DeliveryAnnouncement';
 import LeaveReview from '@/components/LeaveReview';
 import { safeImageSrc } from '@/utils/safeImage';
 import { variantLabel } from '@/utils/variants';
+import { useNotifications } from '@/components/NotificationProvider';
 
 type BuyerOrderRow = {
   id: string;
@@ -37,6 +38,10 @@ type BuyerOrderRow = {
   refunded_at?: string | null;
   refund_method?: string | null;
   refund_card_kobo?: number | null;
+  dispute_reason?: string | null;
+  dispute_opened_at?: string | null;
+  return_required?: boolean | null;
+  return_received_at?: string | null;
   products?: { id: string; title: string; image_url?: string | null }[] | { id: string; title: string; image_url?: string | null } | null;
 };
 
@@ -64,6 +69,9 @@ type OrderGroup = {
   refunded: boolean;
   refundMethod: string | null;
   refundCardKobo: number;
+  disputeReason: string | null;
+  returnRequired: boolean;
+  pendingReturnCount: number;
 };
 
 const TRACK_STEPS = ['in_escrow', 'packing', 'ready_for_pickup', 'confirmed', 'completed'];
@@ -171,6 +179,10 @@ async function fetchBuyerOrderGroups(
       refunded_at,
       refund_method,
       refund_card_kobo,
+      dispute_reason,
+      dispute_opened_at,
+      return_required,
+      return_received_at,
       products:product_id ( id, title, image_url )
     `)
     .eq('buyer_id', user.id)
@@ -204,7 +216,14 @@ async function fetchBuyerOrderGroups(
         matric_number,
         delivery_address,
         meetup_location,
-        created_at
+        created_at,
+        refunded_at,
+        refund_method,
+        refund_card_kobo,
+        dispute_reason,
+        dispute_opened_at,
+        return_required,
+        return_received_at
       `)
       .eq('buyer_id', user.id)
       .order('created_at', { ascending: false });
@@ -261,6 +280,9 @@ async function fetchBuyerOrderGroups(
         refunded: Boolean(row.refunded_at),
         refundMethod: row.refund_method ?? null,
         refundCardKobo: Number(row.refund_card_kobo) || 0,
+        disputeReason: row.dispute_reason ?? null,
+        returnRequired: row.return_required === true,
+        pendingReturnCount: row.return_required === true && !row.return_received_at ? 1 : 0,
       });
     } else {
       existing.items.push(row);
@@ -275,6 +297,11 @@ async function fetchBuyerOrderGroups(
         existing.refundCardKobo,
         Number(row.refund_card_kobo) || 0,
       );
+      existing.disputeReason = existing.disputeReason || row.dispute_reason || null;
+      existing.returnRequired = existing.returnRequired || row.return_required === true;
+      if (row.return_required === true && !row.return_received_at) {
+        existing.pendingReturnCount += 1;
+      }
       // The group only advances to a stage once EVERY seller's item has
       // reached it. Whichever seller is furthest behind sets the tracker.
       const rank = (s: string) => TRACK_STEPS.indexOf(s);
@@ -300,12 +327,16 @@ async function fetchBuyerOrderGroups(
 export default function OrdersPage() {
   const supabase = createClient();
   const { clearCart, clearBuyNow } = useCart();
+  const { notify } = useNotifications();
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<OrderGroup[]>([]);
   const [updatingRef, setUpdatingRef] = useState<string | null>(null);
   const [refundingRef, setRefundingRef] = useState<string | null>(null);
   const [paymentNotice, setPaymentNotice] = useState<{ kind: 'success' | 'error'; message: string; retry?: boolean } | null>(null);
   const [expandedRefs, setExpandedRefs] = useState<Record<string, boolean>>({});
+  const [disputeTarget, setDisputeTarget] = useState<OrderGroup | null>(null);
+  const [disputeReason, setDisputeReason] = useState('');
+  const [returnRequired, setReturnRequired] = useState(false);
 
   const toggleExpand = (ref: string) => {
     setExpandedRefs((prev) => ({
@@ -439,32 +470,58 @@ export default function OrdersPage() {
           const data = await res.json();
           if (data?.error) message = data.error;
         } catch { /* fall through */ }
-        alert(message);
+        notify(message, { tone: 'error' });
       }
     } catch (err) {
       console.error('Confirm order error:', err);
-      alert('Could not confirm this order. Please try again.');
+      notify('Could not confirm this order. Please try again.', { tone: 'error' });
     } finally {
       setUpdatingRef(null);
     }
   };
 
-  const handleGroupRefund = async (group: OrderGroup) => {
-    const ok = window.confirm(
-      'Report a problem with this order and request a refund?\n\nIf you paid by card, the card portion is refunded to your card; any wallet portion returns to your FuhsiMarket wallet. The whole order will be cancelled.',
-    );
-    if (!ok) return;
-
+  const handleGroupRefund = async (
+    group: OrderGroup,
+    reason = '',
+    buyerHasItem = false,
+  ) => {
     setRefundingRef(group.order_ref);
     try {
       const res = await fetch('/api/orders/dispute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderRef: group.order_ref }),
+        body: JSON.stringify({
+          orderRef: group.order_ref,
+          reason,
+          returnRequired: buyerHasItem,
+        }),
       });
       const data = await res.json().catch(() => ({}));
 
       if (res.ok && data?.ok) {
+        if (data.awaitingReturn) {
+          setGroups((prev) =>
+            prev.map((g) =>
+              g.order_ref === group.order_ref
+                ? {
+                    ...g,
+                    status: 'disputed',
+                    disputeReason: reason || g.disputeReason,
+                    returnRequired: true,
+                    pendingReturnCount: Math.max(g.items.length, 1),
+                  }
+                : g,
+            ),
+          );
+          setPaymentNotice({
+            kind: 'success',
+            message: 'Dispute opened. Escrow is frozen. Return the item, then each affected seller must confirm it is back before the refund can finish.',
+          });
+          setDisputeTarget(null);
+          setDisputeReason('');
+          setReturnRequired(false);
+          return;
+        }
         setGroups((prev) =>
           prev.map((g) =>
             g.order_ref === group.order_ref
@@ -485,18 +542,30 @@ export default function OrdersPage() {
               ? 'Refund started. The card portion is on its way and any wallet portion is already in your wallet.'
               : 'Refund complete. The full amount is now in your FuhsiMarket wallet.',
         });
+        setDisputeTarget(null);
+        setDisputeReason('');
+        setReturnRequired(false);
       } else if (res.status === 409) {
-        alert(data?.error || 'This order has already been settled and cannot be refunded.');
+        notify(data?.error || 'This order has already been settled and cannot be refunded.', { tone: 'error' });
         setRefreshToken((n) => n + 1);
       } else {
-        alert(data?.error || 'Could not start the refund. Please try again.');
+        notify(data?.error || 'Could not start the refund. Please try again.', { tone: 'error' });
       }
     } catch (err) {
       console.error('Refund request error:', err);
-      alert('Could not reach the server to refund this order. Please try again.');
+      notify('Could not reach the server to refund this order. Please try again.', { tone: 'error' });
     } finally {
       setRefundingRef(null);
     }
+  };
+
+  const submitDispute = () => {
+    if (!disputeTarget) return;
+    if (disputeReason.trim().length < 10) {
+      notify('Describe the problem in at least 10 characters.', { tone: 'warning' });
+      return;
+    }
+    void handleGroupRefund(disputeTarget, disputeReason.trim(), returnRequired);
   };
 
   if (loading) {
@@ -578,7 +647,8 @@ export default function OrdersPage() {
             const isDisputed = group.status === 'disputed';
             const isRefunded = group.refunded;
             const canConfirm = group.status === 'ready_for_pickup';
-            const canRefund = !isRefunded && ['in_escrow', 'packing', 'ready_for_pickup', 'confirmed', 'delivered', 'disputed'].includes(group.status);
+            const waitingForReturn = isDisputed && group.returnRequired && group.pendingReturnCount > 0;
+            const canRefund = !isRefunded && !waitingForReturn && ['in_escrow', 'packing', 'ready_for_pickup', 'confirmed', 'delivered', 'disputed'].includes(group.status);
             const isTerminal = ['completed', 'confirmed', 'delivered', 'cancelled', 'rejected'].includes(group.status);
             const open = isExpanded(group.order_ref);
             const productNames = group.items
@@ -770,9 +840,43 @@ export default function OrdersPage() {
                     })}
                   </div>
                 )}
+                {waitingForReturn ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
+                    <div className="flex items-start gap-2">
+                      <Clock size={16} className="mt-0.5 shrink-0" />
+                      <div className="flex-1">
+                        <p className="font-bold">Waiting for returned-item confirmation</p>
+                        <p className="mt-1 leading-relaxed">
+                          Return the disputed item to the seller. {group.pendingReturnCount} seller confirmation{group.pendingReturnCount === 1 ? ' is' : 's are'} still outstanding. Escrow remains frozen and no refund is released twice.
+                        </p>
+                        {group.disputeReason ? <p className="mt-2 text-[11px] opacity-75">Your report: “{group.disputeReason}”</p> : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setRefreshToken((value) => value + 1)}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-300 px-2.5 py-1.5 text-[10px] font-bold"
+                      >
+                        <RefreshCw size={11} /> Refresh
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                {isDisputed && group.returnRequired && group.pendingReturnCount === 0 && !isRefunded ? (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-center text-xs font-medium text-emerald-800">
+                    <CheckCircle2 size={15} className="mr-1 inline" /> Seller return confirmation received. Your protected refund can now be completed.
+                  </div>
+                ) : null}
                 {canRefund && (
                   <button
-                    onClick={() => handleGroupRefund(group)}
+                    onClick={() => {
+                      if (isDisputed) {
+                        void handleGroupRefund(group);
+                      } else {
+                        setDisputeTarget(group);
+                        setDisputeReason('');
+                        setReturnRequired(false);
+                      }
+                    }}
                     disabled={refundingRef === group.order_ref}
                     className="w-full border border-[#ffd9c4] bg-[#fff7f2] hover:bg-[#fff0e9] text-[#b04a27] font-bold text-xs py-3 rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 disabled:opacity-60"
                   >
@@ -780,7 +884,9 @@ export default function OrdersPage() {
                     {refundingRef === group.order_ref
                       ? 'Checking refund…'
                       : isDisputed
-                        ? 'Retry refund safely'
+                        ? group.returnRequired
+                          ? 'Complete protected refund'
+                          : 'Retry refund safely'
                         : 'Report a problem / Request refund'}
                   </button>
                 )}
@@ -804,6 +910,81 @@ export default function OrdersPage() {
           })}
         </div>
       )}
+
+      {disputeTarget ? (
+        <div className="fixed inset-0 z-[105] grid place-items-center bg-[#251d18]/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-[1.75rem] border border-[#ECE5DE] bg-white p-6 text-[#251d18] shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#DE6437]">Protected dispute</p>
+                <h2 className="mt-1 text-lg font-black">Report an order problem</h2>
+                <p className="mt-1 text-xs leading-relaxed text-[#81756D]">
+                  Escrow will be frozen while the report and any required return are completed.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDisputeTarget(null)}
+                disabled={refundingRef === disputeTarget.order_ref}
+                aria-label="Close dispute form"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#FAF6F2] text-[#81756D]"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <label className="mt-5 block text-[11px] font-bold text-[#5F5650]">
+              What went wrong?
+              <textarea
+                value={disputeReason}
+                onChange={(event) => setDisputeReason(event.target.value)}
+                maxLength={1000}
+                rows={4}
+                placeholder="Describe what was missing, damaged, different from the listing, or not delivered…"
+                className="mt-2 w-full resize-none rounded-2xl border border-[#E7E0D8] bg-[#FAFAFA] px-4 py-3 text-sm font-normal text-[#251d18] outline-none focus:border-[#DE6437]"
+              />
+              <span className="mt-1 block text-right text-[9px] font-mono text-[#A79C92]">{disputeReason.length}/1000</span>
+            </label>
+
+            <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs leading-relaxed text-amber-950">
+              <input
+                type="checkbox"
+                checked={returnRequired}
+                onChange={(event) => setReturnRequired(event.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[#DE6437]"
+              />
+              <span>
+                <strong>I currently have the item.</strong> I understand I must return it before the refund is finalized, and the seller will confirm only after receiving it.
+              </span>
+            </label>
+
+            <p className="mt-3 text-[10px] leading-relaxed text-[#81756D]">
+              Card-paid amounts return through Paystack where available; wallet-paid amounts return to your FuhsiMarket wallet. Read the{' '}
+              <Link href="/refund-policy" target="_blank" className="font-bold text-[#DE6437] underline">Refund Policy</Link>.
+            </p>
+
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setDisputeTarget(null)}
+                disabled={refundingRef === disputeTarget.order_ref}
+                className="rounded-xl border border-[#E7E0D8] py-3 text-xs font-bold text-[#5F5650] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitDispute}
+                disabled={refundingRef === disputeTarget.order_ref}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#DE6437] py-3 text-xs font-bold text-white disabled:opacity-50"
+              >
+                {refundingRef === disputeTarget.order_ref ? <Loader2 size={14} className="animate-spin" /> : <AlertTriangle size={14} />}
+                {refundingRef === disputeTarget.order_ref ? 'Opening…' : 'Open dispute'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

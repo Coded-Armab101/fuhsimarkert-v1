@@ -13,6 +13,8 @@ import { uploadStudentId, uploadVerificationVideo } from '@/utils/verify';
 import VerificationRecorder from '../VerificationRecorder';
 import ProfileInstallApp from '@/components/ProfileInstallApp';
 import { replayOnboarding } from '@/components/OnboardingGuide';
+import { useNotifications } from '@/components/NotificationProvider';
+import { SELLER_VERIFICATION_CONSENT_VERSION } from '@/utils/legal';
 
 // Comprehensive list of Nigerian Banks for Paystack settlement routing
 const NIGERIAN_BANKS = [
@@ -35,6 +37,7 @@ export default function ProfilePage() {
   const supabase = createClient();
   const router = useRouter();
   const { clearCart } = useCart();
+  const { notify } = useNotifications();
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [paymentLoading, setPaymentLoading] = useState<string | null>(null);
@@ -55,6 +58,7 @@ export default function ProfilePage() {
   }>({ isApproved: false, status: null, rejectReason: null, submittedAt: null });
   const [idFile, setIdFile] = useState<File | null>(null);
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
+  const [verificationConsent, setVerificationConsent] = useState(false);
   const [submittingVerification, setSubmittingVerification] = useState(false);
 
   // Track if user has an active seller subscription
@@ -198,7 +202,7 @@ export default function ProfilePage() {
     if (!userAuth) return;
 
     if (profileData.accountNumber && !/^\d{10}$/.test(profileData.accountNumber)) {
-      alert('Account number must be exactly 10 digits.');
+      notify('Account number must be exactly 10 digits.', { tone: 'warning' });
       return;
     }
 
@@ -220,10 +224,10 @@ export default function ProfilePage() {
       if (!response.ok) {
         throw new Error(result?.error || 'Could not update your profile.');
       }
-      alert('Your profile has been saved.');
+      notify('Your profile has been saved.', { tone: 'success' });
     } catch (error) {
       console.error('Failed to update profile:', error);
-      alert(error instanceof Error ? error.message : 'Could not update your profile. Please try again.');
+      notify(error instanceof Error ? error.message : 'Could not update your profile. Please try again.', { tone: 'error' });
     } finally {
       setUpdating(false);
     }
@@ -242,22 +246,22 @@ export default function ProfilePage() {
     } catch {
       setLoggingOut(false);
       setShowLogoutModal(false);
-      alert('Could not sign you out. Please try again.');
+      notify('Could not sign you out. Please try again.', { tone: 'error' });
     }
   };
 
   const handleWithdraw = async () => {
     const amount = Math.floor(Number(withdrawAmount) * 100); // naira → kobo
     if (!amount || amount <= 0) {
-      alert('Enter a valid withdrawal amount.');
+      notify('Enter a valid withdrawal amount.', { tone: 'warning' });
       return;
     }
     if (!profileData.bankName || !profileData.accountNumber) {
-      alert('Add your bank and account number first.');
+      notify('Add your bank and account number first.', { tone: 'warning' });
       return;
     }
     if (!userAuth?.id) {
-      alert('User authentication details are missing. Please log in again.');
+      notify('User authentication details are missing. Please log in again.', { tone: 'error' });
       return;
     }
 
@@ -275,7 +279,7 @@ export default function ProfilePage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert(data?.error || 'Could not process your withdrawal request.');
+        notify(data?.error || 'Could not process your withdrawal request.', { tone: 'error' });
         setWithdrawing(false);
         return;
       }
@@ -291,10 +295,10 @@ export default function ProfilePage() {
       }
       setShowWithdrawModal(false);
       setWithdrawAmount('');
-      alert('Withdrawal request submitted. An administrator will review and pay it out.');
+      notify('Withdrawal request submitted. An administrator will review and pay it out.', { tone: 'success' });
     } catch (err) {
       console.error('Withdrawal error:', err);
-      alert('Could not process your withdrawal request. Please try again.');
+      notify('Could not process your withdrawal request. Please try again.', { tone: 'error' });
     } finally {
       setWithdrawing(false);
     }
@@ -305,11 +309,15 @@ export default function ProfilePage() {
       if (!userAuth?.id) return;
 
       if (!idFile) {
-        alert('Please take a photo of your student ID card.');
+        notify('Please take a photo of your student ID card.', { tone: 'warning' });
         return;
       }
       if (!recordingBlob) {
-        alert('Please record the 3-second selfie video.');
+        notify('Please record the 3-second selfie video.', { tone: 'warning' });
+        return;
+      }
+      if (!verificationConsent) {
+        notify('Please agree to the verification use of your ID and video.', { tone: 'warning' });
         return;
       }
 
@@ -326,31 +334,33 @@ export default function ProfilePage() {
         const videoRes = await uploadVerificationVideo(supabase, userAuth.id, videoFile);
         if (!videoRes.ok) throw new Error(videoRes.error);
 
-        // 3. Save the object paths and flip status to pending for admin review.
-        const { error } = await supabase
-          .from('profiles')
-          .update({
-            student_id_url: idRes.path,
-            verification_video_url: videoRes.path,
-            verification_status: 'pending',
-            verification_submitted_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', userAuth.id);
-        if (error) throw error;
+        // 3. Record the private object paths together with explicit consent.
+        const response = await fetch('/api/seller/verification', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studentIdPath: idRes.path,
+            videoPath: videoRes.path,
+            consent: verificationConsent,
+            consentVersion: SELLER_VERIFICATION_CONSENT_VERSION,
+          }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result?.error || 'Could not submit your verification.');
 
         setVerification({
           isApproved: false,
           status: 'pending',
           rejectReason: null,
-          submittedAt: new Date().toISOString(),
+          submittedAt: result.submittedAt || new Date().toISOString(),
         });
         setIdFile(null);
         setRecordingBlob(null);
-        alert('Verification submitted. An administrator will review your ID and video.');
+        setVerificationConsent(false);
+        notify('Verification submitted. An administrator will review your ID and video.', { tone: 'success' });
       } catch (err: unknown) {
         console.error('Verification submit error:', err);
-        alert(err instanceof Error ? err.message : 'Could not submit your verification. Please try again.');
+        notify(err instanceof Error ? err.message : 'Could not submit your verification. Please try again.', { tone: 'error' });
       } finally {
         setSubmittingVerification(false);
       }
@@ -412,16 +422,17 @@ export default function ProfilePage() {
       // Paystack could not load the checkout form.
       onError: (error) => {
         console.error('Paystack checkout error:', error);
-        alert(error?.message || 'The payment window failed to load. Please try again.');
+        notify(error?.message || 'The payment window failed to load. Please try again.', { tone: 'error' });
         setPaymentLoading(null);
       },
     });
   } catch (err: unknown) {
     console.error('Paystack initialization error:', err);
-    alert(
+    notify(
       err instanceof Error
         ? err.message
-        : 'Payment initialization failed. Check your browser console.'
+        : 'Payment initialization failed. Check your browser console.',
+      { tone: 'error' },
     );
     setPaymentLoading(null);
   }
@@ -561,9 +572,27 @@ export default function ProfilePage() {
 
           {(verification.status === null || verification.status === 'rejected') && (
             <form onSubmit={handleVerificationSubmit} className="space-y-4">
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-800/50 bg-amber-950/20 p-4 text-[11px] leading-relaxed text-neutral-300">
+                <input
+                  type="checkbox"
+                  checked={verificationConsent}
+                  onChange={(event) => setVerificationConsent(event.target.checked)}
+                  required
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-amber-500"
+                />
+                <span>
+                  I agree that FuhsiMarket may use my student ID and short selfie video only to confirm that I am the FUHSI student represented by this account. The private files are not used for advertising or facial recognition and are deleted after review.{' '}
+                  <Link href="/privacy" target="_blank" className="font-bold text-amber-400 underline">
+                    Privacy details
+                  </Link>
+                </span>
+              </label>
+              {!verificationConsent ? (
+                <p className="text-[10px] font-mono text-amber-400">Agree above to unlock the upload controls.</p>
+              ) : null}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* STUDENT ID */}
-                <label className="block cursor-pointer bg-neutral-900 border border-neutral-800 rounded-xl p-4 hover:border-amber-500/50 transition-all">
+                <label className={`block bg-neutral-900 border border-neutral-800 rounded-xl p-4 transition-all ${verificationConsent ? 'cursor-pointer hover:border-amber-500/50' : 'cursor-not-allowed opacity-55'}`}>
                   <div className="flex items-center gap-2 text-neutral-300">
                     <IdCard size={16} className="text-amber-500" />
                     <span className="text-xs font-bold">Student ID Card (Photo)</span>
@@ -573,6 +602,7 @@ export default function ProfilePage() {
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
                     capture="environment"
+                    disabled={!verificationConsent || submittingVerification}
                     onChange={(e) => setIdFile(e.target.files?.[0] || null)}
                     className="hidden"
                   />
@@ -584,13 +614,13 @@ export default function ProfilePage() {
                 {/* VERIFICATION VIDEO — in-app 3s recording, auto-sent */}
                 <VerificationRecorder
                   onRecorded={setRecordingBlob}
-                  disabled={submittingVerification}
+                  disabled={!verificationConsent || submittingVerification}
                 />
               </div>
 
               <button
                 type="submit"
-                disabled={submittingVerification}
+                disabled={submittingVerification || !verificationConsent}
                 className="w-full sm:w-auto bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 text-white font-bold text-xs px-6 py-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg"
               >
                 {submittingVerification ? (
@@ -610,7 +640,7 @@ export default function ProfilePage() {
         </div>
       )}
 
-      <form onSubmit={handleUpdateProfile} className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         
         {/* ESCROW WALLET GRAPH */}
 <div id="wallet-details" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 shadow-xl">
@@ -629,6 +659,7 @@ export default function ProfilePage() {
           </p>
           {profileData.walletBalance > 0 && (
             <button
+              type="button"
               onClick={() => setShowWithdrawModal(true)}
               className="w-full bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold py-3 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
             >
@@ -640,6 +671,7 @@ export default function ProfilePage() {
 
         {/* CORE DETAILS MATRIX */}
         <div className="lg:col-span-2 space-y-6">
+          <form onSubmit={handleUpdateProfile} className="space-y-6">
           
           {/* STUDENT CAMPUS METADATA */}
           <div id="profile-details" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-4 shadow-xl">
@@ -746,6 +778,7 @@ export default function ProfilePage() {
             <Save size={14} />
             <span>{updating ? 'Saving...' : 'Save changes'}</span>
           </button>
+          </form>
 
           {/* SECURITY & PASSWORD CHANGE */}
           <div id="security-details" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-4 shadow-xl">
@@ -805,7 +838,7 @@ export default function ProfilePage() {
 
         </div>
 
-      </form>
+      </div>
 
       {/* 🚀 ROLE SELECTION MODAL */}
       {showRoleModal && (

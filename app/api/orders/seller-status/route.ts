@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { accountIsActive } from '@/utils/account';
 
 const TRANSITIONS: Record<string, string[]> = {
   in_escrow: ['packing'],
@@ -19,6 +20,7 @@ export async function POST(request: Request) {
     const supabase = await createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+    if (!(await accountIsActive(supabase, user.id))) return NextResponse.json({ error: 'This account is suspended.' }, { status: 403 });
 
     const admin = createAdminClient();
     const { data: order, error: orderError } = await admin

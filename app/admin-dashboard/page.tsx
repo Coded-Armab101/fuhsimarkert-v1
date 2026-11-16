@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/utils/supabase';
 import { formatNaira } from '@/utils/money';
 import {
@@ -25,6 +25,7 @@ import {
   Moon,
   Wallet,
   Megaphone,
+  RotateCcw,
 } from 'lucide-react';
 import OverviewTab from './_components/OverviewTab';
 import MoneyTab from './_components/MoneyTab';
@@ -32,6 +33,7 @@ import PeopleTab from './_components/PeopleTab';
 import type { AdminOverview, AdminTab } from '@/utils/admin/metrics';
 import { variantLabel } from '@/utils/variants';
 import BroadcastsTab from './_components/BroadcastsTab';
+import { useNotifications } from '@/components/NotificationProvider';
 
 type Withdrawal = {
   id: string;
@@ -43,6 +45,9 @@ type Withdrawal = {
   status: 'pending' | 'processing' | 'paid' | 'failed' | 'rejected';
   transfer_status?: string | null;
   transfer_reference?: string | null;
+  transfer_error?: string | null;
+  manual_reconciled_at?: string | null;
+  manual_reconcile_note?: string | null;
   request_note?: string | null;
   created_at: string;
   processed_at?: string | null;
@@ -62,6 +67,8 @@ type SellerVerification = {
   reviewedAt: string | null;
   status: 'pending' | 'rejected' | null;
   rejectReason: string | null;
+  consentAt: string | null;
+  consentVersion: string | null;
   isApproved: boolean;
   urls: { student_id_url: string | null; verification_video_url: string | null };
 };
@@ -81,6 +88,11 @@ type FulfilmentItem = {
   size?: string | null;
   color?: string | null;
   variantKey?: string | null;
+  disputeReason?: string | null;
+  disputeOpenedAt?: string | null;
+  returnRequired: boolean;
+  returnReceivedAt: string | null;
+  returnConfirmationSource?: string | null;
 };
 
 type FulfilmentGroup = {
@@ -113,6 +125,7 @@ function elapsedLabel(iso: string): string {
 
 export default function AdminDashboardPage() {
   const supabase = createClient();
+  const { notify, confirm } = useNotifications();
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [tab, setTab] = useState<AdminTab>('overview');
   const [refreshToken, setRefreshToken] = useState(0);
@@ -137,6 +150,10 @@ export default function AdminDashboardPage() {
   const [wError, setWError] = useState<string | null>(null);
   const [wMessage, setWMessage] = useState<string | null>(null);
   const [actingId, setActingId] = useState<string | null>(null);
+  const [reconcileWithdrawal, setReconcileWithdrawal] = useState<Withdrawal | null>(null);
+  const [reconcileNote, setReconcileNote] = useState('');
+  const [reconcileChecked, setReconcileChecked] = useState(false);
+  const [savingReconciliation, setSavingReconciliation] = useState(false);
 
   const [sellers, setSellers] = useState<SellerStorage[]>([]);
   const [sLoading, setSLoading] = useState(true);
@@ -155,6 +172,11 @@ export default function AdminDashboardPage() {
   const [fulfilments, setFulfilments] = useState<FulfilmentGroup[]>([]);
   const [fLoading, setFLoading] = useState(true);
   const [fError, setFError] = useState<string | null>(null);
+  const [orderFilter, setOrderFilter] = useState<'all' | 'successful' | 'pending' | 'disputed'>('all');
+  const [sellerFilter, setSellerFilter] = useState('all');
+  const [returnOverride, setReturnOverride] = useState<FulfilmentItem | null>(null);
+  const [returnOverrideReason, setReturnOverrideReason] = useState('');
+  const [savingReturnOverride, setSavingReturnOverride] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -201,7 +223,7 @@ export default function AdminDashboardPage() {
 
   const actVerification = async (action: 'approve' | 'reject', sellerId: string) => {
     if (action === 'reject' && !(rejectReasons[sellerId] || '').trim()) {
-      alert('Enter a rejection reason first.');
+      notify('Enter a rejection reason first.', { tone: 'warning' });
       return;
     }
     setActingV(sellerId);
@@ -219,7 +241,9 @@ export default function AdminDashboardPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Action failed');
       if (action === 'reject') {
-        alert('Rejected. They can re-record and resubmit; the activation fee is kept.');
+        notify('Rejected. They can re-record and resubmit; the activation fee is kept.', { tone: 'success' });
+      } else {
+        notify('Seller verification approved.', { tone: 'success' });
       }
       await loadVerifications();
     } catch (err) {
@@ -296,6 +320,15 @@ setSLoading(false);
   }, [isAdmin]);
 
   const act = async (action: 'approve' | 'reject', id: string) => {
+    if (action === 'reject') {
+      const accepted = await confirm({
+        title: 'Return this withdrawal to the wallet?',
+        message: 'Reject only when no bank transfer can still arrive. The server will verify any Paystack reference before returning the held amount.',
+        confirmLabel: 'Reject and return funds',
+        tone: 'danger',
+      });
+      if (!accepted) return;
+    }
     setActingId(id);
     setWError(null);
     setWMessage(null);
@@ -308,11 +341,73 @@ setSLoading(false);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Action failed');
       if (data.message) setWMessage(data.message);
+      if (data.status === 'paid') notify('Withdrawal paid successfully.', { tone: 'success' });
+      if (data.status === 'rejected') notify('Withdrawal rejected and returned to the wallet.', { tone: 'success' });
       await loadWithdrawals();
     } catch (err) {
       setWError(err instanceof Error ? err.message : 'Action failed');
     } finally {
       setActingId(null);
+    }
+  };
+
+  const fulfilmentSellers = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const group of fulfilments) {
+      for (const item of group.items) byId.set(item.sellerId, item.sellerName);
+    }
+    return Array.from(byId, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [fulfilments]);
+
+  const filteredFulfilments = useMemo(() => {
+    const successful = new Set(['completed', 'confirmed', 'delivered']);
+    const pending = new Set(['in_escrow', 'packing', 'ready_for_pickup']);
+    return fulfilments.filter((group) => {
+      if (sellerFilter !== 'all' && !group.items.some((item) => item.sellerId === sellerFilter)) return false;
+      if (orderFilter === 'successful') return successful.has(group.groupStatus);
+      if (orderFilter === 'pending') return pending.has(group.groupStatus);
+      if (orderFilter === 'disputed') return group.groupStatus === 'disputed' || group.items.some((item) => item.status === 'disputed');
+      return true;
+    });
+  }, [fulfilments, orderFilter, sellerFilter]);
+
+  const orderFilterCount = (filter: 'successful' | 'pending' | 'disputed') => {
+    const successful = new Set(['completed', 'confirmed', 'delivered']);
+    const pending = new Set(['in_escrow', 'packing', 'ready_for_pickup']);
+    return fulfilments.filter((group) => {
+      if (filter === 'successful') return successful.has(group.groupStatus);
+      if (filter === 'pending') return pending.has(group.groupStatus);
+      return group.groupStatus === 'disputed' || group.items.some((item) => item.status === 'disputed');
+    }).length;
+  };
+
+  const confirmReturnAsAdmin = async () => {
+    if (!returnOverride) return;
+    if (returnOverrideReason.trim().length < 10) {
+      notify('Add an evidence note of at least 10 characters.', { tone: 'warning' });
+      return;
+    }
+    setSavingReturnOverride(true);
+    try {
+      const response = await fetch('/api/admin/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'confirm_return',
+          orderId: returnOverride.orderId,
+          reason: returnOverrideReason.trim(),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Could not confirm the return.');
+      notify('Return evidence accepted. The buyer can continue the protected refund.', { tone: 'success' });
+      setReturnOverride(null);
+      setReturnOverrideReason('');
+      await loadFulfilments();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not confirm the return.', { tone: 'error' });
+    } finally {
+      setSavingReturnOverride(false);
     }
   };
 
@@ -334,6 +429,43 @@ setSLoading(false);
       setSMessage(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setSavingQuota(null);
+    }
+  };
+
+  const saveReconciliation = async () => {
+    if (!reconcileWithdrawal) return;
+    if (!reconcileChecked) {
+      notify('Confirm that you checked this exact reference in Paystack.', { tone: 'warning' });
+      return;
+    }
+    if (reconcileNote.trim().length < 10) {
+      notify('Add a reconciliation note of at least 10 characters.', { tone: 'warning' });
+      return;
+    }
+    setSavingReconciliation(true);
+    setWError(null);
+    try {
+      const response = await fetch('/api/admin/withdrawals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'confirm_not_started',
+          withdrawalId: reconcileWithdrawal.id,
+          note: reconcileNote.trim(),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Could not reconcile this transfer.');
+      setWMessage(data.message || 'Transfer recorded as not started.');
+      notify('Reconciliation recorded. Reject can now safely return the wallet funds.', { tone: 'success' });
+      setReconcileWithdrawal(null);
+      setReconcileNote('');
+      setReconcileChecked(false);
+      await loadWithdrawals();
+    } catch (error) {
+      setWError(error instanceof Error ? error.message : 'Could not reconcile this transfer.');
+    } finally {
+      setSavingReconciliation(false);
     }
   };
 
@@ -517,6 +649,10 @@ setSLoading(false);
           <BroadcastsTab refreshToken={refreshToken} />
         ) : tab === 'withdrawals' ? (
         <div className="space-y-3">
+          <div className="rounded-2xl border border-blue-500/20 bg-blue-500/[0.06] px-4 py-3 text-[11px] leading-relaxed text-blue-200">
+            <strong>Paystack Transfers must be enabled on a verified business account.</strong>{' '}
+            Starter Business accounts cannot initiate third-party payouts. If Paystack blocks an attempt before creating a transfer, this board records <span className="font-mono">not-started</span> so Reject can safely return the held money. An <span className="font-mono">unknown</span> transfer must still be checked in Paystack before funds are returned, preventing a seller from being paid twice.
+          </div>
           {wLoading ? (
             <div className="flex justify-center py-16">
               <Loader2 className="animate-spin text-neutral-600" size={24} />
@@ -553,9 +689,14 @@ setSLoading(false);
                       {w.transfer_reference ? ` · ${w.transfer_reference}` : ''}
                     </p>
                   )}
+                  {w.transfer_error && w.status === 'pending' ? (
+                    <p className="mt-2 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-2.5 py-2 text-[10px] leading-relaxed text-red-300">
+                      {w.transfer_error}
+                    </p>
+                  ) : null}
                 </div>
                 {w.status === 'pending' && (
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <button
                       onClick={() => act('approve', w.id)}
                       disabled={actingId === w.id}
@@ -571,6 +712,20 @@ setSLoading(false);
                     >
                       <X size={13} /> Reject
                     </button>
+                    {w.transfer_reference && ['unknown', 'error'].includes(w.transfer_status || '') ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReconcileWithdrawal(w);
+                          setReconcileNote('');
+                          setReconcileChecked(false);
+                        }}
+                        disabled={actingId === w.id}
+                        className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-500/20 disabled:opacity-50"
+                      >
+                        <ShieldCheck size={13} /> I checked Paystack
+                      </button>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -629,6 +784,44 @@ setSLoading(false);
         </div>
       ) : tab === 'fulfilment' ? (
         <div className="space-y-3">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-3 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {([
+                ['all', 'All orders', fulfilments.length],
+                ['successful', 'Successful', orderFilterCount('successful')],
+                ['pending', 'Pending', orderFilterCount('pending')],
+                ['disputed', 'Disputed', orderFilterCount('disputed')],
+              ] as const).map(([id, label, count]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setOrderFilter(id)}
+                  className={`rounded-full border px-3 py-1.5 text-[10px] font-bold transition-colors ${
+                    orderFilter === id
+                      ? id === 'disputed'
+                        ? 'border-red-500 bg-red-600 text-white'
+                        : 'border-[#DE6437] bg-[#DE6437] text-white'
+                      : 'border-white/10 bg-white/5 text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  {label} · {count}
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 text-[10px] font-mono text-neutral-500">
+              Seller
+              <select
+                value={sellerFilter}
+                onChange={(event) => setSellerFilter(event.target.value)}
+                className="min-w-0 flex-1 rounded-xl border border-white/10 bg-neutral-950 px-3 py-2 text-xs text-neutral-200 outline-none focus:border-[#DE6437] sm:max-w-xs"
+              >
+                <option value="all">All sellers</option>
+                {fulfilmentSellers.map((seller) => (
+                  <option key={seller.id} value={seller.id}>{seller.name}</option>
+                ))}
+              </select>
+            </label>
+          </div>
           {fError && (
             <p className="text-[11px] font-mono text-red-400 bg-red-950/30 border border-red-900/50 rounded-xl px-3 py-2.5 mb-2">
               {fError}
@@ -638,10 +831,10 @@ setSLoading(false);
             <div className="flex justify-center py-16">
               <Loader2 className="animate-spin text-neutral-600" size={24} />
             </div>
-          ) : fulfilments.length === 0 ? (
-            <p className="text-center text-xs text-neutral-500 py-16 font-mono">No orders yet.</p>
+          ) : filteredFulfilments.length === 0 ? (
+            <p className="text-center text-xs text-neutral-500 py-16 font-mono">No orders match these filters.</p>
           ) : (
-            fulfilments.map((g) => (
+            filteredFulfilments.map((g) => (
               <div key={g.order_ref} className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div>
@@ -707,6 +900,8 @@ setSLoading(false);
                               ? 'bg-sky-950/60 text-sky-300 border-sky-800'
                               : i.status === 'completed' || i.status === 'confirmed' || i.status === 'delivered'
                               ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800'
+                              : i.status === 'disputed' || i.status === 'cancelled'
+                              ? 'bg-red-950/60 text-red-300 border-red-800'
                               : 'bg-amber-950/60 text-amber-300 border-amber-800'
                           }`}
                         >
@@ -717,6 +912,24 @@ setSLoading(false);
                             <Clock size={9} className="inline -mt-0.5" /> {elapsedLabel(i.statusChangedAt)}
                           </p>
                         )}
+                        {i.status === 'disputed' && i.returnRequired ? (
+                          i.returnReceivedAt ? (
+                            <p className="mt-1 text-[9px] font-mono text-emerald-400">
+                              return confirmed · {i.returnConfirmationSource || 'seller'}
+                            </p>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReturnOverride(i);
+                                setReturnOverrideReason('');
+                              }}
+                              className="mt-2 inline-flex items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-[9px] font-bold text-red-300 hover:bg-red-500/20"
+                            >
+                              <RotateCcw size={10} /> Confirm return evidence
+                            </button>
+                          )
+                        ) : null}
                       </div>
                     </div>
                   ))}
@@ -771,6 +984,11 @@ setSLoading(false);
                     submitted {new Date(v.submittedAt).toLocaleString()}
                   </p>
                 )}
+                {v.consentAt ? (
+                  <p className="text-[10px] text-emerald-400/80 font-mono">
+                    consent recorded {new Date(v.consentAt).toLocaleString()} · {v.consentVersion || 'version unavailable'}
+                  </p>
+                ) : null}
 
                 <div className="flex flex-wrap gap-2">
                   {v.urls.student_id_url ? (
@@ -834,7 +1052,7 @@ setSLoading(false);
                         disabled={actingV === v.id}
                         className="flex items-center gap-1.5 text-xs font-semibold bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-2 rounded-xl transition-all cursor-pointer disabled:opacity-50"
                       >
-                        <X size={13} /> Reject & Refund
+                        <X size={13} /> Reject submission
                       </button>
                     </div>
                   </>
@@ -844,6 +1062,117 @@ setSLoading(false);
           )}
         </div>
       )}
+      {returnOverride ? (
+        <div className="fixed inset-0 z-[115] grid place-items-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-neutral-950 p-6 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-red-500/10 text-red-300">
+                <RotateCcw size={20} />
+              </div>
+              <div>
+                <h2 className="text-base font-black text-white">Confirm return as administrator</h2>
+                <p className="mt-1 text-xs leading-relaxed text-neutral-400">
+                  Use this only after checking handover evidence or contacting both parties. It replaces the seller’s confirmation and allows the buyer refund to continue.
+                </p>
+              </div>
+            </div>
+            {returnOverride.disputeReason ? (
+              <p className="mt-4 rounded-xl border border-red-500/20 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-200">
+                Buyer report: “{returnOverride.disputeReason}”
+              </p>
+            ) : null}
+            <label className="mt-4 block text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+              Evidence checked / reason for override
+              <textarea
+                value={returnOverrideReason}
+                onChange={(event) => setReturnOverrideReason(event.target.value)}
+                maxLength={500}
+                rows={4}
+                placeholder="e.g. Seller confirmed the physical return by support call and handover photo"
+                className="mt-2 w-full resize-none rounded-xl border border-white/10 bg-neutral-900 px-3 py-2.5 text-xs normal-case tracking-normal text-white outline-none focus:border-red-500"
+              />
+            </label>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setReturnOverride(null)}
+                disabled={savingReturnOverride}
+                className="rounded-xl border border-white/10 bg-white/5 py-3 text-xs font-bold text-neutral-300 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmReturnAsAdmin()}
+                disabled={savingReturnOverride}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 py-3 text-xs font-bold text-white hover:bg-red-500 disabled:opacity-50"
+              >
+                {savingReturnOverride ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                {savingReturnOverride ? 'Saving…' : 'Confirm override'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {reconcileWithdrawal ? (
+        <div className="fixed inset-0 z-[116] grid place-items-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-amber-500/20 bg-neutral-950 p-6 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-amber-500/10 text-amber-300">
+                <ShieldCheck size={20} />
+              </div>
+              <div>
+                <h2 className="text-base font-black text-white">Reconcile an unknown transfer</h2>
+                <p className="mt-1 text-xs leading-relaxed text-neutral-400">
+                  This does not move money. Use it only after the Paystack Transfers dashboard shows that this exact reference was never created. You will then use Reject separately to return the held wallet amount.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-mono text-[11px] text-neutral-300">
+              Reference: <span className="font-bold text-amber-300">{reconcileWithdrawal.transfer_reference}</span>
+            </div>
+            <label className="mt-4 block text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+              What you checked
+              <textarea
+                value={reconcileNote}
+                onChange={(event) => setReconcileNote(event.target.value)}
+                maxLength={500}
+                rows={3}
+                placeholder="e.g. Searched Transfers by the full reference at 14:30; Paystack returned no record"
+                className="mt-2 w-full resize-none rounded-xl border border-white/10 bg-neutral-900 px-3 py-2.5 text-xs normal-case tracking-normal text-white outline-none focus:border-amber-500"
+              />
+            </label>
+            <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-[11px] leading-relaxed text-amber-100">
+              <input
+                type="checkbox"
+                checked={reconcileChecked}
+                onChange={(event) => setReconcileChecked(event.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-amber-500"
+              />
+              I checked this exact reference in Paystack and confirmed that no transfer exists and no bank payment can still arrive.
+            </label>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setReconcileWithdrawal(null)}
+                disabled={savingReconciliation}
+                className="rounded-xl border border-white/10 bg-white/5 py-3 text-xs font-bold text-neutral-300 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveReconciliation()}
+                disabled={savingReconciliation || !reconcileChecked}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 py-3 text-xs font-bold text-white hover:bg-amber-500 disabled:opacity-50"
+              >
+                {savingReconciliation ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                {savingReconciliation ? 'Recording…' : 'Record no transfer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       </div>
     </div>
   );

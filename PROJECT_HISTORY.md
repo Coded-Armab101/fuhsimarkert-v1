@@ -655,3 +655,36 @@ disputed), replacing the old strict buyer-only UPDATE policy.
 
 **Tooling note (still true):** direct Postgres MCP connection works this
 session; `.mcp.json` holds the superuser string (gitignored, never commit).
+
+---
+
+## Session Log — 2026-11-16 trust, legal, disputes and moderation
+
+- Added mandatory legal acceptance to email and Google signup, with versioned
+  consent metadata. Added `/refund-policy` and `/escrow-policy`, and rewrote the
+  privacy policy to cover ID/video, delivery, bank, payment, notification and
+  retention data actually used by the application.
+- Seller ID/video controls now stay locked until the seller accepts a specific
+  student-verification consent. Submission goes through an authenticated server
+  route and stores the consent timestamp/version with private object paths.
+- Admin People now supports suspension/restoration with reasons. The decision is
+  mirrored to Supabase Auth, the profile state and an immutable moderation audit
+  event; suspended users are blocked by proxy, dashboard, sensitive APIs and a
+  database write trigger.
+- Admin Fulfilment now filters by seller plus Successful, Pending and Disputed.
+  A buyer who possesses a disputed product must return it before refund: each
+  seller confirms physical receipt, while an admin can override only with an
+  evidence note. Escrow remains frozen and the database refund RPC refuses to
+  move money while required confirmations are missing.
+- Replaced native `alert()` / `confirm()` calls with shared branded toast and
+  decision UI. Fixed Buyer Profile’s Withdraw button submitting the profile form
+  (the cause of the incorrect “profile saved” alert) and removed the nested form.
+- Paystack’s “starter business” transfer rejection is now classified as
+  `not-started`; future affected withdrawals can be safely rejected. Truly
+  ambiguous existing references remain blocked until an admin checks the exact
+  reference in Paystack, records an audited **I checked Paystack** reconciliation,
+  and then Rejects, preventing double payment.
+- New required migration: `supabase/migrations/20261118_trust_safety.sql`.
+- Verified: `npx tsc --noEmit`, ESLint (9 existing `<img>` warnings, no errors),
+  and `npm run build` all pass. Build generated 61 routes/pages and includes
+  `ƒ Proxy (Middleware)`.

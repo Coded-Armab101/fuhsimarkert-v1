@@ -4,9 +4,10 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { formatNaira } from '@/utils/money';
-import { Receipt, Loader2, Package, MapPin, Truck, User, Phone, Hash, CheckCircle2, Clock } from 'lucide-react';
+import { Receipt, Loader2, Package, MapPin, Truck, User, Phone, Hash, CheckCircle2, Clock, RotateCcw } from 'lucide-react';
 import { safeImageSrc } from '@/utils/safeImage';
 import { variantLabel } from '@/utils/variants';
+import { useNotifications } from '@/components/NotificationProvider';
 
 type SellerOrder = {
   id: string;
@@ -26,6 +27,11 @@ type SellerOrder = {
   delivery_address?: string | null;
   meetup_location: string;
   created_at: string;
+  dispute_reason?: string | null;
+  dispute_opened_at?: string | null;
+  return_required?: boolean | null;
+  return_received_at?: string | null;
+  return_confirmation_source?: string | null;
   products?: { id: string; title: string; image_url?: string | null }[] | { id: string; title: string; image_url?: string | null } | null;
 };
 
@@ -39,10 +45,12 @@ function getOrderProduct(products: SellerOrder['products']): { id?: string; titl
 export default function SellerOrdersPage() {
   const router = useRouter();
   const supabase = createClient();
+  const { notify, confirm } = useNotifications();
 
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<SellerOrder[]>([]);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [confirmingReturnId, setConfirmingReturnId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -74,6 +82,11 @@ export default function SellerOrdersPage() {
             delivery_address,
             meetup_location,
             created_at,
+            dispute_reason,
+            dispute_opened_at,
+            return_required,
+            return_received_at,
+            return_confirmation_source,
             products:product_id (
               id,
               title,
@@ -104,7 +117,12 @@ export default function SellerOrdersPage() {
               matric_number,
               delivery_address,
               meetup_location,
-              created_at
+              created_at,
+              dispute_reason,
+              dispute_opened_at,
+              return_required,
+              return_received_at,
+              return_confirmation_source
             `)
             .eq('seller_id', user.id)
             .order('created_at', { ascending: false });
@@ -163,9 +181,40 @@ export default function SellerOrdersPage() {
     } else {
       const data = await response.json().catch(() => null);
       console.error('Failed to update order:', data);
-      alert(data?.error || 'Could not update the order. Please try again.');
+      notify(data?.error || 'Could not update the order. Please try again.', { tone: 'error' });
     }
     setUpdatingId(null);
+  };
+
+  const confirmReturnedItem = async (order: SellerOrder) => {
+    const accepted = await confirm({
+      title: 'Confirm item is back with you?',
+      message: 'Only continue after you have physically received and checked the returned product. This confirmation allows the protected buyer refund to continue and is recorded in the dispute history.',
+      confirmLabel: 'Yes, item received',
+      tone: 'warning',
+    });
+    if (!accepted) return;
+
+    setConfirmingReturnId(order.id);
+    try {
+      const response = await fetch('/api/orders/return-received', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: order.id }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Could not confirm the returned item.');
+      setOrders((current) => current.map((entry) =>
+        entry.id === order.id
+          ? { ...entry, return_received_at: new Date().toISOString(), return_confirmation_source: 'seller' }
+          : entry,
+      ));
+      notify('Returned item confirmed. The buyer can now continue the protected refund.', { tone: 'success' });
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not confirm the returned item.', { tone: 'error' });
+    } finally {
+      setConfirmingReturnId(null);
+    }
   };
 
   const statusLabel = (status: string) => status.replace(/_/g, ' ').toUpperCase();
@@ -343,6 +392,33 @@ export default function SellerOrdersPage() {
                       : 'Ready for the buyer — they will confirm receipt on their end.'}
                   </div>
                 )}
+
+                {order.status === 'disputed' && order.return_required && !order.return_received_at ? (
+                  <div className="border-t border-red-900/40 pt-4">
+                    <div className="rounded-xl border border-red-900/50 bg-red-950/20 p-4 text-xs text-red-100">
+                      <p className="font-bold">Buyer says this item will be returned</p>
+                      {order.dispute_reason ? <p className="mt-1 text-[11px] leading-relaxed text-red-200/80">Reason: “{order.dispute_reason}”</p> : null}
+                      <p className="mt-2 text-[10px] leading-relaxed text-neutral-400">
+                        Do not confirm until the physical item is back with you. Escrow stays frozen while confirmation is pending.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void confirmReturnedItem(order)}
+                        disabled={confirmingReturnId === order.id}
+                        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-xs font-bold text-white transition-colors hover:bg-red-500 disabled:opacity-60 sm:w-auto"
+                      >
+                        {confirmingReturnId === order.id ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                        {confirmingReturnId === order.id ? 'Confirming…' : 'I received the returned item'}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {order.status === 'disputed' && order.return_required && order.return_received_at ? (
+                  <div className="border-t border-emerald-900/40 pt-3 text-[11px] font-mono text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 size={13} /> Returned item confirmed {new Date(order.return_received_at).toLocaleString('en-NG')}.
+                  </div>
+                ) : null}
               </div>
             );
           })}

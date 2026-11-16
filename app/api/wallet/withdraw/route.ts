@@ -3,6 +3,7 @@ import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { cookies } from 'next/headers';
 import { SESSION_NONCE_COOKIE, nonceValid } from '@/utils/single-session';
+import { accountIsActive } from '@/utils/account';
 
 /**
  * Seller requests a withdrawal from their wallet balance.
@@ -43,6 +44,9 @@ export async function POST(request: Request) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized system access request.' }, { status: 401 });
+    }
+    if (!(await accountIsActive(supabase, user.id))) {
+      return NextResponse.json({ error: 'This account is suspended.' }, { status: 403 });
     }
 
     // Single-session guard: a request may only move money if its httpOnly nonce

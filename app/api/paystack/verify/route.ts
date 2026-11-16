@@ -3,6 +3,7 @@ import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { recordOrder, productEscrowRef } from '@/utils/paystack/recordOrder';
 import { buyerServiceFeeKobo } from '@/utils/pricing';
+import { accountIsActive } from '@/utils/account';
 
 function metadataText(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
@@ -36,6 +37,9 @@ export async function GET(request: Request) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized system access request.' }, { status: 401 });
+    }
+    if (!(await accountIsActive(supabase, user.id))) {
+      return NextResponse.json({ error: 'This account is suspended.' }, { status: 403 });
     }
 
     const paystackReply = await fetch(

@@ -3,6 +3,7 @@ import { Manrope, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { CartProvider } from '@/context/CartContext';
 import PwaInstall from './PwaInstall';
+import { NotificationProvider } from '@/components/NotificationProvider';
 
 /**
  * Manrope is a clean, geometric sans with tall x-height — it keeps the warm
@@ -67,10 +68,12 @@ export default function RootLayout({
     <html lang="en" className={`${manrope.variable} ${geistMono.variable}`} suppressHydrationWarning>
       <body className="bg-[#fffdfa] text-[#251d18] antialiased" suppressHydrationWarning>
         {/* CartProvider keeps cart data available for the buyer side */}
-        <CartProvider>
-          {children}
-          <PwaInstall />
-        </CartProvider>
+        <NotificationProvider>
+          <CartProvider>
+            {children}
+            <PwaInstall />
+          </CartProvider>
+        </NotificationProvider>
       </body>
     </html>
   );

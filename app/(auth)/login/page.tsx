@@ -224,6 +224,14 @@ export default function LoginPage() {
           <Link href="/privacy" className="hover:text-[#DE6437]">
             Privacy
           </Link>
+          <span className="mx-2">·</span>
+          <Link href="/refund-policy" className="hover:text-[#DE6437]">
+            Refunds
+          </Link>
+          <span className="mx-2">·</span>
+          <Link href="/escrow-policy" className="hover:text-[#DE6437]">
+            Escrow
+          </Link>
         </p>
       </div>
     </div>

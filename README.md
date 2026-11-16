@@ -47,7 +47,11 @@ Then apply `supabase/migrations/20261114_ops.sql`. It fixes the multi-item/multi
 
 Next apply `supabase/migrations/20261115_payout_hardening.sql`. It atomically reserves one Paystack transfer reference per withdrawal (preventing double payouts), blocks an approve/reject race, makes simultaneous withdrawal requests safe, and adds exactly-once wallet fallback bookkeeping for an asynchronous `refund.failed` webhook.
 
-Finally apply `supabase/migrations/20261116_order_reliability.sql`. It removes notification side effects from escrow release/refund transactions, adds the order status/timestamp fields used by the UI, and exposes a service-only checkout preflight. Card and wallet checkout now stop before moving money if the database still has legacy single-item constraints.
+Then apply `supabase/migrations/20261116_order_reliability.sql`. It removes notification side effects from escrow release/refund transactions, adds the order status/timestamp fields used by the UI, and exposes a service-only checkout preflight. Card and wallet checkout now stop before moving money if the database still has legacy single-item constraints.
+
+Apply `supabase/migrations/20261117_broadcasts_variants.sql` for product size/colour variants and administrator broadcasts.
+
+Finally apply `supabase/migrations/20261118_trust_safety.sql`. It adds legal and seller-verification consent records, account suspension and moderation audit fields, disputed-product return confirmation, dispute audit events, and the Paystack transfer error field. The matching build expects this migration before signup, verification, suspension, dispute and withdrawal actions are used.
 
 ## Transactional email (Resend)
 
@@ -66,11 +70,14 @@ NEXT_PUBLIC_SITE_URL=https://your-site.example
 Approving a withdrawal now sends the money through Paystack instead of only updating the ledger:
 
 1. Enable **Transfers** on your Paystack account and keep enough balance in the Paystack wallet.
+   Paystack **Starter Business** accounts cannot initiate third-party payouts; complete Paystack business verification/upgrade first. When Paystack returns that specific block, FuhsiMarket records the transfer as `not-started`, allowing an admin to reject the request and safely return the held amount to the seller wallet.
 2. Disable transfer OTP for API transfers in the Paystack dashboard (Settings → Preferences → Transfer OTP). If OTP is on, approve returns a clear error and the withdrawal stays pending.
 3. Use `PAYSTACK_SECRET_KEY` from the same account that receives checkout payments.
 4. Set the Paystack webhook URL to `https://your-site.example/api/webhooks`. Refund status events use this same signed endpoint; if a queued card refund later fails, its card amount is credited to the buyer's wallet exactly once.
 
 Bank names are resolved against Paystack's live NGN bank list (with aliases such as GTB/UBA). If a seller's bank cannot be matched, the withdrawal stays pending with the reason shown to the admin, and no money moves. A transfer that Paystack reports as `pending`/`queued`/`processing` stays pending until a later Approve verifies it as `success`; only then is the ledger marked `paid` and the seller emailed.
+
+If an older failed attempt is already recorded as `unknown`, Reject remains blocked because an API or network error does not prove that money was not sent. Search the **exact transfer reference** in Paystack first. If no transfer exists, use **I checked Paystack** on the payout row, record the evidence note, then Reject. This audited two-step reconciliation prevents a bank payout plus wallet return from paying the same withdrawal twice.
 
 
 For password reset, add `<your site origin>/auth/callback?next=/reset-password` to the Supabase Auth **Redirect URLs** allow-list.

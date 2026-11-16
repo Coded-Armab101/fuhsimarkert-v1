@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { LEGAL_TERMS_VERSION } from '@/utils/legal';
+import { accountIsActive } from '@/utils/account';
 
 type ProfileInput = {
   fullName?: unknown;
@@ -32,6 +34,9 @@ export async function PATCH(request: Request) {
     if (authError || !user) {
       return NextResponse.json({ error: 'Please sign in again.' }, { status: 401 });
     }
+    if (!(await accountIsActive(supabase, user.id))) {
+      return NextResponse.json({ error: 'This account is suspended.' }, { status: 403 });
+    }
 
     const fullName = text(body.fullName, 120);
     const matricNo = text(body.matricNo, 50);
@@ -57,6 +62,19 @@ export async function PATCH(request: Request) {
       }
     }
 
+    const metadataAcceptedAt = text(user.user_metadata?.legal_accepted_at, 40);
+    const metadataLegalVersion = text(user.user_metadata?.legal_version, 40);
+    const acceptedDate = metadataAcceptedAt ? new Date(metadataAcceptedAt) : null;
+    const legalConsent =
+      metadataLegalVersion === LEGAL_TERMS_VERSION &&
+      acceptedDate &&
+      !Number.isNaN(acceptedDate.getTime())
+        ? {
+            legal_accepted_at: acceptedDate.toISOString(),
+            legal_version: LEGAL_TERMS_VERSION,
+          }
+        : {};
+
     const values = {
       full_name: fullName,
       matric_no: matricNo || null,
@@ -65,6 +83,7 @@ export async function PATCH(request: Request) {
       bank_name: bankName || null,
       account_number: accountNumber || null,
       updated_at: new Date().toISOString(),
+      ...legalConsent,
     };
 
     const admin = createAdminClient();

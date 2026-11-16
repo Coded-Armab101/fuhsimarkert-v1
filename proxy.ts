@@ -144,11 +144,25 @@ export async function proxy(request: NextRequest) {
 
   const { data: nonceRow } = await supabase
     .from('profiles')
-    .select('session_nonce')
+    .select('session_nonce, is_suspended')
     .eq('id', user.id)
-    .maybeSingle<{ session_nonce: string | null }>();
+    .maybeSingle<{ session_nonce: string | null; is_suspended: boolean | null }>();
 
   const storedNonce = nonceRow?.session_nonce ?? null;
+
+  if (nonceRow?.is_suspended === true && pathname !== '/account-suspended') {
+    const suspended = request.nextUrl.clone();
+    suspended.pathname = '/account-suspended';
+    suspended.search = '';
+    return redirectPreservingCookies(suspended, response);
+  }
+
+  if (nonceRow?.is_suspended !== true && pathname === '/account-suspended') {
+    const home = request.nextUrl.clone();
+    home.pathname = '/buyer';
+    home.search = '';
+    return redirectPreservingCookies(home, response);
+  }
 
   if (cookieNonce && storedNonce && cookieNonce !== storedNonce) {
     // Cookie belongs to a superseded session — revoke.

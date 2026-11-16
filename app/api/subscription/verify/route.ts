@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { recordRoleSubscription } from '@/utils/paystack/recordSubscription';
+import { accountIsActive } from '@/utils/account';
 
 /**
  * Confirms a role subscription payment and activates the role.
@@ -23,6 +24,9 @@ export async function POST(request: Request) {
         { error: 'You must be signed in to subscribe.' },
         { status: 401 }
       );
+    }
+    if (!(await accountIsActive(supabase, user.id))) {
+      return NextResponse.json({ error: 'This account is suspended.' }, { status: 403 });
     }
 
     const body = await request.json().catch(() => ({}));

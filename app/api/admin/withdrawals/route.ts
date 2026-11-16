@@ -64,7 +64,7 @@ export async function GET() {
     const { data, error } = await admin
       .from('withdrawals')
       .select(
-        'id, seller_id, amount_kobo, bank_name, bank_code, account_number, account_name, status, request_note, transfer_reference, transfer_code, transfer_status, created_at, processed_at',
+        'id, seller_id, amount_kobo, bank_name, bank_code, account_number, account_name, status, request_note, transfer_reference, transfer_code, transfer_status, transfer_error, manual_reconciled_at, manual_reconcile_note, created_at, processed_at',
       )
       .order('created_at', { ascending: false });
     if (error) throw error;
@@ -95,7 +95,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    let body: { action?: string; withdrawalId?: string };
+    let body: { action?: string; withdrawalId?: string; note?: string };
     try {
       body = await request.json();
     } catch {
@@ -104,8 +104,8 @@ export async function POST(request: Request) {
 
     const action = body?.action;
     const withdrawalId = String(body?.withdrawalId || '');
-    if (!['approve', 'reject'].includes(action || '')) {
-      return NextResponse.json({ error: 'Valid actions: approve, reject.' }, { status: 400 });
+    if (!['approve', 'reject', 'confirm_not_started'].includes(action || '')) {
+      return NextResponse.json({ error: 'Valid actions: approve, reject, confirm_not_started.' }, { status: 400 });
     }
     if (!withdrawalId) {
       return NextResponse.json({ error: 'withdrawalId is required.' }, { status: 400 });
@@ -131,7 +131,7 @@ export async function POST(request: Request) {
     const { data: w, error: loadError } = await admin
       .from('withdrawals')
       .select(
-        'id, seller_id, amount_kobo, bank_name, bank_code, account_number, account_name, status, transfer_reference, transfer_code, transfer_status',
+        'id, seller_id, amount_kobo, bank_name, bank_code, account_number, account_name, status, transfer_reference, transfer_code, transfer_status, transfer_error',
       )
       .eq('id', withdrawalId)
       .maybeSingle();
@@ -148,11 +148,66 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'This withdrawal has an invalid amount.' }, { status: 400 });
     }
 
+    // Manual reconciliation is intentionally a separate two-step action. It
+    // moves no money: after an admin checks the Paystack Transfers dashboard and
+    // records evidence that the reference does not exist, Reject may safely
+    // return the held amount on a second request.
+    if (action === 'confirm_not_started') {
+      const note = String(body.note || '').trim().slice(0, 500);
+      if (note.length < 10) {
+        return NextResponse.json({ error: 'Add a reconciliation note of at least 10 characters.' }, { status: 400 });
+      }
+      if (!w.transfer_reference || !['unknown', 'error'].includes(String(w.transfer_status || ''))) {
+        return NextResponse.json({
+          error: 'Only an unknown or errored transfer reference can be manually marked not started.',
+        }, { status: 409 });
+      }
+
+      const previousStatus = String(w.transfer_status || 'unknown');
+      const now = new Date().toISOString();
+      const { data: reconciled, error: reconcileError } = await admin
+        .from('withdrawals')
+        .update({
+          transfer_status: 'not-started',
+          transfer_error: 'Administrator checked Paystack and confirmed that no transfer was created.',
+          transfer_claimed_at: null,
+          manual_reconciled_at: now,
+          manual_reconciled_by: user.id,
+          manual_reconcile_note: note,
+        })
+        .eq('id', w.id)
+        .eq('status', 'pending')
+        .eq('transfer_status', previousStatus)
+        .select('id')
+        .maybeSingle();
+      if (reconcileError) throw reconcileError;
+      if (!reconciled) {
+        return NextResponse.json({ error: 'The transfer state changed. Refresh before reconciling it.' }, { status: 409 });
+      }
+
+      const { error: auditError } = await admin.from('withdrawal_reconciliation_events').insert({
+        withdrawal_id: w.id,
+        admin_id: user.id,
+        transfer_reference: w.transfer_reference,
+        previous_status: previousStatus,
+        decision: 'confirmed_not_started',
+        note,
+      });
+      if (auditError) console.error('[admin/withdrawals] reconciliation audit failed', auditError);
+
+      return NextResponse.json({
+        ok: true,
+        status: 'pending',
+        transfer_status: 'not-started',
+        message: 'Recorded as not started. You may now Reject to return the held amount to the seller wallet.',
+      });
+    }
+
     // -----------------------------------------------------------------------
     // REJECT — return held money only when no transfer can still land.
     // -----------------------------------------------------------------------
     if (action === 'reject') {
-      if (w.transfer_reference) {
+      if (w.transfer_reference && w.transfer_status !== 'not-started') {
         let transfer: Awaited<ReturnType<typeof verifyTransfer>> | null = null;
         try {
           transfer = await verifyTransfer(w.transfer_reference);
@@ -409,6 +464,7 @@ export async function POST(request: Request) {
         reference,
         payout.transferCode || existingCode,
         payout.transferStatus || 'error',
+        payout.message,
       );
 
       return NextResponse.json({
@@ -472,6 +528,7 @@ async function storeTransferState(
   reference: string,
   transferCode: string | null,
   status: string,
+  errorMessage: string | null = null,
 ) {
   const { error } = await admin
     .from('withdrawals')
@@ -479,6 +536,7 @@ async function storeTransferState(
       transfer_reference: reference,
       transfer_code: transferCode,
       transfer_status: status,
+      transfer_error: errorMessage,
       transfer_claimed_at: null,
     })
     .eq('id', withdrawalId)

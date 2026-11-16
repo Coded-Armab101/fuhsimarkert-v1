@@ -5,6 +5,9 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { uploadStudentId, uploadVerificationVideo } from '@/utils/verify';
 import VerificationRecorder from './buyer/VerificationRecorder';
+import Link from 'next/link';
+import { useNotifications } from '@/components/NotificationProvider';
+import { SELLER_VERIFICATION_CONSENT_VERSION } from '@/utils/legal';
 import {
   ArrowLeftRight,
   CheckCircle2,
@@ -32,9 +35,11 @@ export default function SellerVerificationGate({
 }) {
   const router = useRouter();
   const supabase = createClient();
+  const { notify } = useNotifications();
 
   const [idFile, setIdFile] = useState<File | null>(null);
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
+  const [verificationConsent, setVerificationConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [refreshLoading, setRefreshLoading] = useState(false);
 
@@ -69,11 +74,15 @@ export default function SellerVerificationGate({
     if (!user) return;
 
     if (!idFile) {
-      alert('Please take a photo of your student ID card.');
+      notify('Please take a photo of your student ID card.', { tone: 'warning' });
       return;
     }
     if (!recordingBlob) {
-      alert('Please record the 3-second selfie video.');
+      notify('Please record the 3-second selfie video.', { tone: 'warning' });
+      return;
+    }
+    if (!verificationConsent) {
+      notify('Please agree to the verification use of your ID and video.', { tone: 'warning' });
       return;
     }
 
@@ -88,25 +97,28 @@ export default function SellerVerificationGate({
       const videoRes = await uploadVerificationVideo(supabase, user.id, videoFile);
       if (!videoRes.ok) throw new Error(videoRes.error);
 
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          student_id_url: idRes.path,
-          verification_video_url: videoRes.path,
-          verification_status: 'pending',
-          verification_submitted_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', user.id);
-      if (error) throw error;
+      const response = await fetch('/api/seller/verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentIdPath: idRes.path,
+          videoPath: videoRes.path,
+          consent: verificationConsent,
+          consentVersion: SELLER_VERIFICATION_CONSENT_VERSION,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result?.error || 'Could not submit your verification.');
 
-      setOverride({ status: 'pending', submittedAt: new Date().toISOString() });
+      setOverride({ status: 'pending', submittedAt: result.submittedAt || new Date().toISOString() });
       setIdFile(null);
       setRecordingBlob(null);
+      setVerificationConsent(false);
+      notify('Verification submitted. An administrator will review it.', { tone: 'success' });
       await onRefresh();
     } catch (err: unknown) {
       console.error('Verification submit error:', err);
-      alert(err instanceof Error ? err.message : 'Could not submit your verification. Please try again.');
+      notify(err instanceof Error ? err.message : 'Could not submit your verification. Please try again.', { tone: 'error' });
     } finally {
       setSubmitting(false);
     }
@@ -167,8 +179,31 @@ export default function SellerVerificationGate({
             </p>
           )}
 
+          <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-[#eaded4] bg-[#fffaf7] p-4 text-[11px] leading-relaxed text-[#6f625a]">
+            <input
+              type="checkbox"
+              checked={verificationConsent}
+              onChange={(event) => setVerificationConsent(event.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-[#ef6b3b]"
+              required
+            />
+            <span>
+              I agree that FuhsiMarket may use my student ID and short selfie video only to confirm that I am the FUHSI student represented by this account. The files are private, are not used for advertising or facial recognition, and are deleted after review. Read the{' '}
+              <Link href="/privacy" target="_blank" className="font-bold text-[#d8552e] underline">
+                Privacy Policy
+              </Link>
+              .
+            </span>
+          </label>
+
+          {!verificationConsent ? (
+            <p className="rounded-xl bg-[#fff7e8] px-3 py-2 text-[10px] font-mono text-[#8a650f]">
+              Agree above to unlock the ID and video controls.
+            </p>
+          ) : null}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <label className="block cursor-pointer rounded-2xl border border-[#eee6de] bg-[#faf6f2] p-4 hover:border-[#ef6b3b] transition-all">
+            <label className={`block rounded-2xl border border-[#eee6de] bg-[#faf6f2] p-4 transition-all ${verificationConsent ? 'cursor-pointer hover:border-[#ef6b3b]' : 'cursor-not-allowed opacity-55'}`}>
               <div className="flex items-center gap-2 text-xs font-bold text-[#251d18]">
                 <IdCard size={16} className="text-[#ef6b3b]" /> Student ID Card (Photo)
               </div>
@@ -176,6 +211,7 @@ export default function SellerVerificationGate({
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
+                disabled={!verificationConsent || submitting}
                 onChange={(e) => setIdFile(e.target.files?.[0] || null)}
                 className="hidden"
               />
@@ -184,12 +220,12 @@ export default function SellerVerificationGate({
               </span>
             </label>
 
-            <VerificationRecorder onRecorded={setRecordingBlob} disabled={submitting} />
+            <VerificationRecorder onRecorded={setRecordingBlob} disabled={!verificationConsent || submitting} />
           </div>
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || !verificationConsent}
             className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-[#2e2520] hover:bg-black disabled:bg-[#e3dad1] disabled:cursor-not-allowed text-white font-bold text-xs py-3.5 transition-all cursor-pointer"
           >
             {submitting ? <Loader2 size={15} className="animate-spin" /> : <UploadCloud size={15} />}

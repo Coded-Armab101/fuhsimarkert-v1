@@ -30,6 +30,16 @@ export default async function DashboardLayout({
     redirect('/login');
   }
 
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('is_suspended')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (profile?.is_suspended === true) {
+    redirect('/account-suspended');
+  }
+
   return (
     <>
       {children}

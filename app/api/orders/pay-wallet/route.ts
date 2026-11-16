@@ -6,6 +6,7 @@ import { recordOrder } from '@/utils/paystack/recordOrder';
 import { buyerServiceFeeKobo, deliveryFeeForSellers } from '@/utils/pricing';
 import { checkoutDatabaseReady } from '@/utils/paystack/checkoutReady';
 import { cleanOption, normalizeVariantKey, resolveProductOptions } from '@/utils/variants';
+import { accountIsActive } from '@/utils/account';
 
 type CartRow = {
   product_id: string;
@@ -53,6 +54,9 @@ export async function POST(request: Request) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized system access request.' }, { status: 401 });
+    }
+    if (!(await accountIsActive(supabase, user.id))) {
+      return NextResponse.json({ error: 'This account is suspended.' }, { status: 403 });
     }
 
     const admin = createAdminClient();

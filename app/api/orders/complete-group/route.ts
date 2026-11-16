@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { appLink, sendEmailToUsers } from '@/utils/email';
+import { accountIsActive } from '@/utils/account';
 
 /**
  * Buyer confirms receipt of a WHOLE combined order (one order_ref, possibly from
@@ -32,6 +33,9 @@ export async function POST(request: Request) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized system access request.' }, { status: 401 });
+    }
+    if (!(await accountIsActive(supabase, user.id))) {
+      return NextResponse.json({ error: 'This account is suspended.' }, { status: 403 });
     }
 
     // Prove the order(s) exist and belong to the caller before touching money.

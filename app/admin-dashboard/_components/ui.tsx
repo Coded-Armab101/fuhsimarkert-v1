@@ -56,6 +56,7 @@ const STATUS_TONES: Record<string, string> = {
   rejected: 'bg-red-500/10 text-red-300 border-red-500/30',
   cancelled: 'bg-red-500/10 text-red-300 border-red-500/30',
   disputed: 'bg-red-500/10 text-red-300 border-red-500/30',
+  suspended: 'bg-red-500/10 text-red-300 border-red-500/30',
   buyer: 'bg-sky-500/10 text-sky-300 border-sky-500/30',
   seller: 'bg-[#DE6437]/10 text-[#FFB08F] border-[#DE6437]/30',
   admin: 'bg-violet-500/10 text-violet-300 border-violet-500/30',

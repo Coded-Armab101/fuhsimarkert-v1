@@ -5,39 +5,43 @@ import BrandLogo from '@/components/BrandLogo';
 const sections: { title: string; body: string }[] = [
   {
     title: 'Overview',
-    body: 'FuhsiMarket is a campus marketplace for FUHSI students. This policy explains what information we collect, why we collect it, and how we protect it. We only use your data to make the marketplace work — we never sell it.',
+    body: 'FuhsiMarket is a campus marketplace for FUHSI students. This policy explains the personal information we collect, why we need it, who can receive it, and the choices available to you. We do not sell personal information or use seller verification media for advertising.',
   },
   {
     title: 'What we collect',
-    body: 'Account details: your name, campus email, matric number, phone number, hostel and role on the platform. Marketplace data: your listings, orders, chats, reviews and saved watchlist. Wallet data: your balance, transactions and the payout bank details you register for withdrawals.',
+    body: 'We collect account and profile details such as your name, email address, matric number, date of birth, hostel or campus location, account role and profile settings. For seller verification, we collect a student ID image and a short selfie video. For orders and delivery, we collect the receiver name, phone number, matric number, pickup or delivery address, order items and handover code. We also store listings, cart and wishlist records, reviews, support or dispute information, wallet movements, bank name, account number and account name.',
   },
   {
     title: 'How we use your data',
-    body: 'Your details power the marketplace — showing your name to buyers and sellers, confirming your student status, fulfilling orders and deliveries, holding escrow payments, processing payouts, and keeping the platform secure. We may also send you important account updates.',
+    body: 'We use this information to create and secure accounts, confirm FUHSI student eligibility, display and fulfil listings, deliver orders, operate escrow, prevent fraud, resolve disputes, issue refunds, process seller payouts and comply with legal obligations. We may send transactional email, in-app or push notifications about orders, security, payouts and important service changes.',
+  },
+  {
+    title: 'Student ID & verification video',
+    body: 'The student ID image and short selfie video are used only for a trained administrator to check that a seller appears to be the FUHSI student represented by the account. We do not use them for advertising, public profiles, automated facial recognition or unrelated purposes. Files are stored in a private bucket, are available only through short-lived administrator links, and are deleted after the administrator approves or rejects the submission. We retain only the review result, dates, consent record and any rejection reason needed for account safety.',
   },
   {
     title: 'Payments & Paystack',
-    body: 'Card payments are processed by Paystack. We do not see or store your card number. We only keep transaction references, amounts and wallet movements needed to operate escrow, refunds and ledger records.',
+    body: 'Payments, refunds and bank transfers are processed by Paystack. FuhsiMarket does not receive or store your full card number or PIN. We retain transaction and transfer references, amounts, statuses, bank payout details and wallet ledger entries needed to operate escrow, reconcile money and investigate payment problems.',
   },
   {
     title: 'Who we share with',
-    body: 'Sellers receive the fulfilment details needed to complete your order (your name and handover information). Escrow and order data is shared with the platform operations team. We share with Paystack to move money, and with authorities only where the law requires it.',
+    body: 'A seller receives only the buyer or receiver details needed to fulfil that seller’s order. Authorized FuhsiMarket administrators can access account, order, verification and dispute records when needed for operations and safety. Service providers include Supabase for authentication, database and file storage; Paystack for payments, refunds and payouts; Resend for transactional email; and web-push delivery providers when you enable device notifications. We may disclose information to authorities where legally required or to protect users from fraud or harm.',
   },
   {
     title: 'Where your data lives',
-    body: 'Your data is stored securely on our Supabase-hosted infrastructure in the region configured for FuhsiMarket. Access is restricted to the tools needed to run the platform and is protected by role-based controls.',
+    body: 'Marketplace data is stored on Supabase-hosted infrastructure in the region configured for FuhsiMarket. Access is restricted by authentication, row-level security and administrator permissions. No online system can promise absolute security, but we limit access and use private storage for identity documents.',
   },
   {
     title: 'Cookies & local storage',
-    body: 'We use an httpOnly session cookie to keep you signed in and secure, plus browser local storage to remember your cart locally. These help the app stay fast; we do not use them for advertising profiling.',
+    body: 'We use secure session cookies and a session nonce to keep you signed in and prevent account sharing across active sessions. Browser local storage remembers cart, interface and onboarding preferences. If you enable push notifications, we store a device push endpoint and encryption keys. We do not use these technologies for third-party advertising profiling.',
   },
   {
     title: 'How long we keep data',
-    body: 'We keep account and order records as long as your account is active and for a reasonable period after, to operate escrow, resolve disputes and meet legal obligations. You can ask us to delete your data at any time.',
+    body: 'Verification ID and video files are deleted after review as described above. Account, order, escrow, payout, refund, moderation and dispute records are retained while needed to provide the service, prevent fraud, reconcile financial records and satisfy legal obligations. Retention periods may therefore differ by record. A deletion request may not remove information that must be kept for an unresolved transaction, safety investigation or legal requirement.',
   },
   {
     title: 'Your rights',
-    body: 'You can review and correct your profile at any time. You can request a copy of your data, ask for it to be corrected, or ask for your account and data to be deleted. We respond to such requests promptly.',
+    body: 'You can review and correct many profile fields in the app, disable optional push notifications, and request access to, correction of or deletion of your personal information through support. You may also object to or ask us to restrict a use where applicable. We may need to verify your identity before completing a request.',
   },
   {
     title: 'Children',
@@ -63,7 +67,7 @@ export default function PrivacyPage() {
           <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#DE6437]">Legal</p>
           <h1 className="mt-2 text-3xl font-black tracking-tight text-[#2C2C2C]">Privacy Policy</h1>
           <p className="mt-2 text-xs text-[#81756D]">
-            Last updated: 22 September 2026. This document explains how FuhsiMarket handles your information.
+            Last updated: 16 November 2026. This document explains how FuhsiMarket handles your information.
           </p>
 
           <ol className="mt-6 space-y-5">
@@ -77,6 +81,12 @@ export default function PrivacyPage() {
               </li>
             ))}
           </ol>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2 text-xs font-bold text-[#DE6437]">
+          <Link href="/terms" className="rounded-full bg-white px-4 py-2 ring-1 ring-[#E7E0D8]">Terms</Link>
+          <Link href="/refund-policy" className="rounded-full bg-white px-4 py-2 ring-1 ring-[#E7E0D8]">Refund Policy</Link>
+          <Link href="/escrow-policy" className="rounded-full bg-white px-4 py-2 ring-1 ring-[#E7E0D8]">Escrow Policy</Link>
         </div>
 
         <Link

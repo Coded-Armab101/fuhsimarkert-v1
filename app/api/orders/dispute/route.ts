@@ -4,6 +4,7 @@ import { createAdminClient } from '@/utils/supabase/admin';
 import { getWalletPaidKobo, refundCardPortion } from '@/utils/paystack/refund';
 import { sendEmailToUsers, appLink } from '@/utils/email';
 import { formatNaira } from '@/utils/money';
+import { accountIsActive } from '@/utils/account';
 
 /**
  * Buyer reports a problem with a whole combined order → refund.
@@ -34,13 +35,17 @@ type OrderRow = {
   refund_card_status?: string | null;
   refund_reference?: string | null;
   refunded_at?: string | null;
+  dispute_reason?: string | null;
+  dispute_opened_at?: string | null;
+  return_required?: boolean | null;
+  return_received_at?: string | null;
 };
 
 const DISPUTABLE = ['in_escrow', 'packing', 'ready_for_pickup', 'confirmed', 'delivered'];
 
 export async function POST(request: Request) {
   try {
-    let body: { orderRef?: string; orderId?: string };
+    let body: { orderRef?: string; orderId?: string; reason?: string; returnRequired?: boolean };
     try {
       body = await request.json();
     } catch {
@@ -49,6 +54,8 @@ export async function POST(request: Request) {
 
     let orderRef = typeof body?.orderRef === 'string' ? body.orderRef.trim() : '';
     const orderId = typeof body?.orderId === 'string' ? body.orderId.trim() : '';
+    const disputeReason = typeof body?.reason === 'string' ? body.reason.trim().slice(0, 1000) : '';
+    const requestedReturn = body?.returnRequired === true;
 
     if (!orderRef && !orderId) {
       return NextResponse.json({ error: 'Missing order reference.' }, { status: 400 });
@@ -58,6 +65,9 @@ export async function POST(request: Request) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized system access request.' }, { status: 401 });
+    }
+    if (!(await accountIsActive(supabase, user.id))) {
+      return NextResponse.json({ error: 'This account is suspended.' }, { status: 403 });
     }
 
     // Resolve the legacy orderId form to the group reference first.
@@ -79,7 +89,7 @@ export async function POST(request: Request) {
     // refundable (or already claimed by a previous unfinished attempt).
     const { data: rows, error: rowsError } = await supabase
       .from('orders')
-      .select('id, seller_id, product_id, status, refund_card_kobo, refund_card_status, refund_reference, refunded_at')
+      .select('id, seller_id, product_id, status, refund_card_kobo, refund_card_status, refund_reference, refunded_at, dispute_reason, dispute_opened_at, return_required, return_received_at')
       .eq('order_ref', orderRef)
       .eq('buyer_id', user.id);
     if (rowsError) throw rowsError;
@@ -103,6 +113,90 @@ export async function POST(request: Request) {
     }
 
     const admin = createAdminClient();
+
+    const alreadyDisputed = group.every((row) => row.status === 'disputed');
+    if (!alreadyDisputed) {
+      if (disputeReason.length < 10) {
+        return NextResponse.json({
+          error: 'Describe the problem in at least 10 characters so the seller and administrator can review it.',
+        }, { status: 400 });
+      }
+
+      const { data: opened, error: openError } = await admin.rpc('open_order_dispute', {
+        p_order_ref: orderRef,
+        p_buyer_id: user.id,
+        p_reason: disputeReason,
+        p_return_required: requestedReturn,
+      });
+      if (openError) throw openError;
+      if (opened !== true) {
+        return NextResponse.json({ error: 'This order can no longer be disputed.' }, { status: 409 });
+      }
+
+      const { error: openEventError } = await admin.from('order_dispute_events').insert(
+        group.map((row) => ({
+          order_id: row.id,
+          actor_id: user.id,
+          actor_role: 'buyer',
+          event_type: 'opened',
+          note: disputeReason,
+        })),
+      );
+      if (openEventError) console.error('[orders/dispute] open audit insert failed', openEventError);
+
+      if (requestedReturn) {
+        try {
+          const sellerIds = Array.from(new Set(group.map((row) => row.seller_id)));
+          const notifications = group.map((row) => ({
+            user_id: row.seller_id,
+            order_id: row.id,
+            type: 'order_return_requested',
+            title: 'Disputed item awaiting return',
+            message: 'The buyer opened a dispute and says they have the item. Confirm in Sales only after the returned item is back with you.',
+          }));
+          await admin.from('notifications').upsert(notifications, {
+            onConflict: 'user_id,order_id,type',
+            ignoreDuplicates: true,
+          });
+          await sendEmailToUsers(admin, sellerIds, {
+            subject: 'A disputed FuhsiMarket item is being returned',
+            heading: 'Return confirmation required',
+            lines: [
+              `The buyer opened a dispute for order ${orderRef}.`,
+              `Reason: ${disputeReason}`,
+              'Do not confirm the return until the item is physically back with you. Escrow remains frozen in the meantime.',
+            ],
+            cta: { label: 'Open your sales', url: appLink('/seller/orders') },
+          });
+        } catch (notificationError) {
+          console.warn('[orders/dispute] return notification failed', notificationError);
+        }
+
+        return NextResponse.json({
+          ok: true,
+          status: 'awaiting_return',
+          orderRef,
+          awaitingReturn: true,
+          refunded: false,
+        }, { status: 202 });
+      }
+    }
+
+    // A retry after opening a return-required dispute may only move money once
+    // every affected seller has confirmed that their item is back. The RPC
+    // below enforces the same invariant under a row lock.
+    if (
+      alreadyDisputed &&
+      group.some((row) => row.return_required === true && !row.return_received_at)
+    ) {
+      return NextResponse.json({
+        ok: true,
+        status: 'awaiting_return',
+        orderRef,
+        awaitingReturn: true,
+        refunded: false,
+      }, { status: 202 });
+    }
 
     // 1) Atomically claim the refund. Returns the amount still held, or null if
     // the group is not refundable / was already finalized.
@@ -205,6 +299,17 @@ export async function POST(request: Request) {
       // Another concurrent request finalized first. The money is settled.
       return NextResponse.json({ ok: true, alreadyRefunded: true, orderRef });
     }
+
+    const { error: refundEventError } = await admin.from('order_dispute_events').insert(
+      group.map((row) => ({
+        order_id: row.id,
+        actor_id: user.id,
+        actor_role: 'buyer',
+        event_type: 'refunded',
+        note: `Refund finalized by ${method}.`,
+      })),
+    );
+    if (refundEventError) console.error('[orders/dispute] refund audit insert failed', refundEventError);
 
     // 4) Tell both sides what happened. Best-effort, never blocks the refund.
     try {

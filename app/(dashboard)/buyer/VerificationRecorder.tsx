@@ -174,6 +174,7 @@ export default function VerificationRecorder({ onRecorded, disabled }: Props) {
           capture="user"
           className="hidden"
           disabled={disabled}
+          onChange={(event) => onRecorded(event.target.files?.[0] || null)}
         />
         <span className="text-[11px] text-neutral-400">Tap to open your camera and record</span>
       </label>

@@ -41,7 +41,7 @@ const sections: { title: string; body: string }[] = [
   },
   {
     title: 'Disputes',
-    body: 'If an order cannot be completed, raise a dispute within the platform. Our team reviews the evidence and releases funds according to the escrow rules. Keep payment and chat records as evidence.',
+    body: 'If an order cannot be completed, raise a dispute before confirming satisfactory receipt. Escrow is frozen while the issue is reviewed. If the buyer has the item and a refund requires a return, the refund remains on hold until the seller confirms the returned item or an administrator resolves the return using the available evidence. Keep item, payment and handover records as evidence.',
   },
   {
     title: 'Suspension & termination',
@@ -67,7 +67,7 @@ export default function TermsPage() {
           <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#DE6437]">Legal</p>
           <h1 className="mt-2 text-3xl font-black tracking-tight text-[#2C2C2C]">Terms of Service</h1>
           <p className="mt-2 text-xs text-[#81756D]">
-            Last updated: 22 September 2026. This document applies to every FUHSI student using FuhsiMarket.
+             Last updated: 16 November 2026. This document applies to every FUHSI student using FuhsiMarket.
           </p>
 
           <ol className="mt-6 space-y-5">
@@ -81,6 +81,12 @@ export default function TermsPage() {
               </li>
             ))}
           </ol>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2 text-xs font-bold text-[#DE6437]">
+          <Link href="/privacy" className="rounded-full bg-white px-4 py-2 ring-1 ring-[#E7E0D8]">Privacy Policy</Link>
+          <Link href="/refund-policy" className="rounded-full bg-white px-4 py-2 ring-1 ring-[#E7E0D8]">Refund Policy</Link>
+          <Link href="/escrow-policy" className="rounded-full bg-white px-4 py-2 ring-1 ring-[#E7E0D8]">Escrow Policy</Link>
         </div>
 
         <Link

@@ -4,6 +4,7 @@ import {
   listBanks,
   resolveAccountNumber,
   verifyTransfer,
+  PaystackRequestError,
   type PaystackBank,
   type PaystackTransfer,
 } from './api';
@@ -134,6 +135,16 @@ export function transferNeedsOtp(status: string): boolean {
   return status === 'otp';
 }
 
+function transferWasDefinitelyBlockedBeforeCreation(error: unknown): boolean {
+  if (!(error instanceof PaystackRequestError)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('starter business') ||
+    message.includes('cannot initiate third party payout') ||
+    message.includes('cannot initiate third-party payout')
+  );
+}
+
 /**
  * Create a recipient and initiate a transfer. Never marks the withdrawal paid:
  * the caller persists the returned state and only flips to `paid` on `success`.
@@ -208,6 +219,16 @@ export async function sendSellerPayout(input: {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Paystack rejected the transfer.';
+    if (transferWasDefinitelyBlockedBeforeCreation(err)) {
+      return {
+        kind: 'error',
+        retryable: false,
+        reference: input.reference,
+        transferStatus: 'not-started',
+        message:
+          'Paystack did not start this bank transfer because the account is a Starter Business. Upgrade and verify the Paystack business, then enable Transfers. No transfer was created, so this withdrawal can be safely rejected to return the money to the seller wallet.',
+      };
+    }
     // A duplicate reference means the transfer already exists; verify it.
     try {
       transfer = await verifyTransfer(input.reference);

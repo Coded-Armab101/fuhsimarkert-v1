@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { ROLE_PLANS, isRolePlan } from '@/utils/plans';
 import { rateLimit, PAYMENT_INIT_LIMIT } from '@/utils/rate-limit';
+import { accountIsActive } from '@/utils/account';
 
 /**
  * Starts a role subscription payment.
@@ -20,6 +21,9 @@ export async function POST(request: Request) {
 
     if (authError || !user?.email) {
       return NextResponse.json({ error: 'You must be signed in to subscribe.' }, { status: 401 });
+    }
+    if (!(await accountIsActive(supabase, user.id))) {
+      return NextResponse.json({ error: 'This account is suspended.' }, { status: 403 });
     }
 
     const limit = rateLimit({ key: `subscription-init:${user.id}`, ...PAYMENT_INIT_LIMIT });
