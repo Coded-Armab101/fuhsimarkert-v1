@@ -72,7 +72,9 @@ export default function BuyerDashboardPage() {
         // `search_products` also matches the seller's name (profiles RLS hides
         // those rows from the client). If the migration has not been applied
         // yet, fall back to title/description/category via PostgREST.
-        const { data: rpcRows, error: rpcError } = await supabase.rpc('search_products', { p_query: term });
+        const { data: rpcRows, error: rpcError } = await supabase
+          .rpc('search_products', { p_query: term })
+          .limit(100);
         if (!rpcError && Array.isArray(rpcRows)) {
           rows = rpcRows as Product[];
         } else {
@@ -80,11 +82,16 @@ export default function BuyerDashboardPage() {
           let query = supabase.from('products').select('*').eq('is_available', true);
           const filter = productSearchFilter(term);
           if (filter) query = query.or(filter);
-          const { data } = await query;
+          const { data } = await query.limit(100);
           rows = (data as Product[]) || [];
         }
       } else {
-        const { data } = await supabase.from('products').select('*').eq('is_available', true);
+        const { data } = await supabase
+          .from('products')
+          .select('*')
+          .eq('is_available', true)
+          .order('created_at', { ascending: false })
+          .limit(100);
         rows = (data as Product[]) || [];
       }
 

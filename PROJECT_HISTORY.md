@@ -688,3 +688,21 @@ session; `.mcp.json` holds the superuser string (gitignored, never commit).
 - Verified: `npx tsc --noEmit`, ESLint (9 existing `<img>` warnings, no errors),
   and `npm run build` all pass. Build generated 61 routes/pages and includes
   `ƒ Proxy (Middleware)`.
+
+### 2026-11-16 — Simplified install/onboarding UX and first traffic controls
+
+- PWA install UI now renders only when the browser supplies a real
+  `beforeinstallprompt`. Tapping **Install** opens the native installer directly;
+  unsupported/already-installed browsers see no misleading button or manual
+  steps. Accepted and dismissed choices are remembered once per browser/device.
+- Buyer and seller walkthroughs remain automatic first-run guides, but their
+  replay buttons and redundant install step were removed. Finish, Skip and Close
+  all mark each role guide complete in local storage so it does not return.
+- Seller Settings was redesigned around one clear **Switch to buyer** action,
+  with tidy notification, personal details, payout and security sections. The
+  eligible install action is now a quiet secondary device row.
+- Reduced baseline traffic: buyer order badge and notification polling now runs
+  once per minute only while the tab is visible, reuses the authenticated user
+  id, and seller subscription state refreshes only every 15 minutes. Catalogue
+  and search responses are capped at 100 products pending cursor pagination.
+- Re-verified `npx tsc --noEmit`, ESLint (no errors) and `npm run build`.

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, CheckCheck } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
@@ -41,16 +41,30 @@ export default function OrderNotificationBell({ role, className = '' }: Props) {
   const [open, setOpen] = useState(false);
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
   const [subscriptionSeen, setSubscriptionSeen] = useState(true);
+  const userIdRef = useRef<string | null>(null);
+  const lastSubscriptionCheckRef = useRef(0);
+  const loadInFlightRef = useRef(false);
 
   const storageKey = `fuhsi_order_notifications_${role}`;
   const subscriptionKey = `${storageKey}_subscription_seen`;
   const clearedKey = `${storageKey}_cleared`;
 
   const load = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (document.visibilityState !== 'visible' || loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
+    try {
+    if (!userIdRef.current) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      userIdRef.current = user.id;
+    }
+    const userId = userIdRef.current;
+    if (!userId) return;
 
-    if (role === 'seller') {
+    if (
+      role === 'seller' &&
+      Date.now() - lastSubscriptionCheckRef.current > 15 * 60 * 1000
+    ) {
       // Subscription reminders ride the same bell so a seller sees an expiring
       // plan without having to open Settings. `bucket` changes only when the
       // plan crosses the 7-day / expired line, which keeps the reminder from
@@ -58,8 +72,9 @@ export default function OrderNotificationBell({ role, className = '' }: Props) {
       const { data: profile } = await supabase
         .from('profiles')
         .select('subscription_expires_at')
-        .eq('id', user.id)
+        .eq('id', userId)
         .maybeSingle();
+      lastSubscriptionCheckRef.current = Date.now();
       const expiresAt = (profile?.subscription_expires_at as string | null) ?? null;
       let daysLeft: number | null = null;
       let bucket: SubscriptionInfo['bucket'] = 'none';
@@ -70,14 +85,14 @@ export default function OrderNotificationBell({ role, className = '' }: Props) {
       }
       setSubscription({ expiresAt, daysLeft, bucket });
       setSubscriptionSeen(localStorage.getItem(subscriptionKey) === `${expiresAt ?? 'none'}:${bucket}`);
-    } else {
+    } else if (role !== 'seller') {
       setSubscription(null);
     }
 
     const query = supabase.from('orders').select('id,status,order_ref,created_at,products(title)').order('created_at', { ascending: false }).limit(30);
     const { data, error } = role === 'buyer'
-      ? await query.eq('buyer_id', user.id)
-      : await query.eq('seller_id', user.id);
+      ? await query.eq('buyer_id', userId)
+      : await query.eq('seller_id', userId);
     if (error || !data) return;
 
     const next = data as unknown as OrderNotice[];
@@ -121,16 +136,24 @@ export default function OrderNotificationBell({ role, className = '' }: Props) {
       JSON.stringify(Array.from(nextUnread).filter(id => visibleIds.has(id))),
     );
     localStorage.setItem(clearedKey, JSON.stringify(nextCleared));
+    } finally {
+      loadInFlightRef.current = false;
+    }
   }, [clearedKey, role, storageKey, subscriptionKey, supabase]);
 
   useEffect(() => {
     // Kick off the first fetch on the next tick so the bell can paint
     // immediately, then poll for status changes while the app stays open.
     const first = window.setTimeout(() => void load(), 0);
-    const timer = window.setInterval(() => void load(), 30000);
+    const timer = window.setInterval(() => void load(), 60000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       window.clearTimeout(first);
       window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [load]);
 

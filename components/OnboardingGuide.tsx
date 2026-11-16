@@ -35,15 +35,11 @@ const GUIDES: Record<Role, { heading: string; intro: string; steps: GuideStep[] 
         body: 'Open Orders to follow packing, pickup or delivery. When the item arrives, confirm receipt to release the seller’s money.',
         tip: 'Dispute an order from the Orders page if something is wrong.',
       },
-      {
-        title: 'Install the app',
-        body: 'Add FuhsiMarket to your home screen from your profile. It opens faster and keeps a helpful offline fallback.',
-      },
     ],
   },
   seller: {
     heading: 'Start selling on FuhsiMarket',
-    intro: 'Five steps from verification to your first payout.',
+    intro: 'Four steps from verification to your first payout.',
     steps: [
       {
         title: 'Complete your seller verification',
@@ -64,30 +60,19 @@ const GUIDES: Record<Role, { heading: string; intro: string; steps: GuideStep[] 
         title: 'Get paid after delivery',
         body: 'The buyer confirms receipt and escrow releases your earnings to your wallet. Request a withdrawal to your bank when you are ready.',
       },
-      {
-        title: 'Install the app',
-        body: 'Install FuhsiMarket from your profile so new order alerts and updates are easier to catch.',
-      },
     ],
   },
 };
 
 const STORAGE_PREFIX = 'fuhsi_onboarding_v1_';
-const OPEN_EVENT = 'fuhsi-onboarding-start';
 
 function guideKey(role: Role) {
   return `${STORAGE_PREFIX}${role}`;
 }
 
-/** Replay the guide from a profile/settings button. */
-export function replayOnboarding(role: Role) {
-  if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: { role } }));
-}
-
 /**
- * First-run walkthrough for buyers and sellers. It shows once per browser and
- * can be replayed from the profile pages.
+ * First-run walkthrough for buyers and sellers. It shows once per browser for
+ * each role; finishing, skipping or closing permanently completes it.
  */
 export default function OnboardingGuide({ role }: { role: Role }) {
   const [open, setOpen] = useState(false);
@@ -107,18 +92,8 @@ export default function OnboardingGuide({ role }: { role: Role }) {
       setReady(true);
     }, 700);
 
-    const onOpen = (event: Event) => {
-      const detail = (event as CustomEvent<{ role?: Role }>).detail;
-      if (!detail?.role || detail.role === role) {
-        setStep(0);
-        setOpen(true);
-      }
-    };
-
-    window.addEventListener(OPEN_EVENT, onOpen);
     return () => {
       window.clearTimeout(timer);
-      window.removeEventListener(OPEN_EVENT, onOpen);
     };
   }, [role]);
 

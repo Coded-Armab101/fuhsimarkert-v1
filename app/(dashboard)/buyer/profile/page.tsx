@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { User, Wallet, Landmark, Save, PlusCircle, Cake, Store, X, CheckCircle, Zap, LayoutDashboard, Loader2, LogOut, IdCard, UploadCloud, ShieldCheck, Lock, RefreshCw, BookOpen } from 'lucide-react';
+import { User, Wallet, Landmark, Save, PlusCircle, Cake, Store, X, CheckCircle, Zap, LayoutDashboard, Loader2, LogOut, IdCard, UploadCloud, ShieldCheck, Lock, RefreshCw } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
 import { useCart } from '@/context/CartContext';
 import { ROLE_PLANS, type RolePlan } from '@/utils/plans';
@@ -12,7 +12,6 @@ import { formatNaira } from '@/utils/money';
 import { uploadStudentId, uploadVerificationVideo } from '@/utils/verify';
 import VerificationRecorder from '../VerificationRecorder';
 import ProfileInstallApp from '@/components/ProfileInstallApp';
-import { replayOnboarding } from '@/components/OnboardingGuide';
 import { useNotifications } from '@/components/NotificationProvider';
 import { SELLER_VERIFICATION_CONSENT_VERSION } from '@/utils/legal';
 
@@ -522,7 +521,6 @@ export default function ProfilePage() {
         <button onClick={() => document.getElementById('profile-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><User size={17} className="text-[#d8552e]" />Manage profile</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
         <button onClick={() => document.getElementById('wallet-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Wallet size={17} className="text-[#d8552e]" />Wallet and bank</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
         <button onClick={() => document.getElementById('security-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Lock size={17} className="text-[#d8552e]" />Security & Change Password</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
-        <button onClick={() => replayOnboarding('buyer')} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><BookOpen size={17} className="text-[#d8552e]" />How to use FuhsiMarket</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
         <button onClick={() => isSeller ? document.getElementById('seller-details')?.scrollIntoView({ behavior: 'smooth' }) : openRoleModal(sellerLapsed ? 'renew' : 'subscribe')} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Store size={17} className="text-[#d8552e]" />Selling on FuhsiMarket</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
       </section>
 

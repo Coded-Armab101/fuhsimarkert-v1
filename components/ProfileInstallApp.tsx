@@ -1,135 +1,109 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Download, Share2, Smartphone, X } from 'lucide-react';
+import { Download, Smartphone, X } from 'lucide-react';
 import {
   clearPwaInstallPrompt,
   getPwaInstallPrompt,
-  installGuide,
-  isIosBrowser,
+  pwaInstallWasHandled,
   pwaIsInstalled,
+  rememberPwaInstallChoice,
   subscribeToPwaInstallPrompt,
   type PwaInstallPromptEvent,
 } from '@/utils/pwaInstall';
+import { useNotifications } from '@/components/NotificationProvider';
 
 /** Profile install card, hidden automatically inside the installed PWA. */
 export default function ProfileInstallApp() {
+  const { notify } = useNotifications();
   const [checked, setChecked] = useState(false);
-  const [installed, setInstalled] = useState(false);
+  const [handled, setHandled] = useState(false);
   const [promptEvent, setPromptEvent] = useState<PwaInstallPromptEvent | null>(null);
-  const [showSteps, setShowSteps] = useState(false);
-  const [ios, setIos] = useState(false);
 
   useEffect(() => {
-    const refreshInstalledState = () => {
-      setInstalled(pwaIsInstalled());
+    const refreshState = () => {
+      const complete = pwaIsInstalled() || pwaInstallWasHandled();
+      setHandled(complete);
+      setPromptEvent(complete ? null : getPwaInstallPrompt());
       setChecked(true);
     };
 
     const initialState = window.setTimeout(() => {
-      refreshInstalledState();
-      const isIos = isIosBrowser();
-      setIos(isIos);
-      // iOS never fires `beforeinstallprompt`, so show the Safari steps
-      // immediately instead of making the buyer guess.
-      if (isIos) setShowSteps(true);
-      setPromptEvent(getPwaInstallPrompt());
+      refreshState();
     }, 0);
 
-    const unsubscribe = subscribeToPwaInstallPrompt(setPromptEvent);
+    const unsubscribe = subscribeToPwaInstallPrompt((event) => {
+      if (!pwaInstallWasHandled() && !pwaIsInstalled()) setPromptEvent(event);
+    });
     const displayMode = window.matchMedia('(display-mode: standalone)');
     const appInstalled = () => {
+      rememberPwaInstallChoice('installed');
       clearPwaInstallPrompt();
-      setInstalled(true);
+      setPromptEvent(null);
+      setHandled(true);
     };
 
-    displayMode.addEventListener('change', refreshInstalledState);
+    displayMode.addEventListener('change', refreshState);
     window.addEventListener('appinstalled', appInstalled);
     return () => {
       window.clearTimeout(initialState);
       unsubscribe();
-      displayMode.removeEventListener('change', refreshInstalledState);
+      displayMode.removeEventListener('change', refreshState);
       window.removeEventListener('appinstalled', appInstalled);
     };
   }, []);
 
   const install = async () => {
-    if (!promptEvent) {
-      setShowSteps(true);
-      return;
-    }
+    if (!promptEvent) return;
 
     try {
       await promptEvent.prompt();
       const choice = await promptEvent.userChoice;
+      rememberPwaInstallChoice(choice.outcome === 'accepted' ? 'installed' : 'dismissed');
       clearPwaInstallPrompt();
       setPromptEvent(null);
-      if (choice.outcome === 'accepted') setInstalled(true);
-      else setShowSteps(true);
+      setHandled(true);
     } catch {
-      // Some browsers reject prompt() when it is not tied to a user gesture or
-      // the install criteria changed. Fall back to the written steps.
       clearPwaInstallPrompt();
       setPromptEvent(null);
-      setShowSteps(true);
+      notify('This browser cannot install FuhsiMarket right now.', { tone: 'warning' });
     }
   };
 
-  if (!checked || installed) return null;
+  const dismiss = () => {
+    rememberPwaInstallChoice('dismissed');
+    setHandled(true);
+    setPromptEvent(null);
+  };
 
-  const guide = installGuide();
+  // `beforeinstallprompt` is the browser's authoritative signal that a direct
+  // install is possible. No prompt means no misleading button or manual steps.
+  if (!checked || handled || !promptEvent) return null;
 
   return (
-    <section className="rounded-[1.75rem] border border-[#ffd9c4] bg-gradient-to-br from-[#fff7f2] to-white p-5 shadow-sm">
-      <div className="flex items-start gap-4">
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[#ef6b3b] text-white shadow-sm">
-          <Smartphone size={21} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-black text-[#251d18]">Install FuhsiMarket</h2>
-          <p className="mt-1 text-[11px] leading-5 text-[#81756d]">
-            {ios
-              ? 'iPhone and iPad need a few Safari steps. Follow the guide below.'
-              : 'Tap once and your browser will install the marketplace for faster access, offline fallback and phone notifications.'}
-          </p>
-          <button
-            type="button"
-            onClick={install}
-            className="mt-3 inline-flex items-center gap-2 rounded-xl bg-[#ef6b3b] px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-[#d8552e]"
-          >
-            <Download size={15} />
-            {promptEvent ? 'Install now' : ios ? 'Show iPhone steps' : 'Show install steps'}
-          </button>
-        </div>
+    <section className="relative flex items-center gap-3 rounded-2xl border border-[#eee4dc] bg-white px-4 py-3 shadow-sm">
+      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#faf6f2] text-[#81756d]">
+        <Smartphone size={17} />
       </div>
-
-      {showSteps && !promptEvent && (
-        <div className="relative mt-4 rounded-2xl border border-[#eee4dc] bg-white p-4 pr-9 text-[11px] leading-5 text-[#5f5650]">
-          <button
-            type="button"
-            onClick={() => setShowSteps(false)}
-            className="absolute right-3 top-3 text-[#9d9188]"
-            aria-label="Hide install instructions"
-          >
-            <X size={14} />
-          </button>
-          <p className="flex items-center gap-1.5 font-bold text-[#251d18]">
-            <Share2 size={14} className="text-[#ef6b3b]" />
-            {guide.title}
-          </p>
-          <p className="mt-1 text-[#81756d]">{guide.intro}</p>
-          <ol className="mt-2 list-decimal space-y-1 pl-4">
-            {guide.steps.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ol>
-          {!ios && (
-            <p className="mt-2 text-[10px] text-[#9d9188]">
-              If the install option is missing, this browser may not support installing apps. Try Chrome, Edge or Safari.
-            </p>
-          )}
-        </div>
-      )}
+      <div className="min-w-0 flex-1">
+        <h2 className="text-xs font-bold text-[#251d18]">Install on this device</h2>
+        <p className="truncate text-[10px] text-[#81756d]">Open FuhsiMarket directly from your home screen.</p>
+      </div>
+      <button
+        type="button"
+        onClick={install}
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[#e3dad1] bg-[#faf6f2] px-3 py-2 text-[11px] font-bold text-[#5f5650] transition-colors hover:border-[#ef6b3b] hover:text-[#d8552e]"
+      >
+        <Download size={13} /> Install
+      </button>
+      <button
+        type="button"
+        onClick={dismiss}
+        aria-label="Do not show install again"
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[#b4aaa2] hover:bg-[#faf6f2] hover:text-[#81756d]"
+      >
+        <X size={13} />
+      </button>
     </section>
   );
 }

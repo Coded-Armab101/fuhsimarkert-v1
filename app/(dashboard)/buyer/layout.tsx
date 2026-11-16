@@ -15,23 +15,52 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
   const [orderUnread, setOrderUnread] = useState(0);
   useEffect(() => {
     const key = 'fuhsi_order_notifications_buyer';
-    const read = JSON.parse(localStorage.getItem(key) || '{}') as Record<string, string>;
     const supabase = createClient();
+    let userId: string | null = null;
+    let stopped = false;
+    let requestInFlight = false;
     const load = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data } = await supabase
-        .from('orders')
-        .select('id, status')
-        .eq('buyer_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(30);
-      const rows = (data || []) as { id: string; status: string }[];
-      setOrderUnread(rows.filter((o) => !(o.id in read) || read[o.id] !== o.status).length);
+      try {
+        if (document.visibilityState !== 'visible' || !userId || stopped || requestInFlight) return;
+        requestInFlight = true;
+        const { data } = await supabase
+          .from('orders')
+          .select('id, status')
+          .eq('buyer_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(30);
+        if (stopped) return;
+        const rows = (data || []) as { id: string; status: string }[];
+        let read: Record<string, string> = {};
+        try {
+          read = JSON.parse(localStorage.getItem(key) || '{}') as Record<string, string>;
+        } catch {
+          read = {};
+        }
+        setOrderUnread(rows.filter((o) => !(o.id in read) || read[o.id] !== o.status).length);
+      } finally {
+        requestInFlight = false;
+      }
     };
-    void load();
-    const t = window.setInterval(load, 15000);
-    return () => window.clearInterval(t);
+    const start = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || stopped) return;
+      userId = user.id;
+      await load();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    void start();
+    // One lightweight refresh per minute while the tab is visible. The old
+    // 15-second loop also called Auth every time, multiplying Supabase traffic.
+    const t = window.setInterval(() => void load(), 60000);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stopped = true;
+      window.clearInterval(t);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
   useEffect(() => { const supabase = createClient(); void (async () => { const { data: { user } } = await supabase.auth.getUser(); if (!user) return; const { count } = await supabase.from('wishlists').select('*', { count: 'exact', head: true }).eq('user_id', user.id); setSavedCount(count || 0); })(); }, []);
 
