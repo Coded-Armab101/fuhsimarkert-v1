@@ -37,14 +37,14 @@ const accountRows = [
 export default function SettingsPage() {
   return (
     <div className="seller-secondary mx-auto max-w-2xl space-y-5 py-2">
-      <section className="overflow-hidden rounded-[1.75rem] bg-gradient-to-br from-[#2e2520] via-[#3c302a] to-[#4b392f] p-6 text-white shadow-lg">
+      <section className="settings-hero overflow-hidden rounded-[1.75rem] bg-gradient-to-br from-[#2e2520] via-[#3c302a] to-[#4b392f] p-6 text-white shadow-lg">
         <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white/60">
           <Store size={14} className="text-[#ff9a55]" /> Seller account
         </div>
         <div className="mt-3 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="max-w-md">
             <h1 className="text-2xl font-black tracking-tight">Account & settings</h1>
-            <p className="mt-1.5 text-xs leading-5 text-white/65">
+            <p className="settings-muted mt-1.5 text-xs leading-5 text-white/65">
               Keep order alerts, payout details and account security in one place.
             </p>
           </div>

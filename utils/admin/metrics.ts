@@ -74,6 +74,19 @@ export type AdminOverview = {
     platformProfitKobo: number;
     sellerPayoutKobo: number;
   };
+  /** Net accounting after provider costs. See MoneyTab for the plain-English view. */
+  fees: {
+    processingCollectedKobo: number;
+    providerCollectionFeesKobo: number;
+    paymentFeeSurplusKobo: number;
+    refundedProviderFeesKobo: number;
+    transferFeesCollectedKobo: number;
+    transferFeeVarianceKobo: number;
+    deliveryReserveKobo: number;
+    grossPlatformIncomeKobo: number;
+    netPlatformCashKobo: number;
+    netRevenueBeforeCourierKobo: number;
+  };
   money: {
     walletFloatKobo: number;
     sellerWalletKobo: number;
@@ -83,6 +96,8 @@ export type AdminOverview = {
     paidWithdrawalsKobo: number;
     paidWithdrawalsCount: number;
     sellerMoneyKobo: number;
+    heldBuyerMoneyKobo: number;
+    paidTransferFeesKobo: number;
   };
   catalogue: {
     total: number;
@@ -163,6 +178,7 @@ type OrderRow = {
   status: string;
   created_at: string | null;
   status_changed_at: string | null;
+  refunded_at?: string | null;
 };
 
 type WalletRow = {
@@ -174,8 +190,24 @@ type WithdrawalRow = {
   id: string;
   seller_id: string;
   amount_kobo: number | null;
+  transfer_fee_kobo?: number | null;
+  wallet_debit_kobo?: number | null;
   status: string;
   created_at: string | null;
+};
+
+type PaymentTransactionRow = {
+  reference: string;
+  purpose: string;
+  processing_fee_kobo: number | null;
+  provider_fee_kobo: number | null;
+};
+
+type WalletCreditRow = {
+  user_id: string;
+  source: string;
+  remaining_kobo: number | null;
+  withdrawable_at: string | null;
 };
 
 type ProductRow = {
@@ -344,6 +376,8 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
     withdrawals,
     products,
     subscriptions,
+    payments,
+    credits,
     authSignups,
   ] = await Promise.all([
     // `*` keeps this working even if a deployment is missing `created_at`
@@ -352,7 +386,7 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
     fetchAllRows<OrderRow>(
       admin,
       'orders',
-      'id, order_ref, buyer_id, seller_id, amount_kobo, delivery_fee_kobo, platform_fee_kobo, quantity, status, created_at, status_changed_at',
+      'id, order_ref, buyer_id, seller_id, amount_kobo, delivery_fee_kobo, platform_fee_kobo, quantity, status, created_at, status_changed_at, refunded_at',
       { column: 'id', ascending: true },
     ),
     fetchAllRows<WalletRow>(admin, 'wallets', 'user_id, balance', {
@@ -362,8 +396,15 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
     fetchAllRows<WithdrawalRow>(
       admin,
       'withdrawals',
-      'id, seller_id, amount_kobo, status, created_at',
+      'id, seller_id, amount_kobo, transfer_fee_kobo, wallet_debit_kobo, status, created_at',
       { column: 'id', ascending: true },
+    ).catch(() =>
+      fetchAllRows<WithdrawalRow>(
+        admin,
+        'withdrawals',
+        'id, seller_id, amount_kobo, status, created_at',
+        { column: 'id', ascending: true },
+      ),
     ),
     fetchAllRows<ProductRow>(admin, 'products', 'id, stock', { column: 'id', ascending: true }),
     // Subscriptions are a bonus revenue line. A missing/renamed table must not
@@ -374,6 +415,20 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
       'user_id, amount_kobo, expires_at',
       { column: 'reference', ascending: true },
     ).catch(() => [] as SubscriptionRow[]),
+    // New accounting tables only exist after the 20261119 migration. Until then,
+    // the console still works with the legacy wallet classification.
+    fetchAllRows<PaymentTransactionRow>(
+      admin,
+      'payment_transactions',
+      'reference, purpose, processing_fee_kobo, provider_fee_kobo',
+      { column: 'reference', ascending: true },
+    ).catch(() => [] as PaymentTransactionRow[]),
+    fetchAllRows<WalletCreditRow>(
+      admin,
+      'wallet_credits',
+      'user_id, source, remaining_kobo, withdrawable_at',
+      { column: 'user_id', ascending: true },
+    ).catch(() => [] as WalletCreditRow[]),
     fetchAuthSignups(admin),
   ]);
 
@@ -427,24 +482,94 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
     return sum + Math.max(0, goods - fee);
   }, 0);
 
+  // Provider costs are recorded when Paystack confirms a payment. The buyer-paid
+  // processing fee is a pass-through: only the surplus/shortfall is ours. A
+  // refund does not return Paystack's original charge, so that fee becomes a
+  // platform cost even though the order itself is no longer revenue.
+  const processingCollectedKobo = payments.reduce(
+    (sum, payment) => sum + num(payment.processing_fee_kobo),
+    0,
+  );
+  const providerCollectionFeesKobo = payments.reduce(
+    (sum, payment) => sum + num(payment.provider_fee_kobo),
+    0,
+  );
+  const paymentFeeSurplusKobo = processingCollectedKobo - providerCollectionFeesKobo;
+  const refundedReferences = new Set(
+    orders
+      .filter((order) => Boolean(order.refunded_at))
+      .map((order) => order.order_ref || order.id),
+  );
+  const refundedProviderFeesKobo = payments
+    .filter((payment) => refundedReferences.has(payment.reference))
+    .reduce((sum, payment) => sum + num(payment.provider_fee_kobo), 0);
+  const transferFeesCollectedKobo = withdrawals.reduce(
+    (sum, withdrawal) => sum + num(withdrawal.transfer_fee_kobo),
+    0,
+  );
+  // Paystack does not currently expose a stored actual transfer fee in this
+  // schema. Our quote uses Paystack's published bands, so the variance is 0
+  // unless a future migration records the real provider fee per transfer.
+  const transferFeeVarianceKobo = 0;
+  const deliveryReserveKobo = deliveryFeesKobo;
+  const grossPlatformIncomeKobo = platformProfitKobo;
+  const netPlatformCashKobo =
+    grossPlatformIncomeKobo +
+    paymentFeeSurplusKobo -
+    refundedProviderFeesKobo -
+    transferFeeVarianceKobo;
+  const netRevenueBeforeCourierKobo = netPlatformCashKobo - deliveryReserveKobo;
+
   const activeSubscriptionUsers = new Set(
     subscriptions
       .filter((subscription) => time(subscription.expires_at) > now)
       .map((subscription) => subscription.user_id),
   );
 
-  const sellerWalletKobo = wallets
-    .filter((wallet) => sellerIds.has(wallet.user_id))
-    .reduce((sum, wallet) => sum + num(wallet.balance), 0);
   const walletFloatKobo = wallets.reduce((sum, wallet) => sum + num(wallet.balance), 0);
+  let sellerWalletKobo = 0;
+  let buyerWalletKobo = 0;
+  let heldBuyerMoneyKobo = 0;
+
+  if (credits.length > 0) {
+    // Source beats profile role: a verified seller can also fund a buyer wallet.
+    for (const credit of credits) {
+      const remaining = num(credit.remaining_kobo);
+      if (remaining <= 0) continue;
+      const source = credit.source;
+      const sellerSource = source === 'seller_earning' || source === 'withdrawal_return';
+      const buyerSource = ['funding', 'refund', 'refund_fallback'].includes(source);
+      const belongsToSeller = sellerSource || (!buyerSource && sellerIds.has(credit.user_id));
+      if (belongsToSeller) sellerWalletKobo += remaining;
+      else {
+        buyerWalletKobo += remaining;
+        if (time(credit.withdrawable_at) > now) heldBuyerMoneyKobo += remaining;
+      }
+    }
+  } else {
+    sellerWalletKobo = wallets
+      .filter((wallet) => sellerIds.has(wallet.user_id))
+      .reduce((sum, wallet) => sum + num(wallet.balance), 0);
+    buyerWalletKobo = walletFloatKobo - sellerWalletKobo;
+  }
+
+  const withdrawalDebitKobo = (withdrawal: WithdrawalRow): number =>
+    withdrawal.wallet_debit_kobo !== null && withdrawal.wallet_debit_kobo !== undefined
+      ? num(withdrawal.wallet_debit_kobo)
+      : num(withdrawal.amount_kobo) + num(withdrawal.transfer_fee_kobo);
+
   const pendingWithdrawalRows = withdrawals.filter((withdrawal) => withdrawal.status === 'pending');
   const paidWithdrawalRows = withdrawals.filter((withdrawal) => withdrawal.status === 'paid');
   const pendingWithdrawalsKobo = pendingWithdrawalRows.reduce(
-    (sum, withdrawal) => sum + num(withdrawal.amount_kobo),
+    (sum, withdrawal) => sum + withdrawalDebitKobo(withdrawal),
     0,
   );
   const paidWithdrawalsKobo = paidWithdrawalRows.reduce(
     (sum, withdrawal) => sum + num(withdrawal.amount_kobo),
+    0,
+  );
+  const paidTransferFeesKobo = paidWithdrawalRows.reduce(
+    (sum, withdrawal) => sum + num(withdrawal.transfer_fee_kobo),
     0,
   );
 
@@ -666,15 +791,29 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
       platformProfitKobo,
       sellerPayoutKobo,
     },
+    fees: {
+      processingCollectedKobo,
+      providerCollectionFeesKobo,
+      paymentFeeSurplusKobo,
+      refundedProviderFeesKobo,
+      transferFeesCollectedKobo,
+      transferFeeVarianceKobo,
+      deliveryReserveKobo,
+      grossPlatformIncomeKobo,
+      netPlatformCashKobo,
+      netRevenueBeforeCourierKobo,
+    },
     money: {
       walletFloatKobo,
       sellerWalletKobo,
-      buyerWalletKobo: walletFloatKobo - sellerWalletKobo,
+      buyerWalletKobo,
       pendingWithdrawalsKobo,
       pendingWithdrawalsCount: pendingWithdrawalRows.length,
       paidWithdrawalsKobo,
       paidWithdrawalsCount: paidWithdrawalRows.length,
       sellerMoneyKobo: sellerWalletKobo + pendingWithdrawalsKobo,
+      heldBuyerMoneyKobo,
+      paidTransferFeesKobo,
     },
     catalogue: {
       total: products.length,
@@ -702,7 +841,7 @@ export async function loadAdminUsers(
     fetchAllRows<OrderRow>(
       admin,
       'orders',
-      'id, order_ref, buyer_id, seller_id, amount_kobo, delivery_fee_kobo, platform_fee_kobo, quantity, status, created_at, status_changed_at',
+      'id, order_ref, buyer_id, seller_id, amount_kobo, delivery_fee_kobo, platform_fee_kobo, quantity, status, created_at, status_changed_at, refunded_at',
       { column: 'id', ascending: true },
     ),
     fetchAllRows<WalletRow>(admin, 'wallets', 'user_id, balance', {

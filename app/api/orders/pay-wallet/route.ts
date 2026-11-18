@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { recordOrder } from '@/utils/paystack/recordOrder';
-import { buyerServiceFeeKobo, deliveryFeeForSellers } from '@/utils/pricing';
+import { buyerServiceFeeKobo, deliveryFeeForOrder } from '@/utils/pricing';
 import { checkoutDatabaseReady } from '@/utils/paystack/checkoutReady';
 import { cleanOption, normalizeVariantKey, resolveProductOptions } from '@/utils/variants';
 import { accountIsActive } from '@/utils/account';
@@ -182,12 +182,7 @@ export async function POST(request: Request) {
     }, 0);
     const buyerFeeKobo = buyerServiceFeeKobo(itemsTotalKobo);
     // One delivery charge per seller, priced from the database.
-    const deliveryFeeKobo = deliveryFeeForSellers(
-      (products ?? []).map((product) => ({
-        seller_id: product.seller_id,
-        delivery_fee_kobo: product.delivery_fee_kobo as number | null,
-      })),
-    );
+    const deliveryFeeKobo = deliveryFeeForOrder(products ?? []);
     const chargedDeliveryKobo = isPaidDelivery ? deliveryFeeKobo : 0;
     const totalKobo = itemsTotalKobo + chargedDeliveryKobo + buyerFeeKobo;
     if (!Number.isSafeInteger(totalKobo) || totalKobo <= 0) {

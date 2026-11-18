@@ -60,9 +60,11 @@ export type PaystackTransaction = {
   reference: string;
   status: 'success' | 'failed' | 'abandoned' | string;
   amount: number;
+  fees?: number | null;
   currency: string;
   channel?: string | null;
   paid_at?: string | null;
+  authorization?: { country_code?: string | null; channel?: string | null } | null;
   customer?: { email?: string | null } | null;
   metadata?: Record<string, unknown> | null;
 };

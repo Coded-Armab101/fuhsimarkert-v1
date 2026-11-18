@@ -71,6 +71,10 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 .buyer-secondary { background: #fffdfa; color: #251d18; }
 .buyer-secondary [class*="text-white"]:not(button):not(a) { color: #251d18; }
 .buyer-secondary [class*="bg-red-"]:not(button):not(a), .buyer-secondary [class*="bg-emerald-"]:not(button):not(a) { color: inherit; }
+.buyer-secondary div.profile-wallet,
+.buyer-secondary div.profile-wallet * { color: #ffffff !important; }
+.buyer-secondary div.profile-wallet .wallet-muted { color: rgba(255,255,255,.68) !important; }
+.buyer-secondary div.profile-wallet button:last-child { color: #2e2520 !important; }
 
 /* Seller screens use the same approachable, light mobile system as the buyer app. */
 .seller-shell [class*="bg-neutral-950"] { background-color: #fff !important; border-color: #eee4dc !important; box-shadow: 0 8px 24px rgba(65,42,29,.05) !important; }
@@ -92,9 +96,12 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 .seller-shell div.wallet-hero,
 .seller-shell div.wallet-hero *,
 .seller-shell div.verification-hero,
-.seller-shell div.verification-hero * { color: #ffffff !important; }
+.seller-shell div.verification-hero *,
+.seller-shell section.settings-hero,
+.seller-shell section.settings-hero * { color: #ffffff !important; }
 .seller-shell div.wallet-hero .wallet-muted,
 .seller-shell div.verification-hero .verification-muted { color: rgba(255,255,255,.72) !important; }
+.seller-shell section.settings-hero .settings-muted { color: rgba(255,255,255,.68) !important; }
 .seller-shell div.verification-hero .verification-accent { color: #ff9a55 !important; }
 
 /* ─────────────────────────────────────────────────────────────────────────

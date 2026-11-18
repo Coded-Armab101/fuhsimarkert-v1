@@ -267,7 +267,7 @@ export default function SellerOrdersPage() {
             const canPack = order.status === 'in_escrow';
             const canReady = order.status === 'packing';
             const fulfilled = order.status === 'ready_for_pickup' || order.status === 'confirmed' || order.status === 'delivered' || order.status === 'completed';
-            const grandTotal = order.amount_kobo + (order.delivery_fee_kobo || 0);
+            const grandTotal = order.amount_kobo;
             const orderedAt = new Date(order.created_at);
             const orderedAtLabel = Number.isNaN(orderedAt.getTime())
               ? 'Time unavailable'
@@ -363,7 +363,7 @@ export default function SellerOrdersPage() {
                     </p>
                     {order.delivery_fee_kobo > 0 && (
                       <p className="text-[10px] font-mono text-amber-400 mt-1">
-                        +₦{formatNaira(order.delivery_fee_kobo)} delivery fee
+                        FuhsiMarket delivery arranged · buyer paid the platform delivery fee
                       </p>
                     )}
                   </div>

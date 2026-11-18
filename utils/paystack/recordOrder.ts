@@ -66,8 +66,14 @@ export interface RecordOrderInput {
    * webhook and the browser verify never double-charges the wallet.
    */
   walletKobo?: number;
-  /** Actual Paystack amount in kobo; 0 for wallet-only checkout. */
+  /** Order principal covered by Paystack after excluding its processing fee. */
   gatewayAmountKobo: number;
+  /** Actual amount charged by Paystack (principal + buyer-paid processing). */
+  gatewayGrossKobo?: number;
+  processingFeeKobo?: number;
+  providerFeeKobo?: number;
+  paymentChannel?: string | null;
+  paidAt?: string | null;
 }
 
 /**
@@ -185,13 +191,40 @@ export async function recordOrder(
 
   const walletKobo = Math.floor(Number(input.walletKobo) || 0);
   const gatewayAmountKobo = Math.floor(Number(input.gatewayAmountKobo));
+  const gatewayGrossKobo = Math.floor(Number(input.gatewayGrossKobo ?? gatewayAmountKobo));
+  const processingFeeKobo = Math.floor(Number(input.processingFeeKobo) || 0);
+  const providerFeeKobo = Math.floor(Number(input.providerFeeKobo) || 0);
   if (!Number.isSafeInteger(gatewayAmountKobo) || gatewayAmountKobo < 0) {
     throw new Error('invalid gateway amount');
+  }
+  if (!Number.isSafeInteger(gatewayGrossKobo) || gatewayGrossKobo < 0 ||
+      !Number.isSafeInteger(processingFeeKobo) || processingFeeKobo < 0 ||
+      !Number.isSafeInteger(providerFeeKobo) || providerFeeKobo < 0 ||
+      gatewayGrossKobo !== gatewayAmountKobo + processingFeeKobo ||
+      providerFeeKobo > processingFeeKobo ||
+      gatewayGrossKobo - providerFeeKobo < gatewayAmountKobo) {
+    throw new Error('invalid payment processing fee');
   }
   if (walletKobo < 0 || walletKobo > expectedTotalKobo ||
       gatewayAmountKobo + walletKobo !== expectedTotalKobo) {
     throw new Error('payment amount does not match checkout total');
   }
+
+  const { error: paymentAccountingError } = await supabase
+    .from('payment_transactions')
+    .upsert({
+      reference: input.reference,
+      user_id: input.buyerId,
+      purpose: 'marketplace_checkout',
+      gross_amount_kobo: gatewayGrossKobo,
+      principal_amount_kobo: gatewayAmountKobo,
+      processing_fee_kobo: processingFeeKobo,
+      provider_fee_kobo: providerFeeKobo,
+      net_received_kobo: gatewayGrossKobo - providerFeeKobo,
+      channel: input.paymentChannel || (gatewayGrossKobo === 0 ? 'wallet' : null),
+      paid_at: input.paidAt || null,
+    }, { onConflict: 'reference', ignoreDuplicates: true });
+  if (paymentAccountingError) throw paymentAccountingError;
 
   // Note whether this reference is already recorded before we debit/upsert.
   // `.select()` after the upsert is the authoritative idempotency signal, but

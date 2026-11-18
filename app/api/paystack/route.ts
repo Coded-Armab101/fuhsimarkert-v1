@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { rateLimit, PAYMENT_INIT_LIMIT } from '@/utils/rate-limit';
-import { buyerServiceFeeKobo, deliveryFeeForSellers } from '@/utils/pricing';
+import { buyerServiceFeeKobo, deliveryFeeForOrder } from '@/utils/pricing';
+import { grossUpPaystackLocalKobo } from '@/utils/payment-fees';
 import { checkoutDatabaseReady } from '@/utils/paystack/checkoutReady';
 import { cleanOption, normalizeVariantKey, resolveProductOptions } from '@/utils/variants';
 import { accountIsActive } from '@/utils/account';
@@ -227,12 +228,7 @@ export async function POST(request: Request) {
       return Number.isSafeInteger(next) ? next : Number.NaN;
     }, 0);
 
-    const deliveryFeeKobo = deliveryFeeForSellers(
-      (products ?? []).map((product) => ({
-        seller_id: product.seller_id,
-        delivery_fee_kobo: product.delivery_fee_kobo as number | null,
-      })),
-    );
+    const deliveryFeeKobo = deliveryFeeForOrder(products ?? []);
 
     // Platform earning model: goods + per-seller delivery (platform handles the
     // drop) + a tiered buyer service fee on the goods total. The buyer service
@@ -261,7 +257,7 @@ export async function POST(request: Request) {
     //       the idempotent debit_wallet ledger. The escrow value recorded later
     //       is the full product price regardless of the payment split.
     let walletKobo = 0;
-    let paystackAmountKobo = trueTotalKobo;
+    let gatewayPrincipalKobo = trueTotalKobo;
     if (walletFirst) {
       const { data: wallet } = await supabase
         .from('wallets')
@@ -275,8 +271,11 @@ export async function POST(request: Request) {
         // no Paystack charge. Signal the client to use /api/orders/pay-wallet.
         return NextResponse.json({ wallet_only: true, wallet_kobo: trueTotalKobo });
       }
-      paystackAmountKobo = trueTotalKobo - walletKobo;
+      gatewayPrincipalKobo = trueTotalKobo - walletKobo;
     }
+
+    const gatewayQuote = grossUpPaystackLocalKobo(gatewayPrincipalKobo);
+    const paystackAmountKobo = gatewayQuote.grossKobo;
 
     // 4. Dispatch a hidden credentialed request to Paystack's API engine
     const origin = request.headers.get('origin') || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
@@ -290,7 +289,7 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         email: user.email,
-        amount: paystackAmountKobo,
+       amount: paystackAmountKobo,
         callback_url: callbackUrl,
     // ⚡ CRITICAL CRITERIA: This metadata structure maps the transaction assets
     metadata: {
@@ -305,6 +304,9 @@ export async function POST(request: Request) {
         unit_price_kobo: priceById.get(item.productId) ?? 0,
       })),
       expected_total_kobo: trueTotalKobo,
+      gateway_principal_kobo: gatewayPrincipalKobo,
+      processing_fee_kobo: gatewayQuote.processingFeeKobo,
+      gateway_charge_kobo: paystackAmountKobo,
       currency: 'NGN',
       purpose: 'marketplace_checkout',
       checkout_mode: buyNow ? 'buy_now' : 'cart',

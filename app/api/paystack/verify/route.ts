@@ -95,9 +95,16 @@ export async function GET(request: Request) {
         : [];
       const expectedTotalKobo = Number(metadata.expected_total_kobo);
       const walletKobo = Number(metadata.wallet_kobo) > 0 ? Number(metadata.wallet_kobo) : 0;
+      const gatewayPrincipalKobo = Number(metadata.gateway_principal_kobo);
+      const processingFeeKobo = Number(metadata.processing_fee_kobo);
+      const gatewayChargeKobo = Number(metadata.gateway_charge_kobo);
+      const providerFeeKobo = Math.max(0, Math.floor(Number(transaction.fees) || 0));
 
       if (metadata.purpose !== 'marketplace_checkout' || metadata.currency !== 'NGN' ||
           !Number.isSafeInteger(expectedTotalKobo) || expectedTotalKobo <= 0 ||
+          !Number.isSafeInteger(gatewayPrincipalKobo) || gatewayPrincipalKobo <= 0 ||
+          !Number.isSafeInteger(processingFeeKobo) || processingFeeKobo < 0 ||
+          !Number.isSafeInteger(gatewayChargeKobo) || gatewayChargeKobo <= 0 ||
           items.length === 0 ||
           items.some((i) => !i.productId || !Number.isSafeInteger(i.quantity) || i.quantity < 1 ||
             !Number.isSafeInteger(i.unitPriceKobo) || i.unitPriceKobo < 0)) {
@@ -108,7 +115,11 @@ export async function GET(request: Request) {
       const deliveryFeeKobo = Number(metadata.delivery_fee_kobo) > 0 ? Number(metadata.delivery_fee_kobo) : 0;
       const expectedBuyerFeeKobo = buyerServiceFeeKobo(goodsKobo);
       if (goodsKobo + deliveryFeeKobo + expectedBuyerFeeKobo !== expectedTotalKobo ||
-          Number(transaction.amount) + walletKobo !== expectedTotalKobo ||
+          gatewayPrincipalKobo + walletKobo !== expectedTotalKobo ||
+          gatewayChargeKobo !== gatewayPrincipalKobo + processingFeeKobo ||
+          Number(transaction.amount) !== gatewayChargeKobo ||
+          providerFeeKobo > processingFeeKobo ||
+          gatewayChargeKobo - providerFeeKobo < gatewayPrincipalKobo ||
           transaction.currency !== 'NGN') {
         console.error('[paystack/verify] payment integrity mismatch', { reference });
         return NextResponse.json({ error: 'Payment amount could not be validated.' }, { status: 400 });
@@ -136,7 +147,12 @@ export async function GET(request: Request) {
         matricNumber: metadataText(metadata.matric_number),
         deliveryAddress: metadataText(metadata.delivery_address),
         walletKobo,
-        gatewayAmountKobo: Number(transaction.amount),
+        gatewayAmountKobo: gatewayPrincipalKobo,
+        gatewayGrossKobo: gatewayChargeKobo,
+        processingFeeKobo,
+        providerFeeKobo,
+        paymentChannel: transaction.channel || null,
+        paidAt: transaction.paid_at || null,
       };
 
       try {

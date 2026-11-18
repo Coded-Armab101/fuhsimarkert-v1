@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { User, Wallet, Landmark, Save, PlusCircle, Cake, Store, X, CheckCircle, Zap, LayoutDashboard, Loader2, LogOut, IdCard, UploadCloud, ShieldCheck, Lock, RefreshCw } from 'lucide-react';
@@ -14,6 +14,14 @@ import VerificationRecorder from '../VerificationRecorder';
 import ProfileInstallApp from '@/components/ProfileInstallApp';
 import { useNotifications } from '@/components/NotificationProvider';
 import { SELLER_VERIFICATION_CONSENT_VERSION } from '@/utils/legal';
+import {
+  grossUpPaystackLocalKobo,
+  paystackTransferFeeKobo,
+  WALLET_FUNDING_DAILY_MAX_KOBO,
+  WALLET_FUNDING_MIN_KOBO,
+  WALLET_WITHDRAWAL_DAILY_MAX_KOBO,
+  WALLET_WITHDRAWAL_MIN_KOBO,
+} from '@/utils/payment-fees';
 
 // Comprehensive list of Nigerian Banks for Paystack settlement routing
 const NIGERIAN_BANKS = [
@@ -46,6 +54,14 @@ export default function ProfilePage() {
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [withdrawing, setWithdrawing] = useState(false);
+  const [showFundModal, setShowFundModal] = useState(false);
+  const [fundAmount, setFundAmount] = useState('');
+  const [funding, setFunding] = useState(false);
+  const [walletSummary, setWalletSummary] = useState({
+    withdrawableKobo: 0,
+    heldKobo: 0,
+    nextReleaseAt: null as string | null,
+  });
   const [avatar, setAvatar] = useState('🦊');
 
   // Seller identity verification (after paying for a seller role).
@@ -93,6 +109,18 @@ export default function ProfilePage() {
     accountNumber: '',
     walletBalance: 0
   });
+
+  const refreshWalletSummary = useCallback(async () => {
+    const response = await fetch('/api/wallet/summary', { cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return;
+    setProfileData((current) => ({ ...current, walletBalance: Number(data.total_kobo) || 0 }));
+    setWalletSummary({
+      withdrawableKobo: Number(data.withdrawable_kobo) || 0,
+      heldKobo: Number(data.held_kobo) || 0,
+      nextReleaseAt: typeof data.next_release_at === 'string' ? data.next_release_at : null,
+    });
+  }, []);
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -151,12 +179,8 @@ export default function ProfilePage() {
         console.error('Error fetching profile:', profileError);
       }
 
-      // 3. Fetch escrow wallet balance (kobo)
-      const { data: wallet } = await supabase
-        .from('wallets')
-        .select('balance')
-        .eq('user_id', user.id)
-        .maybeSingle();
+      const walletResponse = await fetch('/api/wallet/summary', { cache: 'no-store' });
+      const wallet = await walletResponse.json().catch(() => ({}));
 
       if (isMounted) {
         if (savedAvatar) setAvatar(savedAvatar);
@@ -178,7 +202,12 @@ export default function ProfilePage() {
           dob: profile?.dob || '',
           bankName: profile?.bank_name || '',
           accountNumber: profile?.account_number || '',
-          walletBalance: Number(wallet?.balance) || 0,
+           walletBalance: Number(wallet?.total_kobo) || 0,
+         });
+        setWalletSummary({
+          withdrawableKobo: Number(wallet?.withdrawable_kobo) || 0,
+          heldKobo: Number(wallet?.held_kobo) || 0,
+          nextReleaseAt: typeof wallet?.next_release_at === 'string' ? wallet.next_release_at : null,
         });
       }
     } catch (err) {
@@ -195,6 +224,33 @@ export default function ProfilePage() {
     isMounted = false;
   };
 }, [supabase]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const reference = url.searchParams.get('reference') || url.searchParams.get('trxref');
+    if (url.searchParams.get('funding') !== '1' || !reference) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/wallet/fund/verify?reference=${encodeURIComponent(reference)}`);
+        const data = await response.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!response.ok || data.status !== 'success') {
+          throw new Error(data?.error || 'Wallet funding was not completed.');
+        }
+        await refreshWalletSummary();
+        notify(`₦${formatNaira(Number(data.credit_kobo) || 0)} was added to your wallet.`, { tone: 'success' });
+      } catch (error) {
+        if (!cancelled) notify(error instanceof Error ? error.message : 'Could not confirm wallet funding.', { tone: 'error' });
+      } finally {
+        url.searchParams.delete('reference');
+        url.searchParams.delete('trxref');
+        url.searchParams.delete('funding');
+        window.history.replaceState(null, '', url.toString());
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [notify, refreshWalletSummary]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -249,10 +305,46 @@ export default function ProfilePage() {
     }
   };
 
+  const fundCreditKobo = Math.floor(Number(fundAmount) * 100) || 0;
+  const fundQuote = grossUpPaystackLocalKobo(fundCreditKobo);
+  const withdrawalBankKobo = Math.floor(Number(withdrawAmount) * 100) || 0;
+  const withdrawalFeeKobo = paystackTransferFeeKobo(withdrawalBankKobo);
+  const withdrawalWalletDebitKobo = withdrawalBankKobo + withdrawalFeeKobo;
+
+  const handleFundWallet = async () => {
+    if (
+      fundCreditKobo < WALLET_FUNDING_MIN_KOBO ||
+      fundCreditKobo > WALLET_FUNDING_DAILY_MAX_KOBO
+    ) {
+      notify('Fund between ₦500 and ₦100,000.', { tone: 'warning' });
+      return;
+    }
+    setFunding(true);
+    try {
+      const response = await fetch('/api/wallet/fund/initialize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creditKobo: fundCreditKobo }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.authorization_url) {
+        throw new Error(data?.error || 'Could not start wallet funding.');
+      }
+      window.location.href = data.authorization_url;
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not start wallet funding.', { tone: 'error' });
+      setFunding(false);
+    }
+  };
+
   const handleWithdraw = async () => {
-    const amount = Math.floor(Number(withdrawAmount) * 100); // naira → kobo
-    if (!amount || amount <= 0) {
-      notify('Enter a valid withdrawal amount.', { tone: 'warning' });
+    const amount = withdrawalBankKobo;
+    if (amount < WALLET_WITHDRAWAL_MIN_KOBO || amount > WALLET_WITHDRAWAL_DAILY_MAX_KOBO) {
+      notify('Withdraw between ₦1,000 and ₦100,000.', { tone: 'warning' });
+      return;
+    }
+    if (withdrawalWalletDebitKobo > walletSummary.withdrawableKobo) {
+      notify('Your withdrawable balance must cover both the bank amount and Paystack transfer fee.', { tone: 'warning' });
       return;
     }
     if (!profileData.bankName || !profileData.accountNumber) {
@@ -282,19 +374,10 @@ export default function ProfilePage() {
         setWithdrawing(false);
         return;
       }
-      // Refresh the wallet balance shown on the ledger card.
-      const walletRes = await supabase
-        .from('wallets')
-        .select('balance')
-        .eq('user_id', userAuth.id)
-        .maybeSingle();
-      if (!walletRes.error) {
-        const newBalance = Number(walletRes.data?.balance) || 0;
-        setProfileData((prev) => ({ ...prev, walletBalance: newBalance }));
-      }
+      await refreshWalletSummary();
       setShowWithdrawModal(false);
       setWithdrawAmount('');
-      notify('Withdrawal request submitted. An administrator will review and pay it out.', { tone: 'success' });
+      notify(`Withdrawal requested. ₦${formatNaira(amount)} will reach the bank after admin approval; ₦${formatNaira(Number(data.transfer_fee_kobo) || withdrawalFeeKobo)} covers transfer charges.`, { tone: 'success' });
     } catch (err) {
       console.error('Withdrawal error:', err);
       notify('Could not process your withdrawal request. Please try again.', { tone: 'error' });
@@ -448,81 +531,102 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="buyer-secondary space-y-5 relative py-2">
-      <Link href="/buyer" className="inline-flex items-center gap-2 text-xs font-bold text-[#81756d] hover:text-[#d8552e]">← Back to home</Link>
-      {/* HEADER MATRIX */}
-      <div className="bg-neutral-950 border border-neutral-800 rounded-[2rem] p-6 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-xl text-center sm:text-left">
-        <div className="space-y-1 flex flex-col items-center sm:items-start">
-          <div className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-[#c5a4ff] to-[#8c6ae8] text-3xl">
-            {avatar}
-          </div>
-          <p className="mt-2 text-[10px] font-bold uppercase tracking-[.18em] text-[#8f8279]">Settings</p>
-          <h1 className="text-xl md:text-2xl font-black text-white flex items-center gap-2">
-            <User className="text-red-500" size={24} />
-            {profileData.fullName || 'Your account'}
-          </h1>
-          <p className="text-xs text-neutral-400 font-mono text-[11px] max-w-sm truncate">
-            {userAuth?.email}
-          </p>
+    <div className="buyer-secondary relative mx-auto max-w-4xl space-y-5 py-2">
+      <Link href="/buyer" className="inline-flex items-center gap-2 text-xs font-bold text-[#81756d] transition-colors hover:text-[#d8552e]">← Back to home</Link>
+
+      <section className="overflow-hidden rounded-[2rem] border border-[#eee4dc] bg-gradient-to-br from-[#fff7f2] via-white to-[#faf6f2] shadow-[0_16px_45px_rgba(65,42,29,.08)]">
+        <div className="flex items-center justify-between border-b border-[#f0e9e2] px-5 py-3">
+          <p className="text-[10px] font-black uppercase tracking-[.18em] text-[#d8552e]">Your FuhsiMarket account</p>
+          <button
+            type="button"
+            onClick={() => setShowLogoutModal(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[11px] font-bold text-[#81756d] transition-colors hover:bg-white hover:text-[#c2410c]"
+          >
+            <LogOut size={14} /> Sign out
+          </button>
         </div>
 
-        {/* CONDITIONALLY RENDERED BUTTON */}
-        {isSeller && verification.isApproved ? (
-          <Link href="/seller">
-            <button className="bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-4 py-3 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-red-950/40 active:scale-95 cursor-pointer">
-              <LayoutDashboard size={16} />
-              <span>Switch to Seller Studio</span>
-            </button>
-          </Link>
-        ) : isSeller ? (
-          <button
-            onClick={() => router.push('/seller')}
-            className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-4 py-3 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-amber-950/30 active:scale-95 cursor-pointer"
-          >
-            <ShieldCheck size={16} />
-            <span>Complete Verification to Sell</span>
-          </button>
-        ) : sellerLapsed ? (
-          <button
-            onClick={() => openRoleModal('renew')}
-            className="bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-4 py-3 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-red-950/40 active:scale-95 cursor-pointer"
-          >
-            <RefreshCw size={16} />
-            <span>Renew for next month</span>
-          </button>
-        ) : (
-          <button
-            onClick={() => openRoleModal('subscribe')}
-            className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-4 py-3 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-amber-950/30 active:scale-95 cursor-pointer"
-          >
-            <PlusCircle size={16} />
-            <span>Choose a Role to Become</span>
-          </button>
-        )}
+        <div className="p-5 sm:p-6">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+            <div className="grid h-20 w-20 shrink-0 place-items-center rounded-[1.6rem] bg-gradient-to-br from-[#c5a4ff] to-[#8c6ae8] text-4xl shadow-sm">
+              {avatar}
+            </div>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-2xl font-black tracking-tight text-[#251d18]">
+                {profileData.fullName || 'Complete your profile'}
+              </h1>
+              <p className="mt-1 truncate text-[11px] font-mono text-[#81756d]">{userAuth?.email}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <span className="rounded-full border border-[#eadfd6] bg-white px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-[#81756d]">Buyer</span>
+                {isSeller ? (
+                  <span className={`rounded-full border px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider ${verification.isApproved ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                    {verification.isApproved ? 'Verified seller' : 'Seller verification needed'}
+                  </span>
+                ) : null}
+              </div>
+            </div>
 
-        <button
-          onClick={() => setShowLogoutModal(true)}
-          className="bg-white hover:bg-[#FFF1EA] text-[#C2410C] text-xs font-black px-5 py-3 rounded-xl flex items-center gap-2 transition-all border border-white shadow-lg shadow-black/30 hover:shadow-black/40 active:scale-95 cursor-pointer"
-        >
-          <LogOut size={16} />
-          <span>Logout</span>
-        </button>
-      </div>
+            <div className="shrink-0">
+              {isSeller && verification.isApproved ? (
+                <Link href="/seller" className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#ef6b3b] px-5 py-3.5 text-xs font-black text-white shadow-lg shadow-[#ef6b3b]/20 transition-colors hover:bg-[#d8552e] sm:w-auto">
+                  <LayoutDashboard size={16} /> Switch to Seller Studio
+                </Link>
+              ) : isSeller ? (
+                <button type="button" onClick={() => router.push('/seller')} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-600 px-5 py-3.5 text-xs font-black text-white transition-colors hover:bg-amber-500 sm:w-auto">
+                  <ShieldCheck size={16} /> Complete seller verification
+                </button>
+              ) : sellerLapsed ? (
+                <button type="button" onClick={() => openRoleModal('renew')} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#ef6b3b] px-5 py-3.5 text-xs font-black text-white transition-colors hover:bg-[#d8552e] sm:w-auto">
+                  <RefreshCw size={16} /> Renew seller access
+                </button>
+              ) : (
+                <button type="button" onClick={() => openRoleModal('subscribe')} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#2e2520] px-5 py-3.5 text-xs font-black text-white transition-colors hover:bg-black sm:w-auto">
+                  <PlusCircle size={16} /> Become a seller
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-5 border-t border-[#f0e9e2] pt-4">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-[#9d9188]">Profile icon · saved on this device</p>
+            <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
+              {['🦊','🐼','🐸','🐯','🐙','🦋','⚽','🎧','📚','🚀','🌻','🍕'].map((icon) => (
+                <button
+                  key={icon}
+                  type="button"
+                  onClick={() => { setAvatar(icon); window.localStorage.setItem('fuhsi-avatar', icon); }}
+                  className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl text-lg transition-all ${avatar === icon ? 'bg-[#fff0e9] ring-2 ring-[#ef6b3b]' : 'bg-white ring-1 ring-[#eee4dc] hover:bg-[#faf6f2]'}`}
+                  aria-label={`Use ${icon} as your profile icon`}
+                >
+                  {icon}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
 
       <ProfileInstallApp />
 
-      <section className="rounded-[1.75rem] bg-white p-4 shadow-sm">
-        <p className="text-xs font-bold text-[#251d18]">Choose your profile icon</p>
-        <p className="mt-1 text-[11px] text-[#81756d]">Saved only on this device. It does not use database space.</p>
-        <div className="mt-3 flex flex-wrap gap-2">{['🦊','🐼','🐸','🐯','🐙','🦋','⚽','🎧','📚','🚀','🌻','🍕'].map(icon => <button key={icon} onClick={() => { setAvatar(icon); window.localStorage.setItem('fuhsi-avatar', icon); }} className={`grid h-10 w-10 place-items-center rounded-xl text-xl ${avatar === icon ? 'bg-[#fff0e9] ring-2 ring-[#ef6b3b]' : 'bg-[#faf6f2]'}`} aria-label={`Use ${icon} as your profile icon`}>{icon}</button>)}</div>
-      </section>
-
-      <section className="grid gap-2 rounded-[1.75rem] bg-white p-3 shadow-sm">
-        <button onClick={() => document.getElementById('profile-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><User size={17} className="text-[#d8552e]" />Manage profile</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
-        <button onClick={() => document.getElementById('wallet-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Wallet size={17} className="text-[#d8552e]" />Wallet and bank</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
-        <button onClick={() => document.getElementById('security-details')?.scrollIntoView({ behavior: 'smooth' })} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Lock size={17} className="text-[#d8552e]" />Security & Change Password</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
-        <button onClick={() => isSeller ? document.getElementById('seller-details')?.scrollIntoView({ behavior: 'smooth' }) : openRoleModal(sellerLapsed ? 'renew' : 'subscribe')} className="flex items-center justify-between rounded-2xl bg-[#faf6f2] px-4 py-4 text-left text-sm font-semibold text-[#251d18]"><span className="flex items-center gap-3"><Store size={17} className="text-[#d8552e]" />Selling on FuhsiMarket</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white">→</span></button>
-      </section>
+      <nav className="grid grid-cols-3 gap-2 rounded-[1.5rem] border border-[#eee4dc] bg-white p-2 shadow-sm" aria-label="Account sections">
+        {[
+          { id: 'profile-details', label: 'Profile', icon: User },
+          { id: 'wallet-details', label: 'Wallet', icon: Wallet },
+          { id: 'security-details', label: 'Security', icon: Lock },
+        ].map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => document.getElementById(item.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              className="flex flex-col items-center justify-center gap-1.5 rounded-2xl px-2 py-3 text-[11px] font-bold text-[#6f625a] transition-colors hover:bg-[#fff7f2] hover:text-[#d8552e]"
+            >
+              <Icon size={17} /> {item.label}
+            </button>
+          );
+        })}
+      </nav>
 
       {/* SELLER VERIFICATION ONBOARDING */}
       {isSeller && !verification.isApproved && (
@@ -638,112 +742,136 @@ export default function ProfilePage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-3">
         
         {/* ESCROW WALLET GRAPH */}
-<div id="wallet-details" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 shadow-xl">
+        <div id="wallet-details" className="profile-wallet scroll-mt-24 space-y-4 rounded-[1.75rem] bg-gradient-to-br from-[#2e2520] to-[#47372f] p-5 text-white shadow-xl lg:sticky lg:top-20">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-mono font-bold text-white">ESCROW LEDGER</span>
-            <Wallet size={16} className="text-emerald-400" />
+            <span className="text-[10px] font-bold uppercase tracking-[.16em] text-white/65">FuhsiMarket wallet</span>
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-white/10"><Wallet size={17} /></span>
           </div>
           <div className="space-y-1">
-            <p className="text-[10px] text-white/80 uppercase font-bold tracking-wider">Wallet balance</p>
-            <h2 className="text-3xl font-black font-mono text-white">
+            <p className="wallet-muted text-[11px] text-white/70">Available balance</p>
+            <h2 className="text-3xl font-black font-mono text-white sm:text-4xl">
               ₦{(profileData.walletBalance / 100).toLocaleString()}
             </h2>
           </div>
-          <p className="text-[11px] text-neutral-300 leading-relaxed">
-            Refunds and money from completed sales are kept here. You can withdraw to your bank.
+          <p className="wallet-muted text-[11px] leading-relaxed text-white/65">
+            Funded money and refunds can be spent immediately. Those credits unlock for bank withdrawal after 14 days; seller earnings are withdrawable immediately.
           </p>
-          {profileData.walletBalance > 0 && (
+          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-white/10 p-3 text-[10px]">
+            <div>
+              <p className="wallet-muted text-white/60">Withdrawable now</p>
+              <p className="mt-1 font-mono text-sm font-black text-white">₦{formatNaira(walletSummary.withdrawableKobo)}</p>
+            </div>
+            <div>
+              <p className="wallet-muted text-white/60">14-day hold</p>
+              <p className="mt-1 font-mono text-sm font-black text-white">₦{formatNaira(walletSummary.heldKobo)}</p>
+            </div>
+          </div>
+          {walletSummary.nextReleaseAt ? (
+            <p className="wallet-muted text-[10px] text-white/60">
+              Next held credit unlocks {new Date(walletSummary.nextReleaseAt).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })}.
+            </p>
+          ) : null}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setShowFundModal(true)}
+              className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#ef6b3b] py-3 text-xs font-black text-white transition-colors hover:bg-[#d8552e]"
+            >
+              <PlusCircle size={14} /> Fund wallet
+            </button>
             <button
               type="button"
               onClick={() => setShowWithdrawModal(true)}
-              className="w-full bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold py-3 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
+              disabled={walletSummary.withdrawableKobo < WALLET_WITHDRAWAL_MIN_KOBO}
+              className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-white py-3 text-xs font-black text-[#2e2520] transition-all hover:bg-[#fff0e9] active:scale-95 disabled:cursor-not-allowed disabled:opacity-45"
             >
-              <Wallet size={14} />
-              <span>Withdraw to Bank</span>
+              <Landmark size={14} />
+              <span>Withdraw</span>
             </button>
-          )}
+          </div>
         </div>
 
         {/* CORE DETAILS MATRIX */}
-        <div className="lg:col-span-2 space-y-6">
-          <form onSubmit={handleUpdateProfile} className="space-y-6">
+        <div className="space-y-5 lg:col-span-2">
+          <form onSubmit={handleUpdateProfile} className="space-y-5">
           
           {/* STUDENT CAMPUS METADATA */}
-          <div id="profile-details" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-4 shadow-xl">
-            <h3 className="text-sm font-bold border-b border-neutral-900 pb-3 uppercase tracking-wider font-mono text-xs text-neutral-400">
-              Personal Identity Parameters
-            </h3>
+          <section id="profile-details" className="scroll-mt-24 space-y-5 rounded-[1.75rem] border border-[#eee4dc] bg-white p-5 shadow-sm sm:p-6">
+            <div className="border-b border-[#f0e9e2] pb-4">
+              <h2 className="text-sm font-black text-[#251d18]">Personal information</h2>
+              <p className="mt-1 text-[11px] text-[#81756d]">Used for your account, campus orders and student verification.</p>
+            </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
               <div className="space-y-1">
-                <label className="text-neutral-400">Full Legal Name (Matches Bank Account)</label>
+                <label className="font-bold text-[#6f625a]">Full legal name</label>
                 <input 
                   type="text"
                   required
                   placeholder="e.g. Chinedu Okafor"
                   value={profileData.fullName}
                   onChange={(e) => setProfileData({...profileData, fullName: e.target.value})}
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-red-500"
+                  className="w-full rounded-xl border border-[#e8ddd4] bg-[#faf6f2] px-4 py-3 text-[#251d18] outline-none focus:border-[#ef6b3b]"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-neutral-400">Matriculation Number</label>
+                <label className="font-bold text-[#6f625a]">Matriculation number</label>
                 <input 
                   type="text"
                   required
                   placeholder="FUHSI/2024/*** "
                   value={profileData.matricNo}
                   onChange={(e) => setProfileData({...profileData, matricNo: e.target.value})}
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-red-500 font-mono uppercase"
+                  className="w-full rounded-xl border border-[#e8ddd4] bg-[#faf6f2] px-4 py-3 font-mono uppercase text-[#251d18] outline-none focus:border-[#ef6b3b]"
                 />
               </div>
 
               {/* DATE OF BIRTH FIELD */}
               <div className="space-y-1 sm:col-span-2">
-                <label className="text-neutral-400 flex items-center gap-1">
-                  <Cake size={13} className="text-amber-500" /> Date of Birth (Birthday Campaign Rewards)
+                <label className="flex items-center gap-1 font-bold text-[#6f625a]">
+                  <Cake size={13} className="text-[#ef6b3b]" /> Date of birth
                 </label>
                 <input 
                   type="date"
                   required
                   value={profileData.dob}
                   onChange={(e) => setProfileData({...profileData, dob: e.target.value})}
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-red-500 font-mono"
+                  className="w-full rounded-xl border border-[#e8ddd4] bg-[#faf6f2] px-4 py-3 font-mono text-[#251d18] outline-none focus:border-[#ef6b3b]"
                 />
               </div>
 
               <div className="space-y-1 sm:col-span-2">
-                <label className="text-neutral-400">Current Campus Hostel / Location Residence</label>
+                <label className="font-bold text-[#6f625a]">Campus hostel or current location</label>
                 <input 
                   type="text"
                   required
                   placeholder="e.g. Hostel B, Block C, Room 12"
                   value={profileData.hostel}
                   onChange={(e) => setProfileData({...profileData, hostel: e.target.value})}
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-red-500"
+                  className="w-full rounded-xl border border-[#e8ddd4] bg-[#faf6f2] px-4 py-3 text-[#251d18] outline-none focus:border-[#ef6b3b]"
                 />
               </div>
             </div>
-          </div>
+          </section>
 
           {/* EXTENDED BANK SYSTEM SELECTION */}
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-4 shadow-xl">
-            <h3 className="text-sm font-bold border-b border-neutral-900 pb-3 flex items-center gap-2 uppercase tracking-wider font-mono text-xs text-neutral-400">
-              <Landmark size={15} className="text-amber-500" /> Bank details
-            </h3>
+          <section className="space-y-5 rounded-[1.75rem] border border-[#eee4dc] bg-white p-5 shadow-sm sm:p-6">
+            <div className="border-b border-[#f0e9e2] pb-4">
+              <h2 className="flex items-center gap-2 text-sm font-black text-[#251d18]"><Landmark size={16} className="text-[#ef6b3b]" /> Bank & payouts</h2>
+              <p className="mt-1 text-[11px] text-[#81756d]">Only required when you want money sent to a bank account.</p>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
               <div className="space-y-1">
-                <label className="text-neutral-400">Select Bank Partner</label>
+                <label className="font-bold text-[#6f625a]">Bank</label>
                 <select
-                  required
                   value={profileData.bankName}
                   onChange={(e) => setProfileData({...profileData, bankName: e.target.value})}
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-red-500 appearance-none"
+                  className="w-full appearance-none rounded-xl border border-[#e8ddd4] bg-[#faf6f2] px-4 py-3 text-[#251d18] outline-none focus:border-[#ef6b3b]"
                 >
                   <option value="">-- Choose Account Bank --</option>
                   {NIGERIAN_BANKS.map(bank => (
@@ -753,25 +881,24 @@ export default function ProfilePage() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-neutral-400">10-Digit Account Number</label>
+                <label className="font-bold text-[#6f625a]">10-digit account number</label>
                 <input 
                   type="text"
                   maxLength={10}
-                  required
                   placeholder="0123456789"
                   value={profileData.accountNumber}
                   onChange={(e) => setProfileData({...profileData, accountNumber: e.target.value.replace(/\D/g, '')})}
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-red-500 font-mono tracking-widest"
+                  className="w-full rounded-xl border border-[#e8ddd4] bg-[#faf6f2] px-4 py-3 font-mono tracking-widest text-[#251d18] outline-none focus:border-[#ef6b3b]"
                 />
               </div>
             </div>
-          </div>
+          </section>
 
           {/* SUBMIT TRIGGER */}
           <button
             type="submit"
             disabled={updating}
-            className="w-full sm:w-auto bg-red-700 hover:bg-red-600 disabled:bg-neutral-800 text-white font-bold text-xs px-6 py-3.5 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all shadow-lg"
+            className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-[#ef6b3b] px-6 py-3.5 text-xs font-black text-white shadow-lg shadow-[#ef6b3b]/20 transition-colors hover:bg-[#d8552e] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
           >
             <Save size={14} />
             <span>{updating ? 'Saving...' : 'Save changes'}</span>
@@ -779,10 +906,11 @@ export default function ProfilePage() {
           </form>
 
           {/* SECURITY & PASSWORD CHANGE */}
-          <div id="security-details" className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-4 shadow-xl">
-            <h3 className="text-sm font-bold border-b border-neutral-900 pb-3 flex items-center gap-2 uppercase tracking-wider font-mono text-xs text-neutral-400">
-              <Lock size={15} className="text-amber-500" /> Security & Change Password
-            </h3>
+          <section id="security-details" className="scroll-mt-24 space-y-5 rounded-[1.75rem] border border-[#eee4dc] bg-white p-5 shadow-sm sm:p-6">
+            <div className="border-b border-[#f0e9e2] pb-4">
+              <h2 className="flex items-center gap-2 text-sm font-black text-[#251d18]"><Lock size={15} className="text-[#ef6b3b]" /> Password & security</h2>
+              <p className="mt-1 text-[11px] text-[#81756d]">Use a unique password with at least six characters.</p>
+            </div>
 
             {passwordMessage && (
               <div
@@ -799,26 +927,26 @@ export default function ProfilePage() {
             <form onSubmit={handlePasswordChange} className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-neutral-400">New Password</label>
+                  <label className="font-bold text-[#6f625a]">New password</label>
                   <input
                     type="password"
                     required
                     placeholder="••••••••"
                     value={passwordForm.newPassword}
                     onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
-                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-red-500 font-mono"
+                    className="w-full rounded-xl border border-[#e8ddd4] bg-[#faf6f2] px-4 py-3 font-mono text-[#251d18] outline-none focus:border-[#ef6b3b]"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-neutral-400">Confirm New Password</label>
+                  <label className="font-bold text-[#6f625a]">Confirm new password</label>
                   <input
                     type="password"
                     required
                     placeholder="••••••••"
                     value={passwordForm.confirmPassword}
                     onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
-                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-red-500 font-mono"
+                    className="w-full rounded-xl border border-[#e8ddd4] bg-[#faf6f2] px-4 py-3 font-mono text-[#251d18] outline-none focus:border-[#ef6b3b]"
                   />
                 </div>
               </div>
@@ -826,13 +954,13 @@ export default function ProfilePage() {
               <button
                 type="submit"
                 disabled={passwordLoading}
-                className="bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs px-5 py-3 rounded-xl flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#2e2520] px-5 py-3 text-xs font-bold text-white transition-colors hover:bg-black disabled:opacity-50"
               >
                 {passwordLoading && <Loader2 size={14} className="animate-spin" />}
                 <span>{passwordLoading ? 'Updating...' : 'Update Password'}</span>
               </button>
             </form>
-          </div>
+          </section>
 
         </div>
 
@@ -944,57 +1072,128 @@ export default function ProfilePage() {
         </div>
       )}
 
+      {showFundModal && (
+        <div className="fixed inset-0 z-[90] grid place-items-center bg-[#251d18]/70 p-4 backdrop-blur-sm">
+          <div className="relative w-full max-w-sm space-y-5 rounded-[1.75rem] border border-[#eee4dc] bg-white p-6 text-[#251d18] shadow-2xl sm:p-7">
+            <button
+              type="button"
+              onClick={() => setShowFundModal(false)}
+              disabled={funding}
+              className="absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-full bg-[#faf6f2] text-[#81756d] disabled:opacity-50"
+              aria-label="Close wallet funding"
+            >
+              <X size={15} />
+            </button>
+            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#fff0e9] text-[#d8552e]">
+              <PlusCircle size={22} />
+            </div>
+            <div>
+              <h2 className="text-lg font-black">Fund your wallet</h2>
+              <p className="mt-1 text-xs leading-5 text-[#81756d]">
+                Wallet credit is available for purchases immediately. Any unspent funded amount unlocks for bank withdrawal after 14 days.
+              </p>
+            </div>
+            <label className="block text-xs font-bold text-[#6f625a]">
+              Amount to add (₦)
+              <input
+                type="number"
+                inputMode="decimal"
+                min={500}
+                max={100000}
+                value={fundAmount}
+                onChange={(event) => setFundAmount(event.target.value)}
+                placeholder="500"
+                className="mt-2 w-full rounded-xl border border-[#e8ddd4] bg-[#faf6f2] px-4 py-3 font-mono text-sm text-[#251d18] outline-none focus:border-[#ef6b3b]"
+              />
+            </label>
+            <div className="space-y-2 rounded-2xl bg-[#faf6f2] p-4 text-[11px] text-[#6f625a]">
+              <div className="flex justify-between"><span>Wallet credit</span><strong>₦{formatNaira(fundCreditKobo)}</strong></div>
+              <div className="flex justify-between"><span>Paystack processing</span><strong>₦{formatNaira(fundQuote.processingFeeKobo)}</strong></div>
+              <div className="flex justify-between border-t border-[#e9dfd7] pt-2 text-xs text-[#251d18]"><span>You pay</span><strong>₦{formatNaira(fundQuote.grossKobo)}</strong></div>
+            </div>
+            <p className="text-[10px] leading-4 text-[#9d9188]">
+              The processing charge covers Paystack and is not wallet credit. Disable international payment methods in Paystack so this local-fee quote remains accurate.
+            </p>
+            <button
+              type="button"
+              onClick={handleFundWallet}
+              disabled={funding}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#ef6b3b] py-3.5 text-xs font-black text-white transition-colors hover:bg-[#d8552e] disabled:opacity-60"
+            >
+              {funding ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
+              {funding ? 'Opening Paystack…' : `Continue · ₦${formatNaira(fundQuote.grossKobo)}`}
+            </button>
+          </div>
+        </div>
+      )}
+
     {/* 🚀 WITHDRAW CONFIRMATION MODAL */}
       {showWithdrawModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-neutral-950 border border-neutral-800 rounded-3xl max-w-sm w-full p-6 sm:p-8 space-y-5 shadow-2xl relative animate-in fade-in zoom-in duration-150 text-center">
+        <div className="fixed inset-0 z-[90] grid place-items-center bg-[#251d18]/70 p-4 backdrop-blur-sm">
+          <div className="relative w-full max-w-sm space-y-5 rounded-[1.75rem] border border-[#eee4dc] bg-white p-6 text-[#251d18] shadow-2xl sm:p-7">
             <button
+              type="button"
               onClick={() => setShowWithdrawModal(false)}
               disabled={withdrawing}
-              className="absolute top-4 right-4 text-neutral-400 hover:text-white p-1 rounded-lg bg-neutral-900 border border-neutral-800 transition-all cursor-pointer disabled:opacity-50"
+              className="absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-full bg-[#faf6f2] text-[#81756d] disabled:opacity-50"
+              aria-label="Close withdrawal"
             >
               <X size={16} />
             </button>
 
-            <div className="w-14 h-14 rounded-2xl bg-emerald-950/50 border border-emerald-900/50 flex items-center justify-center mx-auto">
-              <Wallet size={24} className="text-emerald-500" />
+            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
+              <Landmark size={22} />
             </div>
 
-            <div className="space-y-1">
-              <h2 className="text-lg font-bold text-white">Withdraw to Bank</h2>
-              <p className="text-xs text-neutral-400">
-                Available: ₦{(profileData.walletBalance / 100).toLocaleString()} · Payout to{' '}
-                <span className="text-emerald-400">{profileData.bankName || '— bank not set —'}</span>
+            <div>
+              <h2 className="text-lg font-black">Withdraw to bank</h2>
+              <p className="mt-1 text-xs leading-5 text-[#81756d]">
+                Withdrawable now: <strong className="text-emerald-700">₦{formatNaira(walletSummary.withdrawableKobo)}</strong> · {profileData.bankName || 'bank not set'}
               </p>
             </div>
 
             <div className="space-y-1 text-left">
-              <label className="text-neutral-400 text-xs">Amount (₦)</label>
+              <label className="text-xs font-bold text-[#6f625a]">Amount the bank should receive (₦)</label>
               <input
                 type="number"
                 inputMode="decimal"
-                min={1}
-                placeholder="0.00"
+                min={1000}
+                max={100000}
+                placeholder="1,000"
                 value={withdrawAmount}
                 onChange={(e) => setWithdrawAmount(e.target.value)}
-                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 font-mono"
+                className="w-full rounded-xl border border-[#e8ddd4] bg-[#faf6f2] px-4 py-3 font-mono text-[#251d18] outline-none focus:border-emerald-600"
               />
             </div>
 
+            <div className="space-y-2 rounded-2xl bg-[#faf6f2] p-4 text-[11px] text-[#6f625a]">
+              <div className="flex justify-between"><span>Bank receives</span><strong>₦{formatNaira(withdrawalBankKobo)}</strong></div>
+              <div className="flex justify-between"><span>Transfer + stamp charge</span><strong>₦{formatNaira(withdrawalFeeKobo)}</strong></div>
+              <div className="flex justify-between border-t border-[#e9dfd7] pt-2 text-xs text-[#251d18]"><span>Wallet debit</span><strong>₦{formatNaira(withdrawalWalletDebitKobo)}</strong></div>
+            </div>
+
+            {walletSummary.heldKobo > 0 ? (
+              <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-4 text-amber-800">
+                ₦{formatNaira(walletSummary.heldKobo)} is still inside its 14-day cash-out hold but can already be spent in the marketplace.
+              </p>
+            ) : null}
+
             <div className="grid grid-cols-2 gap-3">
               <button
+                type="button"
                 onClick={() => setShowWithdrawModal(false)}
                 disabled={withdrawing}
-                className="bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-300 text-xs font-bold py-3 rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                className="rounded-xl border border-[#e8ddd4] bg-white py-3 text-xs font-bold text-[#6f625a] transition-colors hover:bg-[#faf6f2] disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleWithdraw}
                 disabled={withdrawing}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                className="flex items-center justify-center gap-2 rounded-xl bg-emerald-700 py-3 text-xs font-bold text-white transition-colors hover:bg-emerald-600 disabled:opacity-50"
               >
-                {withdrawing ? <Loader2 size={14} className="animate-spin" /> : <Wallet size={14} />}
+                {withdrawing ? <Loader2 size={14} className="animate-spin" /> : <Landmark size={14} />}
                 <span>{withdrawing ? 'Processing...' : 'Withdraw'}</span>
               </button>
             </div>

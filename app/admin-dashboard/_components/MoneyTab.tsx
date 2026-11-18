@@ -13,6 +13,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import type { AdminOverview } from '@/utils/admin/metrics';
+import { formatNaira } from '@/utils/money';
 import { compactNaira, fullNaira, Panel, PanelHeader } from './ui';
 
 /**
@@ -23,11 +24,12 @@ import { compactNaira, fullNaira, Panel, PanelHeader } from './ui';
  *                  pending withdrawal is created, so wallet + pending is the
  *                  real amount still owed to sellers.
  *  Buyer money   — buyer wallet balances (refunds and wallet credit).
- *  Platform money— what FuhsiMarket has earned and kept: seller commission,
- *                  buyer service fees, delivery fees and seller plans.
+ *  Platform money— cash left after Paystack costs. Gross income includes
+ *                  commission, buyer fees, delivery and seller plans; net
+ *                  revenue excludes delivery because it is reserved for courier.
  *
- * Every figure is all-time and derived from the same order rows as the rest of
- * the console, so this tab never disagrees with the Overview KPIs.
+ * Every figure is all-time and derived from the same order/ledger rows as the
+ * rest of the console, so this tab never disagrees with the Overview KPIs.
  */
 
 type Props = {
@@ -42,16 +44,22 @@ function share(part: number, whole: number): number {
   return Math.round((Math.max(0, part) / whole) * 100);
 }
 
+function signedNaira(kobo: number): string {
+  return kobo < 0 ? `-₦${formatNaira(Math.abs(kobo))}` : fullNaira(kobo);
+}
+
 function MoneyRow({
   label,
   value,
   hint,
   emphasis = false,
+  signed = false,
 }: {
   label: string;
   value: number;
   hint?: string;
   emphasis?: boolean;
+  signed?: boolean;
 }) {
   return (
     <div
@@ -68,7 +76,7 @@ function MoneyRow({
           emphasis ? 'font-black text-emerald-300' : 'text-neutral-200'
         }`}
       >
-        {fullNaira(value)}
+        {signed ? signedNaira(value) : fullNaira(value)}
       </span>
     </div>
   );
@@ -137,9 +145,9 @@ export default function MoneyTab({ data, loading, error, onRetry }: Props) {
     );
   }
 
-  const { money, orders } = data;
+  const { money, orders, fees } = data;
   const heldForPeople = money.sellerMoneyKobo + money.buyerWalletKobo;
-  const everythingTracked = heldForPeople + orders.platformProfitKobo;
+  const everythingTracked = heldForPeople + fees.netPlatformCashKobo;
 
   const revenueStreams = [
     { label: 'Seller commission', value: orders.commissionKobo, color: 'bg-[#DE6437]' },
@@ -147,7 +155,7 @@ export default function MoneyTab({ data, loading, error, onRetry }: Props) {
     { label: 'Delivery fees', value: orders.deliveryFeesKobo, color: 'bg-sky-400' },
     { label: 'Seller subscriptions', value: orders.subscriptionRevenueKobo, color: 'bg-violet-400' },
   ];
-  const revenueTotal = Math.max(1, orders.platformProfitKobo);
+  const revenueTotal = Math.max(1, fees.grossPlatformIncomeKobo);
 
   return (
     <div className="space-y-5">
@@ -163,9 +171,8 @@ export default function MoneyTab({ data, loading, error, onRetry }: Props) {
       <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
         <p className="flex items-center gap-2 text-[11px] leading-relaxed text-neutral-400">
           <Info size={13} className="shrink-0" />
-          Seller and buyer balances are money the platform is holding for other people.
-          Platform earnings are what FuhsiMarket has kept for itself. Keep the two separate —
-          a big balance is not profit.
+          Seller and buyer balances belong to other people. Paystack charges are costs, and
+          delivery money is reserved for the courier. Net revenue is what is left after both.
         </p>
       </div>
 
@@ -178,15 +185,16 @@ export default function MoneyTab({ data, loading, error, onRetry }: Props) {
           icon={<Store size={17} className="text-violet-300" />}
           tone="border-violet-500/25"
         >
-          <MoneyRow label="In seller wallets" value={money.sellerWalletKobo} />
+          <MoneyRow label="In seller wallets" value={money.sellerWalletKobo} hint="Source-tracked seller earnings" />
           <MoneyRow
             label="Waiting to be paid out"
             value={money.pendingWithdrawalsKobo}
             hint={`${money.pendingWithdrawalsCount} pending request${
               money.pendingWithdrawalsCount === 1 ? '' : 's'
-            }`}
+            } · includes seller-paid transfer fee`}
           />
-          <MoneyRow label="Already paid to sellers" value={money.paidWithdrawalsKobo} hint="All-time" />
+          <MoneyRow label="Already paid to sellers" value={money.paidWithdrawalsKobo} hint="Bank amount, all-time" />
+          <MoneyRow label="Transfer fees paid to Paystack" value={money.paidTransferFeesKobo} hint="Paid by sellers, not platform revenue" />
           <MoneyRow label="Seller payouts from completed orders" value={orders.sellerPayoutKobo} hint="After commission" />
         </PoolCard>
 
@@ -199,6 +207,7 @@ export default function MoneyTab({ data, loading, error, onRetry }: Props) {
           tone="border-sky-500/25"
         >
           <MoneyRow label="Buyer wallet balances" value={money.buyerWalletKobo} />
+          <MoneyRow label="Inside 14-day cash-out hold" value={money.heldBuyerMoneyKobo} hint="Spendable now, not withdrawable yet" />
           <MoneyRow label="Total buyer spend" value={orders.gmvKobo} hint="All orders except cancelled" />
           <MoneyRow label="Completed buyer spend" value={orders.completedGmvKobo} hint="Delivered orders" />
           <MoneyRow label="Still in escrow" value={orders.activeValueKobo} hint={`${orders.active} open orders`} />
@@ -206,27 +215,67 @@ export default function MoneyTab({ data, loading, error, onRetry }: Props) {
 
         <PoolCard
           title="FuhsiMarket money"
-          owner="Earned by the platform"
-          total={orders.platformProfitKobo}
-          hint="Every revenue stream combined: commission, fees, delivery and seller plans."
+          owner="Cash left after Paystack costs"
+          total={fees.netPlatformCashKobo}
+          hint="Includes the delivery reserve. Net revenue excludes it until courier is paid."
           icon={<TrendingUp size={17} className="text-[#FFB08F]" />}
           tone="border-[#DE6437]/25"
         >
-          <MoneyRow label="Seller commission (3%)" value={orders.commissionKobo} />
-          <MoneyRow label="Buyer service fees" value={orders.buyerFeesKobo} />
-          <MoneyRow label="Delivery fees kept" value={orders.deliveryFeesKobo} />
-          <MoneyRow label="Seller plan revenue" value={orders.subscriptionRevenueKobo} hint={`${data.users.activeSubscriptions} active plans`} />
+          <MoneyRow label="Gross platform income" value={fees.grossPlatformIncomeKobo} />
+          <MoneyRow label="Payment fee surplus / (shortfall)" value={fees.paymentFeeSurplusKobo} signed />
+          <MoneyRow label="Paystack fees lost on refunds" value={-fees.refundedProviderFeesKobo} signed hint="Original fees are not returned" />
+          <MoneyRow label="Net platform cash" value={fees.netPlatformCashKobo} emphasis />
+          <MoneyRow label="Delivery reserve inside cash" value={fees.deliveryReserveKobo} hint="Courier paid outside the app" />
+          <MoneyRow label="Net revenue before courier" value={fees.netRevenueBeforeCourierKobo} emphasis />
         </PoolCard>
       </div>
+
+      <Panel>
+        <PanelHeader
+          title="Paystack fees & real revenue"
+          subtitle="Buyer-paid processing is a pass-through. Only the surplus or shortfall is ours."
+          action={
+            <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-mono text-emerald-300">
+              {fullNaira(fees.netRevenueBeforeCourierKobo)}
+            </span>
+          }
+        />
+        <div className="grid gap-x-8 px-4 py-4 sm:grid-cols-2">
+          <div>
+            <MoneyRow label="Processing fees collected from buyers" value={fees.processingCollectedKobo} />
+            <MoneyRow label="Paystack collection fees paid" value={-fees.providerCollectionFeesKobo} signed />
+            <MoneyRow
+              label="Payment fee surplus / (shortfall)"
+              value={fees.paymentFeeSurplusKobo}
+              signed
+              hint="Collected processing minus Paystack's real charge"
+            />
+            <MoneyRow
+              label="Paystack fees lost on refunds"
+              value={-fees.refundedProviderFeesKobo}
+              signed
+              hint="Paystack does not refund the original charge"
+            />
+            <MoneyRow label="Transfer fees collected from users" value={fees.transferFeesCollectedKobo} hint="Deducted from seller/buyer wallets" />
+          </div>
+          <div>
+            <MoneyRow label="Transfer fee variance" value={-fees.transferFeeVarianceKobo} signed hint="Quote minus actual Paystack transfer fee" />
+            <MoneyRow label="Gross platform income" value={fees.grossPlatformIncomeKobo} />
+            <MoneyRow label="Net platform cash" value={fees.netPlatformCashKobo} emphasis />
+            <MoneyRow label="Delivery reserve" value={fees.deliveryReserveKobo} hint="Held for courier payment outside the app" />
+            <MoneyRow label="Net revenue before courier" value={fees.netRevenueBeforeCourierKobo} emphasis />
+          </div>
+        </div>
+      </Panel>
 
       <div className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
         <Panel>
           <PanelHeader
-            title="Revenue streams"
-            subtitle="Every way FuhsiMarket makes money, all-time and combined."
+            title="Gross income streams"
+            subtitle="Before Paystack costs and before courier payment."
             action={
               <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-mono text-emerald-300">
-                {fullNaira(orders.platformProfitKobo)}
+                {fullNaira(fees.grossPlatformIncomeKobo)}
               </span>
             }
           />
@@ -268,7 +317,8 @@ export default function MoneyTab({ data, loading, error, onRetry }: Props) {
             </div>
 
             <div className="border-t border-white/10 pt-1">
-              <MoneyRow label="Total platform earnings" value={orders.platformProfitKobo} emphasis />
+              <MoneyRow label="Gross platform income" value={fees.grossPlatformIncomeKobo} emphasis />
+              <MoneyRow label="Net revenue before courier" value={fees.netRevenueBeforeCourierKobo} />
             </div>
           </div>
         </Panel>
@@ -276,7 +326,7 @@ export default function MoneyTab({ data, loading, error, onRetry }: Props) {
         <Panel>
           <PanelHeader
             title="Where every naira sits"
-            subtitle="Held money and earned money, side by side."
+            subtitle="Held money and net platform cash, side by side."
           />
           <div className="px-4 py-4">
             <div className="flex h-3 overflow-hidden rounded-full bg-white/5">
@@ -292,8 +342,8 @@ export default function MoneyTab({ data, loading, error, onRetry }: Props) {
               />
               <div
                 className="bg-[#DE6437]"
-                style={{ width: `${(orders.platformProfitKobo / Math.max(1, everythingTracked)) * 100}%` }}
-                title={`Platform: ${fullNaira(orders.platformProfitKobo)}`}
+                style={{ width: `${(Math.max(0, fees.netPlatformCashKobo) / Math.max(1, everythingTracked)) * 100}%` }}
+                title={`Platform: ${fullNaira(fees.netPlatformCashKobo)}`}
               />
             </div>
             <div className="mt-4">
@@ -303,14 +353,14 @@ export default function MoneyTab({ data, loading, error, onRetry }: Props) {
                 hint={`${share(heldForPeople, everythingTracked)}% of everything tracked`}
               />
               <MoneyRow
-                label="Earned by FuhsiMarket"
-                value={orders.platformProfitKobo}
-                hint={`${share(orders.platformProfitKobo, everythingTracked)}% of everything tracked`}
+                label="Net platform cash"
+                value={fees.netPlatformCashKobo}
+                hint={`${share(fees.netPlatformCashKobo, everythingTracked)}% of everything tracked`}
               />
               <MoneyRow
                 label="Everything tracked"
                 value={everythingTracked}
-                hint="Held balances + platform earnings"
+                hint="Held balances + net platform cash"
                 emphasis
               />
             </div>
@@ -333,26 +383,28 @@ export default function MoneyTab({ data, loading, error, onRetry }: Props) {
             action={<Banknote size={15} className="text-neutral-500" />}
           />
           <div className="px-4 py-4">
-            <MoneyRow label="Pending withdrawal requests" value={money.pendingWithdrawalsKobo} hint={`${money.pendingWithdrawalsCount} waiting`} />
-            <MoneyRow label="Paid out all-time" value={money.paidWithdrawalsKobo} hint={`${money.paidWithdrawalsCount} completed transfers`} />
+            <MoneyRow label="Pending wallet debits" value={money.pendingWithdrawalsKobo} hint={`${money.pendingWithdrawalsCount} waiting · bank amount + fee`} />
+            <MoneyRow label="Paid to bank accounts" value={money.paidWithdrawalsKobo} hint={`${money.paidWithdrawalsCount} completed transfers`} />
+            <MoneyRow label="Transfer charges paid by users" value={money.paidTransferFeesKobo} hint="Not FuhsiMarket revenue" />
             <MoneyRow label="Available in seller wallets now" value={money.sellerWalletKobo} />
           </div>
         </Panel>
 
         <Panel>
           <PanelHeader
-            title="Platform earnings per order"
-            subtitle="Recognised when an order completes, so it never counts money still in escrow."
+            title="Platform income per order"
+            subtitle="Recognised when an order completes, before Paystack costs and courier."
             action={<Wallet size={15} className="text-neutral-500" />}
           />
           <div className="px-4 py-4">
             <MoneyRow label="Completed goods value" value={orders.completedGmvKobo} hint={`${orders.completed} completed orders`} />
             <MoneyRow label="Commission taken" value={orders.commissionKobo} />
             <MoneyRow label="Buyer fees collected" value={orders.buyerFeesKobo} />
-            <MoneyRow label="Delivery fees collected" value={orders.deliveryFeesKobo} />
+            <MoneyRow label="Gross delivery fees collected" value={orders.deliveryFeesKobo} hint="Delivery reserve, not profit" />
             <MoneyRow label="Seller plan revenue" value={orders.subscriptionRevenueKobo} />
             <div className="mt-1 border-t border-white/10 pt-1">
-              <MoneyRow label="Total kept by FuhsiMarket" value={orders.platformProfitKobo} emphasis />
+              <MoneyRow label="Gross platform income" value={fees.grossPlatformIncomeKobo} emphasis />
+              <MoneyRow label="Net revenue before courier" value={fees.netRevenueBeforeCourierKobo} />
             </div>
           </div>
         </Panel>

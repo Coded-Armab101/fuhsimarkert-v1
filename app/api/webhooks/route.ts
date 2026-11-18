@@ -6,6 +6,7 @@ import { buyerServiceFeeKobo } from '@/utils/pricing';
 import { recordRoleSubscription } from '@/utils/paystack/recordSubscription';
 import { appLink, sendEmailToUsers } from '@/utils/email';
 import { formatNaira } from '@/utils/money';
+import { recordWalletFunding } from '@/utils/paystack/recordWalletFunding';
 
 /**
  * Paystack webhook — `charge.success` → escrow orders.
@@ -50,14 +51,20 @@ export async function POST(request: Request) {
     data?: {
       reference?: string;
       amount?: number | string;
+      fees?: number | string | null;
       currency?: string;
       status?: string;
+      channel?: string | null;
+      paid_at?: string | null;
       transaction_reference?: string;
       refund_reference?: string | null;
       metadata?: {
         buyer_id?: string;
         user_id?: string;
         plan_type?: string;
+        credit_amount_kobo?: number;
+        processing_fee_kobo?: number;
+        gateway_charge_kobo?: number;
         product_ids?: string[];
         delivery_type?: string;
         delivery_fee_kobo?: number;
@@ -75,6 +82,7 @@ export async function POST(request: Request) {
           unit_price_kobo?: number;
         }>;
         expected_total_kobo?: number;
+        gateway_principal_kobo?: number;
         purpose?: string;
         currency?: string;
       };
@@ -160,6 +168,28 @@ export async function POST(request: Request) {
 
   const reference = event.data?.reference;
 
+  if (event.data?.metadata?.purpose === 'wallet_funding') {
+    if (!reference || event.data.currency !== 'NGN') {
+      return NextResponse.json({ received: true }, { status: 200 });
+    }
+    try {
+      await recordWalletFunding(createAdminClient(), {
+        reference,
+        status: event.data.status || 'success',
+        amount: Number(event.data.amount),
+        fees: Number(event.data.fees) || 0,
+        currency: event.data.currency,
+        channel: event.data.channel || null,
+        paid_at: event.data.paid_at || null,
+        metadata: event.data.metadata,
+      });
+      return NextResponse.json({ received: true }, { status: 200 });
+    } catch (error) {
+      console.error('[webhook] failed to record wallet funding', { reference, error });
+      return NextResponse.json({ error: 'Temporary wallet funding failure.' }, { status: 500 });
+    }
+  }
+
   // Role subscriptions have no marketplace product payload. Handle them from
   // the signed webhook as the server-side backstop for a browser that closes
   // immediately after payment. recordRoleSubscription is idempotent on the
@@ -205,7 +235,10 @@ export async function POST(request: Request) {
       }))
     : [];
   const expectedTotalKobo = Number(event.data?.metadata?.expected_total_kobo);
-  const gatewayAmountKobo = Number(event.data?.amount);
+  const gatewayPrincipalKobo = Number(event.data?.metadata?.gateway_principal_kobo);
+  const processingFeeKobo = Number(event.data?.metadata?.processing_fee_kobo);
+  const gatewayChargeKobo = Number(event.data?.metadata?.gateway_charge_kobo);
+  const providerFeeKobo = Math.max(0, Math.floor(Number(event.data?.fees) || 0));
   const currency = event.data?.currency;
 
   if (!reference || !buyerId || !Array.isArray(productIds) || productIds.length === 0) {
@@ -218,7 +251,9 @@ export async function POST(request: Request) {
   if (event.data?.metadata?.purpose !== 'marketplace_checkout' ||
       event.data?.metadata?.currency !== 'NGN' || currency !== 'NGN' ||
       !Number.isSafeInteger(expectedTotalKobo) || expectedTotalKobo <= 0 ||
-      !Number.isSafeInteger(gatewayAmountKobo) || gatewayAmountKobo < 0 ||
+      !Number.isSafeInteger(gatewayPrincipalKobo) || gatewayPrincipalKobo <= 0 ||
+      !Number.isSafeInteger(processingFeeKobo) || processingFeeKobo < 0 ||
+      !Number.isSafeInteger(gatewayChargeKobo) || gatewayChargeKobo <= 0 ||
       new Set(productIds).size !== productIds.length ||
       new Set(checkoutItems.map((i) => `${i.productId}::${i.variantKey}`)).size !== checkoutItems.length ||
       new Set(checkoutItems.map((i) => i.productId)).size !== productIds.length ||
@@ -233,7 +268,11 @@ export async function POST(request: Request) {
   const expectedDeliveryKobo = deliveryFeeKobo;
   const expectedFeeKobo = buyerServiceFeeKobo(goodsKobo);
   if (goodsKobo + expectedDeliveryKobo + expectedFeeKobo !== expectedTotalKobo ||
-      gatewayAmountKobo + walletKobo !== expectedTotalKobo) {
+      gatewayPrincipalKobo + walletKobo !== expectedTotalKobo ||
+      gatewayChargeKobo !== gatewayPrincipalKobo + processingFeeKobo ||
+      Number(event.data?.amount) !== gatewayChargeKobo ||
+      providerFeeKobo > processingFeeKobo ||
+      gatewayChargeKobo - providerFeeKobo < gatewayPrincipalKobo) {
     console.error('[webhook] payment amount mismatch', { reference });
     return NextResponse.json({ received: true }, { status: 200 });
   }
@@ -252,7 +291,12 @@ export async function POST(request: Request) {
       matricNumber,
       deliveryAddress: receiverAddress,
       walletKobo,
-      gatewayAmountKobo,
+      gatewayAmountKobo: gatewayPrincipalKobo,
+      gatewayGrossKobo: gatewayChargeKobo,
+      processingFeeKobo,
+      providerFeeKobo,
+      paymentChannel: event.data?.channel || null,
+      paidAt: event.data?.paid_at || null,
     });
 
     return NextResponse.json({ received: true }, { status: 200 });

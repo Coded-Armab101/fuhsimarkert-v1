@@ -39,6 +39,8 @@ type Withdrawal = {
   id: string;
   seller_id: string;
   amount_kobo: number;
+  transfer_fee_kobo?: number;
+  wallet_debit_kobo?: number;
   bank_name: string;
   account_number: string;
   account_name: string;
@@ -677,6 +679,11 @@ setSLoading(false);
                   <p className="text-[11px] text-neutral-400 mt-1">
                     {w.account_name} · {w.bank_name} · {w.account_number}
                   </p>
+                  {Number(w.transfer_fee_kobo) > 0 ? (
+                    <p className="mt-0.5 text-[10px] font-mono text-neutral-500">
+                      User-paid transfer/stamp cost: ₦{formatNaira(Number(w.transfer_fee_kobo))} · wallet debit ₦{formatNaira(Number(w.wallet_debit_kobo) || w.amount_kobo)}
+                    </p>
+                  ) : null}
                   <p className="text-[10px] text-neutral-500 font-mono mt-0.5">
                     {w.seller?.full_name || 'Seller'}
                   </p>
@@ -861,7 +868,10 @@ setSLoading(false);
                   </div>
                   <div className="text-right">
                     <p className="text-emerald-400 font-mono font-bold text-sm">
-                      ₦{formatNaira(g.items.reduce((s, i) => s + i.amountKobo + i.deliveryFeeKobo, 0))}
+                      ₦{formatNaira(
+                        g.items.reduce((sum, item) => sum + item.amountKobo, 0) +
+                        Math.max(0, ...g.items.map((item) => item.deliveryFeeKobo))
+                      )}
                     </p>
                   </div>
                 </div>

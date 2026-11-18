@@ -5,10 +5,13 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { formatNaira, nairaToKobo } from '@/utils/money';
 import { Wallet, Loader2, Banknote, ArrowDownUp, CheckCircle2, Clock, Landmark, ShoppingBag } from 'lucide-react';
+import { paystackTransferFeeKobo } from '@/utils/payment-fees';
 
 type Withdrawal = {
   id: string;
   amount_kobo: number;
+  transfer_fee_kobo?: number | null;
+  wallet_debit_kobo?: number | null;
   bank_name?: string | null;
   account_number?: string | null;
   account_name?: string | null;
@@ -31,6 +34,8 @@ export default function SellerWalletPage() {
 
   const [loading, setLoading] = useState(true);
   const [balanceKobo, setBalanceKobo] = useState(0);
+  const [withdrawableKobo, setWithdrawableKobo] = useState(0);
+  const [heldKobo, setHeldKobo] = useState(0);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
 
   const [amountInput, setAmountInput] = useState('');
@@ -49,16 +54,27 @@ export default function SellerWalletPage() {
           return;
         }
 
-        const [{ data: wallet }, { data: wds }] = await Promise.all([
-          supabase.from('wallets').select('balance').eq('user_id', user.id).maybeSingle(),
+        const [walletResponse, { data: wds }, { data: profile }] = await Promise.all([
+          fetch('/api/wallet/summary', { cache: 'no-store' }),
           supabase.from('withdrawals')
-            .select('id, amount_kobo, bank_name, account_number, account_name, status, request_note, created_at')
+            .select('id, amount_kobo, transfer_fee_kobo, wallet_debit_kobo, bank_name, account_number, account_name, status, request_note, created_at')
             .eq('seller_id', user.id)
             .order('created_at', { ascending: false }),
+          supabase.from('profiles').select('full_name, bank_name, account_number, account_name').eq('id', user.id).maybeSingle(),
         ]);
 
-        if (wallet) setBalanceKobo(Number(wallet.balance) || 0);
+        const wallet = await walletResponse.json().catch(() => ({}));
+        if (walletResponse.ok) {
+          setBalanceKobo(Number(wallet.total_kobo) || 0);
+          setWithdrawableKobo(Number(wallet.withdrawable_kobo) || 0);
+          setHeldKobo(Number(wallet.held_kobo) || 0);
+        }
         if (wds) setWithdrawals((wds as Withdrawal[]) || []);
+        if (profile) {
+          setBankName(profile.bank_name || '');
+          setAccountNumber(profile.account_number || '');
+          setAccountName(profile.account_name || profile.full_name || '');
+        }
       } finally {
         setLoading(false);
       }
@@ -78,8 +94,9 @@ export default function SellerWalletPage() {
       setFeedback({ kind: 'error', msg: 'Enter a valid withdrawal amount.' });
       return;
     }
-    if (amountKobo > balanceKobo) {
-      setFeedback({ kind: 'error', msg: 'Amount exceeds your available balance.' });
+    const transferFeeKobo = paystackTransferFeeKobo(amountKobo);
+    if (amountKobo + transferFeeKobo > withdrawableKobo) {
+      setFeedback({ kind: 'error', msg: 'Your withdrawable balance must cover the bank amount and transfer charges.' });
       return;
     }
 
@@ -97,18 +114,24 @@ export default function SellerWalletPage() {
       });
       const data = await res.json();
       if (res.ok && data.ok) {
-        setBalanceKobo((b) => b - amountKobo);
+        const walletResponse = await fetch('/api/wallet/summary', { cache: 'no-store' });
+        const wallet = await walletResponse.json().catch(() => ({}));
+        if (walletResponse.ok) {
+          setBalanceKobo(Number(wallet.total_kobo) || 0);
+          setWithdrawableKobo(Number(wallet.withdrawable_kobo) || 0);
+          setHeldKobo(Number(wallet.held_kobo) || 0);
+        }
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const refreshed = await supabase
             .from('withdrawals')
-            .select('id, amount_kobo, bank_name, account_number, account_name, status, request_note, created_at')
+            .select('id, amount_kobo, transfer_fee_kobo, wallet_debit_kobo, bank_name, account_number, account_name, status, request_note, created_at')
             .eq('seller_id', user.id)
             .order('created_at', { ascending: false });
           if (refreshed.data) setWithdrawals((refreshed.data as Withdrawal[]) || []);
         }
         setAmountInput('');
-        setFeedback({ kind: 'ok', msg: `Withdrawal of ₦${formatNaira(amountKobo)} requested.` });
+        setFeedback({ kind: 'ok', msg: `₦${formatNaira(amountKobo)} requested for the bank. ₦${formatNaira(Number(data.transfer_fee_kobo) || transferFeeKobo)} covers transfer charges.` });
       } else {
         setFeedback({ kind: 'error', msg: data?.error || 'Could not request withdrawal.' });
       }
@@ -127,13 +150,16 @@ export default function SellerWalletPage() {
 
   const pendingKobo = withdrawals.filter((w) => w.status === 'pending' || w.status === 'processing').reduce((sum, w) => sum + w.amount_kobo, 0);
   const paidKobo = withdrawals.filter((w) => w.status === 'paid').reduce((sum, w) => sum + w.amount_kobo, 0);
+  const requestAmountKobo = nairaToKobo(amountInput) || 0;
+  const requestFeeKobo = paystackTransferFeeKobo(requestAmountKobo);
 
   return (
     <div className="seller-secondary mx-auto max-w-2xl space-y-5 py-2">
       <button onClick={() => router.push('/seller')} className="text-xs font-bold text-[#81756d] hover:text-[#d8552e]">← Back to seller home</button>
       <div className="wallet-hero rounded-[2rem] bg-gradient-to-br from-[#2e2520] to-[#544038] p-6 text-white shadow-xl">
         <div className="flex items-center justify-between"><div><p className="wallet-muted text-xs text-white/65">FuhsiMarket wallet</p><h1 className="mt-1 text-xl font-black">Your money</h1></div><div className="grid h-11 w-11 place-items-center rounded-2xl bg-white/15"><Wallet size={20}/></div></div>
-        <p className="wallet-muted mt-8 text-xs text-white/65">Available to withdraw</p><p className="mt-1 text-4xl font-black tracking-tight">₦{formatNaira(balanceKobo)}</p>
+        <p className="wallet-muted mt-8 text-xs text-white/65">Available to withdraw</p><p className="mt-1 text-4xl font-black tracking-tight">₦{formatNaira(withdrawableKobo)}</p>
+        <p className="wallet-muted mt-2 text-[10px] text-white/60">Total wallet ₦{formatNaira(balanceKobo)} · 14-day hold ₦{formatNaira(heldKobo)}</p>
         <div className="mt-5 grid grid-cols-2 gap-2">
           <button onClick={() => document.getElementById('withdraw')?.scrollIntoView({behavior:'smooth'})} className="flex items-center justify-center gap-2 rounded-2xl bg-[#ef6b3b] py-3.5 text-xs font-bold text-white"><Banknote size={16}/>Withdraw money</button>
           <button onClick={() => router.push('/buyer')} className="flex items-center justify-center gap-2 rounded-2xl bg-white/20 hover:bg-white/30 py-3.5 text-xs font-bold text-white transition-colors"><ShoppingBag size={16}/>Shop with wallet</button>
@@ -172,12 +198,19 @@ export default function SellerWalletPage() {
           <label className="block text-[11px] font-mono text-[#81756d]">Amount (₦)</label>
           <input
             type="number"
-            min="1"
+            min="1000"
+            max="100000"
             value={amountInput}
             onChange={(e) => setAmountInput(e.target.value)}
             placeholder="e.g. 5000"
             className="w-full bg-[#faf6f2] border border-[#e8ddd4] rounded-xl px-4 py-3 text-sm text-[#251d18] outline-none focus:border-[#ef6b3b] placeholder:text-[#a89a90]"
           />
+        </div>
+
+        <div className="rounded-2xl bg-[#faf6f2] p-4 text-[11px] text-[#6f625a] space-y-2">
+          <div className="flex justify-between"><span>Bank receives</span><strong>₦{formatNaira(requestAmountKobo)}</strong></div>
+          <div className="flex justify-between"><span>Transfer + stamp charge</span><strong>₦{formatNaira(requestFeeKobo)}</strong></div>
+          <div className="flex justify-between border-t border-[#e8ddd4] pt-2 text-[#251d18]"><span>Wallet debit</span><strong>₦{formatNaira(requestAmountKobo + requestFeeKobo)}</strong></div>
         </div>
 
         <div className="space-y-2">
@@ -241,6 +274,7 @@ export default function SellerWalletPage() {
                     {w.bank_name || '—'} ••••{w.account_number ? w.account_number.slice(-4) : '—'} ·{' '}
                     {new Date(w.created_at).toLocaleDateString()}
                   </p>
+                  {Number(w.transfer_fee_kobo) > 0 ? <p className="text-[9px] text-[#9d9188]">Fee ₦{formatNaira(Number(w.transfer_fee_kobo))}</p> : null}
                 </div>
                 <span className={`flex shrink-0 items-center gap-1 text-[10px] font-mono uppercase px-2.5 py-1 rounded border ${
                   w.status === 'paid'

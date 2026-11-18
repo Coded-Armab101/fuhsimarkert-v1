@@ -64,7 +64,7 @@ export async function GET() {
     const { data, error } = await admin
       .from('withdrawals')
       .select(
-        'id, seller_id, amount_kobo, bank_name, bank_code, account_number, account_name, status, request_note, transfer_reference, transfer_code, transfer_status, transfer_error, manual_reconciled_at, manual_reconcile_note, created_at, processed_at',
+        'id, seller_id, amount_kobo, transfer_fee_kobo, wallet_debit_kobo, bank_name, bank_code, account_number, account_name, status, request_note, transfer_reference, transfer_code, transfer_status, transfer_error, manual_reconciled_at, manual_reconcile_note, created_at, processed_at',
       )
       .order('created_at', { ascending: false });
     if (error) throw error;
@@ -131,7 +131,7 @@ export async function POST(request: Request) {
     const { data: w, error: loadError } = await admin
       .from('withdrawals')
       .select(
-        'id, seller_id, amount_kobo, bank_name, bank_code, account_number, account_name, status, transfer_reference, transfer_code, transfer_status, transfer_error',
+        'id, seller_id, amount_kobo, transfer_fee_kobo, wallet_debit_kobo, bank_name, bank_code, account_number, account_name, status, transfer_reference, transfer_code, transfer_status, transfer_error',
       )
       .eq('id', withdrawalId)
       .maybeSingle();

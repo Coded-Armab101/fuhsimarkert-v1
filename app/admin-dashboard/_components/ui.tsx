@@ -2,12 +2,15 @@ import React from 'react';
 import { formatNaira } from '@/utils/money';
 
 export function fullNaira(kobo: number): string {
-  return `₦${formatNaira(kobo)}`;
+  const amount = Number(kobo) || 0;
+  return amount < 0 ? `-₦${formatNaira(Math.abs(amount))}` : `₦${formatNaira(amount)}`;
 }
 
 /** Short currency for KPI cards so large balances do not overflow. */
 export function compactNaira(kobo: number): string {
-  const naira = (Number(kobo) || 0) / 100;
+  const amount = Number(kobo) || 0;
+  if (amount < 0) return `-${compactNaira(Math.abs(amount))}`;
+  const naira = amount / 100;
   const abs = Math.abs(naira);
   if (abs >= 1_000_000) return `₦${(naira / 1_000_000).toFixed(1)}m`;
   if (abs >= 100_000) return `₦${(naira / 1_000).toFixed(0)}k`;

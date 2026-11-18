@@ -202,7 +202,7 @@ export default function OverviewTab({ data, loading, error, onRetry, onOpenTab }
     { label: 'Delivery', value: data.orders.deliveryFeesKobo, color: 'bg-sky-400' },
     { label: 'Seller plans', value: data.orders.subscriptionRevenueKobo, color: 'bg-violet-400' },
   ];
-  const profitTotal = Math.max(1, data.orders.platformProfitKobo);
+  const profitTotal = Math.max(1, data.fees.grossPlatformIncomeKobo);
 
   return (
     <div className="space-y-5">
@@ -238,16 +238,16 @@ export default function OverviewTab({ data, loading, error, onRetry, onOpenTab }
           tone="text-amber-300 bg-amber-500/10 border-amber-500/25"
         />
         <Kpi
-          label="Platform profit"
-          value={compactNaira(data.orders.platformProfitKobo)}
-          hint={`${compactNaira(data.orders.commissionKobo)} commission · ${compactNaira(data.orders.buyerFeesKobo + data.orders.deliveryFeesKobo)} service fees · ${compactNaira(data.orders.subscriptionRevenueKobo)} plans`}
+          label="Gross platform income"
+          value={compactNaira(data.fees.grossPlatformIncomeKobo)}
+          hint={`Net before courier ${compactNaira(data.fees.netRevenueBeforeCourierKobo)} · ${compactNaira(data.orders.commissionKobo)} commission`}
           icon={<TrendingUp size={16} />}
           tone="text-[#FFB08F] bg-[#DE6437]/10 border-[#DE6437]/25"
         />
         <Kpi
           label="Seller money"
           value={compactNaira(data.money.sellerMoneyKobo)}
-          hint={`${compactNaira(data.money.sellerWalletKobo)} in wallets · ${compactNaira(data.money.pendingWithdrawalsKobo)} awaiting payout`}
+          hint={`${compactNaira(data.money.sellerWalletKobo)} in wallets · ${compactNaira(data.money.pendingWithdrawalsKobo)} awaiting payout (incl. fee)`}
           icon={<Wallet size={16} />}
           tone="text-violet-300 bg-violet-500/10 border-violet-500/25"
         />
@@ -299,11 +299,11 @@ export default function OverviewTab({ data, loading, error, onRetry, onOpenTab }
       <div className="grid gap-5 lg:grid-cols-2">
         <Panel>
           <PanelHeader
-            title="Where the profit comes from"
-            subtitle="Completed orders plus active seller plans."
+            title="Where gross income comes from"
+            subtitle="Completed orders plus active seller plans, before provider costs."
             action={
               <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-mono text-emerald-300">
-                {fullNaira(data.orders.platformProfitKobo)}
+                {fullNaira(data.fees.grossPlatformIncomeKobo)}
               </span>
             }
           />
@@ -321,11 +321,12 @@ export default function OverviewTab({ data, loading, error, onRetry, onOpenTab }
             <div className="mt-3 grid grid-cols-2 gap-x-4">
               <MoneyLine label="Seller commission" value={data.orders.commissionKobo} />
               <MoneyLine label="Buyer service fees" value={data.orders.buyerFeesKobo} />
-              <MoneyLine label="Delivery fees kept" value={data.orders.deliveryFeesKobo} />
+              <MoneyLine label="Gross delivery fees collected" value={data.orders.deliveryFeesKobo} />
               <MoneyLine label="Seller plan revenue" value={data.orders.subscriptionRevenueKobo} />
             </div>
             <div className="mt-2 border-t border-white/10 pt-2">
-              <MoneyLine label="Total platform profit" value={data.orders.platformProfitKobo} emphasis />
+              <MoneyLine label="Gross platform income" value={data.fees.grossPlatformIncomeKobo} emphasis />
+              <MoneyLine label="Net revenue before courier" value={data.fees.netRevenueBeforeCourierKobo} />
               <MoneyLine label="Paid out to sellers" value={data.orders.sellerPayoutKobo} />
             </div>
           </div>
@@ -343,9 +344,10 @@ export default function OverviewTab({ data, loading, error, onRetry, onOpenTab }
           />
           <div className="grid grid-cols-2 gap-x-4 px-4 py-4">
             <MoneyLine label="Seller wallet balances" value={data.money.sellerWalletKobo} />
-            <MoneyLine label="Pending withdrawals" value={data.money.pendingWithdrawalsKobo} />
-            <MoneyLine label="Buyer wallet float" value={data.money.buyerWalletKobo} />
-            <MoneyLine label="All-time paid out" value={data.money.paidWithdrawalsKobo} />
+            <MoneyLine label="Pending wallet debits" value={data.money.pendingWithdrawalsKobo} />
+            <MoneyLine label="Buyer wallet balances" value={data.money.buyerWalletKobo} />
+            <MoneyLine label="Inside 14-day hold" value={data.money.heldBuyerMoneyKobo} />
+            <MoneyLine label="All-time paid to bank" value={data.money.paidWithdrawalsKobo} />
           </div>
           <button
             onClick={() => onOpenTab('money')}

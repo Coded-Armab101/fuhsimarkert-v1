@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { useCart } from '@/context/CartContext';
 import { formatNaira } from '@/utils/money';
-import { buyerServiceFeeKobo, deliveryFeeForSellers } from '@/utils/pricing';
+import { buyerServiceFeeKobo, deliveryFeeForOrder } from '@/utils/pricing';
+import { grossUpPaystackLocalKobo } from '@/utils/payment-fees';
 import { ShoppingBag, Trash2, ArrowLeft, ShieldCheck, Plus, Minus, Loader2, Truck, Store, User, Phone, Hash, Wallet } from 'lucide-react';
 import { safeImageSrc } from '@/utils/safeImage';
 import { cartLineKey, normalizeVariantKey, variantLabel } from '@/utils/variants';
@@ -97,7 +98,7 @@ export default function BuyerCartPage() {
   );
   const buyerFeeKobo = buyerServiceFeeKobo(checkoutItemsTotalKobo);
   // One delivery charge per seller, taken from each product's configured fee.
-  const deliveryFeeKobo = deliveryFeeForSellers(checkoutItems);
+  const deliveryFeeKobo = deliveryFeeForOrder(checkoutItems);
   const grandTotalKobo =
     checkoutItemsTotalKobo +
     (delivery.type === 'delivery' ? deliveryFeeKobo : 0) +
@@ -106,8 +107,13 @@ export default function BuyerCartPage() {
   // Wallet-first split: wallet covers as much as it can, the remainder via
   // card/transfer. When the wallet covers the whole total, no Paystack needed.
   const walletShareKobo = Math.min(walletBalance, grandTotalKobo);
-  const paystackShareKobo = grandTotalKobo - walletShareKobo;
   const walletCoversAll = paymentMethod === 'wallet' && walletShareKobo >= grandTotalKobo;
+  const walletAppliedKobo = paymentMethod === 'wallet' ? walletShareKobo : 0;
+  const gatewayPrincipalKobo = grandTotalKobo - walletAppliedKobo;
+  const gatewayQuote = grossUpPaystackLocalKobo(gatewayPrincipalKobo);
+  const processingFeeKobo = walletCoversAll ? 0 : gatewayQuote.processingFeeKobo;
+  const paystackShareKobo = walletCoversAll ? 0 : gatewayQuote.grossKobo;
+  const totalBuyerOutlayKobo = grandTotalKobo + processingFeeKobo;
 
   // When Paystack redirects the buyer back here after payment, it appends
   // ?reference=... to the URL. We strip the param immediately (so a refresh
@@ -542,18 +548,20 @@ className={`rounded-2xl border p-4 flex items-start gap-3 text-[11px] font-mono 
 
           <div className="bg-white border border-[#f0e9e2] p-6 rounded-3xl space-y-4">
             <div className="flex justify-between items-center text-sm font-bold border-b border-[#f0e9e2] pb-3">
-              <span className="text-[#81756d] font-mono">Total Amount:</span>
+              <span className="text-[#81756d] font-mono">You pay:</span>
               <span className="text-lg font-black text-[#ef6b3b]">
-                ₦{formatNaira(grandTotalKobo)}
+                ₦{formatNaira(totalBuyerOutlayKobo)}
               </span>
             </div>
 
-            {delivery.type === 'delivery' && (
-              <div className="flex justify-between items-center text-[11px] font-mono text-[#81756d] border-b border-[#f0e9e2] pb-2">
-                <span>Items subtotal</span>
-                <span>₦{formatNaira(checkoutItemsTotalKobo)}</span>
-              </div>
-            )}
+            <div className="flex justify-between items-center text-[11px] font-mono text-[#81756d] border-b border-[#f0e9e2] pb-2">
+              <span>Items subtotal</span>
+              <span>₦{formatNaira(checkoutItemsTotalKobo)}</span>
+            </div>
+            <div className="flex justify-between items-center text-[11px] font-mono text-[#81756d] border-b border-[#f0e9e2] pb-2">
+              <span>Marketplace service fee</span>
+              <span>+₦{formatNaira(buyerFeeKobo)}</span>
+            </div>
             {delivery.type === 'delivery' && (
               <div className="flex justify-between items-center text-[11px] font-mono text-[#81756d] border-b border-[#f0e9e2] pb-2">
                 <span className="flex items-center gap-1">
@@ -564,8 +572,14 @@ className={`rounded-2xl border p-4 flex items-start gap-3 text-[11px] font-mono 
             )}
             {delivery.type === 'delivery' && (
               <p className="text-[10px] font-mono leading-4 text-[#a3968c]">
-                Delivery is charged once per seller, not per item.
+                One flat delivery charge for the whole combined order.
               </p>
+            )}
+            {processingFeeKobo > 0 && (
+              <div className="flex justify-between items-center text-[11px] font-mono text-[#81756d] border-b border-[#f0e9e2] pb-2">
+                <span>Paystack processing fee</span>
+                <span>+₦{formatNaira(processingFeeKobo)}</span>
+              </div>
             )}
 
             <div className="flex items-center gap-2 text-[11px] font-mono text-[#81756d] bg-[#faf6f2] border border-[#eee6de] p-3 rounded-xl">
@@ -598,7 +612,7 @@ className={`rounded-2xl border p-4 flex items-start gap-3 text-[11px] font-mono 
                     </span>
                   ) : (
                     <span className="text-[10px] font-normal text-[#9d9188]">
-                      ₦{formatNaira(walletShareKobo)} from wallet · <span className="text-[#c77b22]">₦{formatNaira(paystackShareKobo)}</span> by card
+                      ₦{formatNaira(walletShareKobo)} wallet · <span className="text-[#c77b22]">₦{formatNaira(paystackShareKobo)}</span> Paystack
                     </span>
                   )}
                 </button>
@@ -616,14 +630,14 @@ className={`rounded-2xl border p-4 flex items-start gap-3 text-[11px] font-mono 
                     <ShieldCheck size={13} /> Card / Transfer
                   </div>
                   <span className="text-[10px] font-normal text-[#9d9188]">
-                    Pay the full ₦{formatNaira(grandTotalKobo)} via Paystack
+                    Pay ₦{formatNaira(paystackShareKobo)} including processing
                   </span>
                 </button>
               </div>
               {paymentMethod === 'wallet' && paystackShareKobo > 0 && (
                 <p className="text-[10px] text-[#9d9188]">
-                  Wallet pays the first ₦{formatNaira(walletShareKobo)}, then you complete the
-                  remaining ₦{formatNaira(paystackShareKobo)} on Paystack. Both go into escrow.
+                  Wallet pays ₦{formatNaira(walletShareKobo)} toward the protected order. Paystack charges
+                  ₦{formatNaira(paystackShareKobo)}, including its ₦{formatNaira(processingFeeKobo)} processing fee.
                 </p>
               )}
             </div>
@@ -653,7 +667,7 @@ className={`rounded-2xl border p-4 flex items-start gap-3 text-[11px] font-mono 
                   <span>
                     {walletCoversAll
                       ? `Pay with Wallet (₦${formatNaira(grandTotalKobo)})`
-                      : `Continue to payment (₦${formatNaira(grandTotalKobo)})`}
+                      : `Continue to payment (₦${formatNaira(totalBuyerOutlayKobo)})`}
                   </span>
                 </>
               )}
