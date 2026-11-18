@@ -99,7 +99,7 @@ export default async function SellerSubscribePage() {
 
         <div className="flex items-center justify-center gap-2 text-[11px] font-mono text-neutral-500">
           <ShieldCheck size={14} className="text-emerald-500 flex-shrink-0" />
-          <span>Secured by Paystack</span>
+          <span>Pay with Paystack or your wallet balance</span>
         </div>
       </div>
 

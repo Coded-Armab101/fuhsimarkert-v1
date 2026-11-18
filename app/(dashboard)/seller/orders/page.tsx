@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { formatNaira } from '@/utils/money';
@@ -42,6 +42,50 @@ function getOrderProduct(products: SellerOrder['products']): { id?: string; titl
   return null;
 }
 
+type SellerOrderGroup = {
+  key: string;
+  orderRef: string;
+  rows: SellerOrder[];
+  status: string;
+  amountKobo: number;
+  quantity: number;
+};
+
+const FULFILMENT_RANK: Record<string, number> = {
+  in_escrow: 0,
+  packing: 1,
+  ready_for_pickup: 2,
+  confirmed: 3,
+  delivered: 4,
+  completed: 5,
+};
+
+/**
+ * All products a buyer bought from this seller in one checkout are packed and
+ * handed over once. The API moves every row in the group together.
+ */
+function groupOrders(rows: SellerOrder[]): SellerOrderGroup[] {
+  const byRef = new Map<string, SellerOrder[]>();
+  for (const row of rows) {
+    const ref = row.order_ref || row.id;
+    const bucket = byRef.get(ref) || [];
+    bucket.push(row);
+    byRef.set(ref, bucket);
+  }
+  return Array.from(byRef, ([ref, bucket]) => ({
+    key: ref,
+    orderRef: ref,
+    rows: bucket,
+    status: bucket.reduce((lowest, row) => {
+      const rowRank = FULFILMENT_RANK[row.status] ?? 99;
+      const lowestRank = FULFILMENT_RANK[lowest] ?? 99;
+      return rowRank < lowestRank ? row.status : lowest;
+    }, bucket[0]?.status || 'in_escrow'),
+    amountKobo: bucket.reduce((sum, row) => sum + row.amount_kobo, 0),
+    quantity: bucket.reduce((sum, row) => sum + row.quantity, 0),
+  }));
+}
+
 export default function SellerOrdersPage() {
   const router = useRouter();
   const supabase = createClient();
@@ -51,6 +95,7 @@ export default function SellerOrdersPage() {
   const [orders, setOrders] = useState<SellerOrder[]>([]);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [confirmingReturnId, setConfirmingReturnId] = useState<string | null>(null);
+  const groups = useMemo(() => groupOrders(orders), [orders]);
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -169,15 +214,18 @@ export default function SellerOrdersPage() {
     fetchOrders();
   }, [router, supabase]);
 
-  const advanceStatus = async (order: SellerOrder, newStatus: 'packing' | 'ready_for_pickup') => {
-    setUpdatingId(order.id);
+  const advanceStatus = async (group: SellerOrderGroup, newStatus: 'packing' | 'ready_for_pickup') => {
+    setUpdatingId(group.key);
     const response = await fetch('/api/orders/seller-status', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderId: order.id, status: newStatus }),
+      // The server advances every row for this order_ref that belongs to the
+      // signed-in seller, so one button packs the whole seller bundle.
+      body: JSON.stringify({ orderRef: group.orderRef, status: newStatus }),
     });
     if (response.ok) {
-      setOrders((prev) => prev.map((ord) => (ord.id === order.id ? { ...ord, status: newStatus } : ord)));
+      const ids = new Set(group.rows.map((row) => row.id));
+      setOrders((prev) => prev.map((ord) => (ids.has(ord.id) ? { ...ord, status: newStatus } : ord)));
     } else {
       const data = await response.json().catch(() => null);
       console.error('Failed to update order:', data);
@@ -262,12 +310,14 @@ export default function SellerOrdersPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {orders.map((order) => {
+          {groups.map((group) => {
+            const order = group.rows[0];
             const product = getOrderProduct(order.products);
-            const canPack = order.status === 'in_escrow';
-            const canReady = order.status === 'packing';
-            const fulfilled = order.status === 'ready_for_pickup' || order.status === 'confirmed' || order.status === 'delivered' || order.status === 'completed';
-            const grandTotal = order.amount_kobo;
+            const hasProblem = group.rows.some((row) => row.status === 'disputed' || row.status === 'cancelled');
+            const canPack = group.status === 'in_escrow' && !hasProblem;
+            const canReady = group.status === 'packing' && !hasProblem;
+            const fulfilled = ['ready_for_pickup', 'confirmed', 'delivered', 'completed'].includes(group.status);
+            const grandTotal = group.amountKobo;
             const orderedAt = new Date(order.created_at);
             const orderedAtLabel = Number.isNaN(orderedAt.getTime())
               ? 'Time unavailable'
@@ -280,7 +330,7 @@ export default function SellerOrdersPage() {
               : null;
 
             return (
-              <div key={order.id} className="bg-neutral-950 border border-neutral-800 rounded-3xl p-5 space-y-4 shadow-xl">
+              <div key={group.key} className="bg-neutral-950 border border-neutral-800 rounded-3xl p-5 space-y-4 shadow-xl">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex items-center gap-4">
                     <div className="w-16 h-16 bg-neutral-900 rounded-2xl overflow-hidden flex-shrink-0">
@@ -307,11 +357,29 @@ export default function SellerOrdersPage() {
                           {variantLabel(order.size, order.color)}
                         </p>
                       )}
+                      {group.rows.length > 1 && (
+                        <div className="mt-2 space-y-1 rounded-xl border border-neutral-800 bg-neutral-900/60 p-2.5">
+                          <p className="text-[9px] font-mono uppercase tracking-wider text-neutral-500">
+                            Packed together · {group.rows.length} product lines
+                          </p>
+                          {group.rows.map((row) => {
+                            const rowProduct = getOrderProduct(row.products);
+                            const rowVariant = variantLabel(row.size, row.color);
+                            return (
+                              <p key={row.id} className="text-[10px] font-mono text-neutral-400">
+                                • {rowProduct?.title || 'Campus product purchase'}
+                                {row.quantity > 1 ? ` x${row.quantity}` : ''}
+                                {rowVariant ? ` · ${rowVariant}` : ''} · ₦{formatNaira(row.amount_kobo)}
+                              </p>
+                            );
+                          })}
+                        </div>
+                      )}
                       <p className="text-[11px] font-mono text-neutral-500">
-                        Order: <span className="text-white font-bold tracking-wider">{order.delivery_code || order.order_ref}</span>
+                        Order: <span className="text-white font-bold tracking-wider">{order.delivery_code || group.orderRef}</span>
                       </p>
                       <p className="text-[10px] font-mono text-neutral-600">
-                        Ref ID: {order.order_ref || order.id.slice(0, 8)}
+                        Ref ID: {group.orderRef.slice(0, 8)}
                       </p>
                       <p className="flex items-center gap-1 text-[10px] font-mono text-neutral-400">
                         <Clock size={11} /> Ordered {orderedAtLabel}
@@ -321,8 +389,8 @@ export default function SellerOrdersPage() {
 
                   <div className="flex items-center justify-between sm:justify-end gap-4 sm:text-right">
                     <div className="space-y-1">
-                      <span className={`inline-flex text-[10px] font-mono px-2.5 py-1 rounded border uppercase tracking-wider font-bold ${statusTone(order.status)}`}>
-                        {statusLabel(order.status)}
+                      <span className={`inline-flex text-[10px] font-mono px-2.5 py-1 rounded border uppercase tracking-wider font-bold ${statusTone(group.status)}`}>
+                        {statusLabel(group.status)}
                       </span>
                       <p className="text-emerald-400 font-mono font-black text-lg">
                         ₦{formatNaira(grandTotal)}
@@ -373,11 +441,11 @@ export default function SellerOrdersPage() {
                 {(canPack || canReady) && (
                   <div className="border-t border-neutral-900 pt-4">
                     <button
-                      onClick={() => advanceStatus(order, canPack ? 'packing' : 'ready_for_pickup')}
-                      disabled={updatingId === order.id}
+                      onClick={() => advanceStatus(group, canPack ? 'packing' : 'ready_for_pickup')}
+                      disabled={updatingId === group.key}
                       className="w-full sm:w-auto bg-red-600 hover:bg-red-500 text-white font-bold text-xs py-3 px-6 rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 disabled:opacity-60"
                     >
-                      {updatingId === order.id && <Loader2 size={14} className="animate-spin" />}
+                      {updatingId === group.key && <Loader2 size={14} className="animate-spin" />}
                       <CheckCircle2 size={14} />
                       {canPack ? 'Start Packing Order' : 'Mark as Ready for Pickup'}
                     </button>
@@ -387,32 +455,34 @@ export default function SellerOrdersPage() {
                 {fulfilled && (
                   <div className="border-t border-neutral-900 pt-3 text-[11px] font-mono text-emerald-400 flex items-center gap-1">
                     <CheckCircle2 size={13} />
-                    {order.status === 'completed'
+                    {group.status === 'completed'
                       ? 'Buyer confirmed receipt — payment has been released to your wallet.'
                       : 'Ready for the buyer — they will confirm receipt on their end.'}
                   </div>
                 )}
 
-                {order.status === 'disputed' && order.return_required && !order.return_received_at ? (
-                  <div className="border-t border-red-900/40 pt-4">
-                    <div className="rounded-xl border border-red-900/50 bg-red-950/20 p-4 text-xs text-red-100">
-                      <p className="font-bold">Buyer says this item will be returned</p>
-                      {order.dispute_reason ? <p className="mt-1 text-[11px] leading-relaxed text-red-200/80">Reason: “{order.dispute_reason}”</p> : null}
-                      <p className="mt-2 text-[10px] leading-relaxed text-neutral-400">
-                        Do not confirm until the physical item is back with you. Escrow stays frozen while confirmation is pending.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => void confirmReturnedItem(order)}
-                        disabled={confirmingReturnId === order.id}
-                        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-xs font-bold text-white transition-colors hover:bg-red-500 disabled:opacity-60 sm:w-auto"
-                      >
-                        {confirmingReturnId === order.id ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-                        {confirmingReturnId === order.id ? 'Confirming…' : 'I received the returned item'}
-                      </button>
+                {group.rows
+                  .filter((row) => row.status === 'disputed' && row.return_required && !row.return_received_at)
+                  .map((row) => (
+                    <div key={row.id} className="border-t border-red-900/40 pt-4">
+                      <div className="rounded-xl border border-red-900/50 bg-red-950/20 p-4 text-xs text-red-100">
+                        <p className="font-bold">Buyer says an item in this bundle will be returned</p>
+                        {row.dispute_reason ? <p className="mt-1 text-[11px] leading-relaxed text-red-200/80">Reason: “{row.dispute_reason}”</p> : null}
+                        <p className="mt-2 text-[10px] leading-relaxed text-neutral-400">
+                          Do not confirm until the physical item is back with you. Escrow stays frozen while confirmation is pending.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => void confirmReturnedItem(row)}
+                          disabled={confirmingReturnId === row.id}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-xs font-bold text-white transition-colors hover:bg-red-500 disabled:opacity-60 sm:w-auto"
+                        >
+                          {confirmingReturnId === row.id ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                          {confirmingReturnId === row.id ? 'Confirming…' : 'I received the returned item'}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ) : null}
+                  ))}
 
                 {order.status === 'disputed' && order.return_required && order.return_received_at ? (
                   <div className="border-t border-emerald-900/40 pt-3 text-[11px] font-mono text-emerald-400 flex items-center gap-1">

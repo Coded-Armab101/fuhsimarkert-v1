@@ -127,14 +127,12 @@ export async function GET() {
       return_confirmation_source?: string | null;
       products?: { id: string; title: string; image_url?: string | null }[] | null;
     };
-    type SellerEntry = {
+    // One product line inside a seller's packing group.
+    type ProductLine = {
       orderId: string;
-      sellerId: string;
-      sellerName: string;
       product: { id: string; title: string; image_url?: string | null } | null;
       quantity: number;
       amountKobo: number;
-      deliveryFeeKobo: number;
       status: string;
       statusChangedAt: string | null;
       createdAt: string;
@@ -148,37 +146,44 @@ export async function GET() {
       returnReceivedAt: string | null;
       returnConfirmationSource: string | null;
     };
+    // One packing group per (order, seller). A buyer order containing three
+    // products from one seller is packed once, not three times.
     type GroupEntry = {
       order_ref: string;
+      sellerId: string;
+      sellerName: string;
       delivery_code: string;
       buyer: { name: string; id: string };
       createdAt: string;
       groupStatus: string;
-      items: SellerEntry[];
+      // Delivery is charged once for the whole order, not once per seller.
+      deliveryFeeKobo: number;
+      items: ProductLine[];
     };
     const groups = new Map<string, GroupEntry>();
     for (const raw of orders as OrderRow[]) {
       const ref = raw.order_ref || raw.id;
-      let g = groups.get(ref);
+      const key = `${ref}::${raw.seller_id}`;
+      let g = groups.get(key);
       if (!g) {
         g = {
           order_ref: ref,
+          sellerId: raw.seller_id,
+          sellerName: sellersById[raw.seller_id]?.full_name || 'Seller',
           delivery_code: raw.delivery_code || ref.slice(0, 8).toUpperCase(),
           buyer: { name: sellersById[raw.buyer_id]?.full_name || 'Buyer', id: raw.buyer_id },
           createdAt: raw.created_at || '',
           groupStatus: raw.status,
+          deliveryFeeKobo: raw.delivery_fee_kobo || 0,
           items: [],
         };
-        groups.set(ref, g);
+        groups.set(key, g);
       }
       g.items.push({
         orderId: raw.id,
-        sellerId: raw.seller_id,
-        sellerName: sellersById[raw.seller_id]?.full_name || 'Seller',
         product: raw.products?.[0] || null,
         quantity: raw.quantity,
         amountKobo: raw.amount_kobo,
-        deliveryFeeKobo: raw.delivery_fee_kobo || 0,
         status: raw.status,
         statusChangedAt: raw.status_changed_at,
         createdAt: raw.created_at || '',
@@ -193,6 +198,9 @@ export async function GET() {
         returnConfirmationSource: raw.return_confirmation_source || null,
       });
       if (rank(raw.status) < rank(g.groupStatus)) g.groupStatus = raw.status;
+      if ((raw.delivery_fee_kobo || 0) > g.deliveryFeeKobo) {
+        g.deliveryFeeKobo = raw.delivery_fee_kobo || 0;
+      }
     }
 
     return NextResponse.json({

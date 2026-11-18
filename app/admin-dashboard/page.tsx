@@ -77,12 +77,9 @@ type SellerVerification = {
 
 type FulfilmentItem = {
   orderId: string;
-  sellerId: string;
-  sellerName: string;
   product: { id: string; title: string; image_url?: string | null } | null;
   quantity: number;
   amountKobo: number;
-  deliveryFeeKobo: number;
   status: string;
   statusChangedAt: string | null;
   createdAt: string;
@@ -97,12 +94,16 @@ type FulfilmentItem = {
   returnConfirmationSource?: string | null;
 };
 
+/** One packing group = one order + one seller, with all that seller's product lines. */
 type FulfilmentGroup = {
   order_ref: string;
+  sellerId: string;
+  sellerName: string;
   delivery_code: string;
   buyer: { name: string; id: string };
   createdAt: string;
   groupStatus: string;
+  deliveryFeeKobo: number;
   items: FulfilmentItem[];
 };
 
@@ -356,7 +357,7 @@ setSLoading(false);
   const fulfilmentSellers = useMemo(() => {
     const byId = new Map<string, string>();
     for (const group of fulfilments) {
-      for (const item of group.items) byId.set(item.sellerId, item.sellerName);
+      byId.set(group.sellerId, group.sellerName);
     }
     return Array.from(byId, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [fulfilments]);
@@ -365,7 +366,7 @@ setSLoading(false);
     const successful = new Set(['completed', 'confirmed', 'delivered']);
     const pending = new Set(['in_escrow', 'packing', 'ready_for_pickup']);
     return fulfilments.filter((group) => {
-      if (sellerFilter !== 'all' && !group.items.some((item) => item.sellerId === sellerFilter)) return false;
+      if (sellerFilter !== 'all' && group.sellerId !== sellerFilter) return false;
       if (orderFilter === 'successful') return successful.has(group.groupStatus);
       if (orderFilter === 'pending') return pending.has(group.groupStatus);
       if (orderFilter === 'disputed') return group.groupStatus === 'disputed' || group.items.some((item) => item.status === 'disputed');
@@ -492,10 +493,7 @@ setSLoading(false);
 
   const pendingCount = withdrawals.filter((w) => w.status === 'pending').length;
   const pendingVerifications = verifications.filter((v) => v.status === 'pending').length;
-  const slowSellerCount = fulfilments.reduce(
-    (n, g) => n + g.items.filter((i) => i.slow).length,
-    0
-  );
+  const slowSellerCount = fulfilments.filter((g) => g.items.some((i) => i.slow)).length;
   const dangerAlerts = overview?.alerts.filter((alert) => alert.level === 'danger').length ?? 0;
   const warningAlerts = overview?.alerts.filter((alert) => alert.level === 'warn').length ?? 0;
   const refreshing = oLoading || wLoading || vLoading || fLoading || sLoading;
@@ -862,17 +860,21 @@ setSLoading(false);
                       </span>
                     </div>
                     <p className="text-[10px] text-neutral-600 font-mono mt-1">
-                      Buyer: <span className="text-neutral-300">{g.buyer.name}</span> · {g.items.length} item
+                      Seller: <span className="text-neutral-300">{g.sellerName}</span> · Buyer:{' '}
+                      <span className="text-neutral-300">{g.buyer.name}</span> · {g.items.length} product line
                       {g.items.length === 1 ? '' : 's'} · {new Date(g.createdAt).toLocaleString()}
                     </p>
+                    {g.deliveryFeeKobo > 0 && (
+                      <p className="text-[9px] font-mono text-sky-400/80 mt-0.5">
+                        Delivery ₦{formatNaira(g.deliveryFeeKobo)} is charged once for the whole order and is shown on every seller group.
+                      </p>
+                    )}
                   </div>
                   <div className="text-right">
                     <p className="text-emerald-400 font-mono font-bold text-sm">
-                      ₦{formatNaira(
-                        g.items.reduce((sum, item) => sum + item.amountKobo, 0) +
-                        Math.max(0, ...g.items.map((item) => item.deliveryFeeKobo))
-                      )}
+                      ₦{formatNaira(g.items.reduce((sum, item) => sum + item.amountKobo, 0))}
                     </p>
+                    <p className="text-[9px] font-mono text-neutral-500">Goods for this seller</p>
                   </div>
                 </div>
 
@@ -899,8 +901,7 @@ setSLoading(false);
                         </div>
                         <p className="text-[10px] text-neutral-500 font-mono truncate">
                           {variantLabel(i.size, i.color) ? `${variantLabel(i.size, i.color)} · ` : ''}
-                          {i.sellerName} · ₦{formatNaira(i.amountKobo)}
-                          {i.deliveryFeeKobo > 0 ? ` + ₦${formatNaira(i.deliveryFeeKobo)} fee` : ''}
+                          ₦{formatNaira(i.amountKobo)}
                         </p>
                       </div>
                       <div className="text-right shrink-0">

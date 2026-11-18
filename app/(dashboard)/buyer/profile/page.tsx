@@ -448,6 +448,36 @@ export default function ProfilePage() {
       }
     };
 
+  const handleWalletRenew = async (planType: RolePlan) => {
+    setPaymentLoading(`wallet-${planType}`);
+    try {
+      const response = await fetch('/api/subscription/renew-wallet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planType }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        throw new Error(data?.error || 'Could not renew with your wallet balance.');
+      }
+      setIsSeller(true);
+      setSellerLapsed(false);
+      setShowRoleModal(false);
+      await refreshWalletSummary();
+      notify(
+        data.alreadyRenewed
+          ? 'Your seller plan is already active.'
+          : `Seller plan renewed with your wallet. Active until ${new Date(data.expiresAt).toLocaleDateString('en-NG')}.`,
+        { tone: 'success' },
+      );
+      window.location.href = data.redirectUrl || '/seller/verification';
+    } catch (err: unknown) {
+      notify(err instanceof Error ? err.message : 'Could not renew with your wallet balance.', { tone: 'error' });
+    } finally {
+      setPaymentLoading(null);
+    }
+  };
+
   const handleRolePayment = async (planType: RolePlan) => {
 
     setPaymentLoading(planType);
@@ -1055,6 +1085,33 @@ export default function ProfilePage() {
                       </>
                     )}
                   </button>
+
+                  {profileData.walletBalance >= ROLE_PLANS.seller.amount ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleWalletRenew('seller')}
+                      disabled={paymentLoading === 'wallet-seller'}
+                      className="mt-2 w-full bg-emerald-700 hover:bg-emerald-600 disabled:bg-neutral-800 text-white font-bold text-xs py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      {paymentLoading === 'wallet-seller' ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          <span>Renewing from wallet...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Wallet size={14} />
+                          <span>
+                            {roleModalMode === 'renew' ? 'Renew next month' : 'Subscribe'} with wallet ({naira(ROLE_PLANS.seller.amount)})
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    <p className="mt-2 text-center text-[10px] font-mono text-neutral-500">
+                      Wallet balance {naira(profileData.walletBalance)} · needs {naira(ROLE_PLANS.seller.amount)} to pay with wallet. Held top-ups can be spent here.
+                    </p>
+                  )}
                 </div>
               </div>
 

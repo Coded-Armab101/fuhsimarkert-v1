@@ -51,7 +51,11 @@ Then apply `supabase/migrations/20261116_order_reliability.sql`. It removes noti
 
 Apply `supabase/migrations/20261117_broadcasts_variants.sql` for product size/colour variants and administrator broadcasts.
 
-Finally apply `supabase/migrations/20261118_trust_safety.sql`. It adds legal and seller-verification consent records, account suspension and moderation audit fields, disputed-product return confirmation, dispute audit events, and the Paystack transfer error field. The matching build expects this migration before signup, verification, suspension, dispute and withdrawal actions are used.
+Next apply `supabase/migrations/20261118_trust_safety.sql`. It adds legal and seller-verification consent records, account suspension and moderation audit fields, disputed-product return confirmation, dispute audit events, and the Paystack transfer error field. The matching build expects this migration before signup, verification, suspension, dispute and withdrawal actions are used.
+
+Then apply `supabase/migrations/20261119_wallet_funding_fees.sql`. It adds source-aware wallet credit lots, buyer wallet funding, Paystack provider-fee records, the 14-day cash-out hold, and the withdrawal fee debits needed by the money report.
+
+Finally apply `supabase/migrations/20261120_wallet_subscription_renewal.sql`. It lets sellers renew their monthly plan from spendable wallet balance (including money still inside the 14-day cash-out hold), records the subscription debit, and can reverse it if activation fails. Without it, the wallet renewal button stays hidden because the wallet summary RPC is unavailable.
 
 ## Transactional email (Resend)
 
