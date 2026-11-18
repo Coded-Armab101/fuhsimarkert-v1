@@ -57,6 +57,10 @@ Then apply `supabase/migrations/20261119_wallet_funding_fees.sql`. It adds sourc
 
 Finally apply `supabase/migrations/20261120_wallet_subscription_renewal.sql`. It lets sellers renew their monthly plan from spendable wallet balance (including money still inside the 14-day cash-out hold), records the subscription debit, and can reverse it if activation fails. Without it, the wallet renewal button stays hidden because the wallet summary RPC is unavailable.
 
+### Security headers / CSP
+
+`vercel.json` adds a `Content-Security-Policy` (plus `X-Content-Type-Options` and `Referrer-Policy`) to every deployment route, including Vercel-internal paths such as `/.well-known/vercel/security/request-challenge`. This covers pages, API route handlers and redirects, so security scanners no longer report a missing CSP header. The policy allow-lists Supabase (auth/storage), Paystack Inline's checkout iframe and SDK origins, blob/data images, and the service worker. Local development adds the same header from `next.config.ts` with `'unsafe-eval'` for React's debug tooling; that keyword is deliberately absent from the production policy.
+
 ## Transactional email (Resend)
 
 Order placed, order completed, refund and payout emails are sent through Resend's REST API using plain `fetch`. Email is best-effort: a missing key or a provider outage never blocks an order or a payout.
