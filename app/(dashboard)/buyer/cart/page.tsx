@@ -132,7 +132,11 @@ export default function BuyerCartPage() {
 
     (async () => {
       try {
-        const res = await fetch(`/api/paystack/verify?reference=${encodeURIComponent(reference)}`);
+        const res = await fetch('/api/paystack/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reference }),
+        });
         const data = await res.json();
 
         if (res.ok && data.status === 'success') {

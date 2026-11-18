@@ -55,11 +55,27 @@ Next apply `supabase/migrations/20261118_trust_safety.sql`. It adds legal and se
 
 Then apply `supabase/migrations/20261119_wallet_funding_fees.sql`. It adds source-aware wallet credit lots, buyer wallet funding, Paystack provider-fee records, the 14-day cash-out hold, and the withdrawal fee debits needed by the money report.
 
-Finally apply `supabase/migrations/20261120_wallet_subscription_renewal.sql`. It lets sellers renew their monthly plan from spendable wallet balance (including money still inside the 14-day cash-out hold), records the subscription debit, and can reverse it if activation fails. Without it, the wallet renewal button stays hidden because the wallet summary RPC is unavailable.
+Then apply `supabase/migrations/20261120_wallet_subscription_renewal.sql`. It lets sellers renew their monthly plan from spendable wallet balance (including money still inside the 14-day cash-out hold), records the subscription debit, and can reverse it if activation fails. Without it, the wallet renewal button stays hidden because the wallet summary RPC is unavailable.
+
+Finally apply `supabase/migrations/20261121_review_update_hardening.sql`. It limits review updates to `rating`/`comment` via column grants, RLS and a trigger, so a buyer cannot move a review to another product/order after the verified-purchase check.
+
+### Product image uploads
+
+Seller product images are uploaded through `POST /api/upload/product-image`, which authenticates the seller and enforces the per-seller storage quota on the server using the service-role client. A failed storage listing is treated as an error (never as zero usage), and every object in the seller's prefix is counted via pagination. The app enforces a 4MB per-file cap to stay under Vercel's 4.5MB serverless request-body limit; the bucket's own limit can remain higher.
 
 ### Security headers / CSP
 
 `vercel.json` adds a `Content-Security-Policy` (plus `X-Content-Type-Options` and `Referrer-Policy`) to every deployment route, including Vercel-internal paths such as `/.well-known/vercel/security/request-challenge`. This covers pages, API route handlers and redirects, so security scanners no longer report a missing CSP header. The policy allow-lists Supabase (auth/storage), Paystack Inline's checkout iframe and SDK origins, blob/data images, and the service worker. Local development adds the same header from `next.config.ts` with `'unsafe-eval'` for React's debug tooling; that keyword is deliberately absent from the production policy.
+
+## Tests
+
+Run the security regression tests (safe image URLs, same-origin redirects and push-submission SSRF validation) with:
+
+```bash
+npm test
+```
+
+They use Node's built-in test runner and require no extra dependency.
 
 ## Transactional email (Resend)
 

@@ -5,10 +5,22 @@ import { accountIsActive } from '@/utils/account';
 import { verifyTransaction } from '@/utils/paystack/api';
 import { recordWalletFunding } from '@/utils/paystack/recordWalletFunding';
 
-export async function GET(request: Request) {
+/**
+ * POST only: verifying funds credits the wallet, so it must never be
+ * triggerable by a navigation, GET or <img> request. The reference is read from
+ * a validated JSON body and bounded before it is sent to Paystack.
+ */
+export async function POST(request: Request) {
   try {
-    const reference = new URL(request.url).searchParams.get('reference')?.trim();
-    if (!reference) return NextResponse.json({ error: 'Missing funding reference.' }, { status: 400 });
+    const payload = await request.json().catch(() => null);
+    const rawReference =
+      payload && typeof payload === 'object' && typeof payload.reference === 'string'
+        ? payload.reference.trim()
+        : '';
+    if (!rawReference || rawReference.length > 200 || !/^[A-Za-z0-9_-]+$/.test(rawReference)) {
+      return NextResponse.json({ error: 'Missing funding reference.' }, { status: 400 });
+    }
+    const reference = rawReference;
 
     const supabase = await createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();

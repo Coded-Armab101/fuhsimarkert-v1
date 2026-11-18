@@ -4,7 +4,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { nairaToKobo, koboToNaira } from '@/utils/money';
-import { uploadProductImage, getSellerStorageUsed } from '@/utils/upload';
 import { productImageFileError, revokePreviewUrl, safeImageSrc } from '@/utils/safeImage';
 import { Package, Loader2, ArrowLeft, UploadCloud, Database } from 'lucide-react';
 import { PRODUCT_CATEGORIES } from '@/utils/categories';
@@ -50,15 +49,17 @@ export default function EditProductPage() {
           return;
         }
 
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('storage_quota')
-          .eq('id', user.id)
-          .maybeSingle();
-        if (profile && profile.storage_quota != null) {
-          setStorageQuota(Number(profile.storage_quota));
+        // Quota and usage come from the trusted server route, never the browser.
+        try {
+          const allowanceRes = await fetch('/api/upload/product-image', { cache: 'no-store' });
+          if (allowanceRes.ok) {
+            const allowance = await allowanceRes.json();
+            setStorageQuota(allowance.quota != null ? Number(allowance.quota) : null);
+            setStorageUsed(Number(allowance.usedBytes) || 0);
+          }
+        } catch (err) {
+          console.warn('Could not load storage allowance', err);
         }
-        setStorageUsed(await getSellerStorageUsed(supabase, user.id));
 
         const { data, error } = await supabase
           .from('products')
@@ -142,16 +143,20 @@ export default function EditProductPage() {
         return;
       }
 
-      // If a new image was chosen, upload it; otherwise keep the existing one.
+      // If a new image was chosen, upload it through the trusted server route;
+      // otherwise keep the existing one.
       let imageUrl = existingImage;
       if (imageFile) {
-        const upload = await uploadProductImage(supabase, user.id, imageFile, storageQuota);
-        if (!upload.ok) {
-          setError(upload.error);
+        const form = new FormData();
+        form.append('file', imageFile);
+        const uploadRes = await fetch('/api/upload/product-image', { method: 'POST', body: form });
+        const upload = await uploadRes.json().catch(() => ({}));
+        if (!uploadRes.ok || !upload.ok) {
+          setError(upload.error || 'Could not upload the image. Please try again.');
           setSubmitting(false);
           return;
         }
-        imageUrl = upload.url || existingImage;
+        imageUrl = typeof upload.url === 'string' && upload.url ? upload.url : existingImage;
       }
 
       const { error: updateError } = await supabase
@@ -330,7 +335,7 @@ export default function EditProductPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-mono text-neutral-300">Product Image (JPG/PNG/WEBP/GIF, max 5MB)</label>
+            <label className="text-xs font-mono text-neutral-300">Product Image (JPG/PNG/WEBP/GIF, max 4MB)</label>
             {storageQuota !== null && (
               <div className="flex items-center gap-2 text-[11px] font-mono text-neutral-400 bg-neutral-900/60 border border-neutral-800 p-3 rounded-xl">
                 <Database size={13} className="text-red-500 shrink-0" />

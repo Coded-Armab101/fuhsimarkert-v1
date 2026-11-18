@@ -12,12 +12,15 @@ function metadataText(value: unknown): string | null {
 /**
  * Verify a Paystack transaction by reference.
  *
- * Called by the buyer's browser when Paystack redirects back to /buyer/cart
- * with ?reference=.... Besides reporting the real status, on a successful
- * charge this route ALSO creates the escrow order server-side (via
- * utils/paystack/recordOrder) — so an order appears reliably even if the
- * Paystack → /api/webhooks push never arrives. The idempotent upsert means a
- * late webhook is a harmless no-op, not a duplicate.
+ * Called by the buyer's browser when Paystack redirects back with
+ * ?reference=... (the page reads that query param and POSTs it here as JSON).
+ * POST is deliberate: this handler creates orders and escrow rows, so it must
+ * never be triggerable by a simple GET/navigation/<img> request.
+ *
+ * Besides reporting the real status, on a successful charge this route ALSO
+ * creates the escrow order server-side (via utils/paystack/recordOrder) — so
+ * an order appears reliably even if the Paystack → /api/webhooks push never
+ * arrives. The idempotent upsert means a late webhook is a harmless no-op.
  *
  * The caller's identity is established with the cookie (anon) client; the
  * actual orders INSERT runs under the service-role client, because RLS has no
@@ -25,12 +28,19 @@ function metadataText(value: unknown): string | null {
  * written by server code, not by end users). The transaction is validated to
  * belong to this buyer before any write is attempted.
  */
-export async function GET(request: Request) {
+export async function POST(request: Request) {
   try {
-    const reference = new URL(request.url).searchParams.get('reference');
-    if (!reference) {
+    const payload = await request.json().catch(() => null);
+    const rawReference =
+      payload && typeof payload === 'object' && typeof payload.reference === 'string'
+        ? payload.reference.trim()
+        : '';
+    // Paystack references are short alphanumeric tokens (e.g. T693638645039951).
+    // Bound the length and character set before using it in the provider URL.
+    if (!rawReference || rawReference.length > 200 || !/^[A-Za-z0-9_-]+$/.test(rawReference)) {
       return NextResponse.json({ error: 'Missing transaction reference.' }, { status: 400 });
     }
+    const reference = rawReference;
 
     // Identify the buyer with the cookie (anon) client.
     const supabase = await createClient();

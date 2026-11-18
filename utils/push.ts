@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendNotification, setVapidDetails } from 'web-push';
+import { validatePushSubscription } from '@/utils/push-endpoint';
 
 /**
  * Server-side Web Push helper.
@@ -95,11 +96,23 @@ export async function sendPushToUsers(
 
   await Promise.all(
     subscriptions.map(async (subscription) => {
+      // Defence in depth: rows may predate the write-time validation or have
+      // been inserted directly. Never hand an untrusted endpoint to web-push.
+      const validated = validatePushSubscription({
+        endpoint: subscription.endpoint,
+        keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+      });
+      if (!validated) {
+        failed += 1;
+        staleIds.push(subscription.id);
+        console.warn('[push] skipped invalid stored subscription', subscription.id);
+        return;
+      }
       try {
         await sendNotification(
           {
-            endpoint: subscription.endpoint,
-            keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+            endpoint: validated.endpoint,
+            keys: { p256dh: validated.p256dh, auth: validated.auth },
           },
           JSON.stringify(payload),
         );

@@ -4,7 +4,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { nairaToKobo } from '@/utils/money';
-import { uploadProductImage, getSellerStorageUsed } from '@/utils/upload';
 import { productImageFileError, revokePreviewUrl, safeImageSrc } from '@/utils/safeImage';
 import { PackagePlus, Loader2, ArrowLeft, UploadCloud, Database } from 'lucide-react';
 import { PRODUCT_CATEGORIES } from '@/utils/categories';
@@ -36,19 +35,19 @@ export default function AddProductPage() {
 
   useEffect(() => {
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('storage_quota')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (profile && profile.storage_quota != null) {
-        setStorageQuota(Number(profile.storage_quota));
+      // Quota and usage are read on the trusted server route. A browser value
+      // is never used for enforcement, and a failed lookup shows no meter.
+      try {
+        const res = await fetch('/api/upload/product-image', { cache: 'no-store' });
+        if (!res.ok) return;
+        const allowance = await res.json();
+        setStorageQuota(allowance.quota != null ? Number(allowance.quota) : null);
+        setStorageUsed(Number(allowance.usedBytes) || 0);
+      } catch (err) {
+        console.warn('Could not load storage allowance', err);
       }
-      setStorageUsed(await getSellerStorageUsed(supabase, user.id));
     })();
-  }, [supabase]);
+  }, []);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
@@ -112,12 +111,20 @@ export default function AddProductPage() {
         return;
       }
 
-      // Upload the image first (if any) so we can persist our own URL.
-      const upload = await uploadProductImage(supabase, user.id, imageFile, storageQuota);
-      if (!upload.ok) {
-        setError(upload.error);
-        setSubmitting(false);
-        return;
+      // Upload through the server route so the quota cannot be bypassed by
+      // tampering with a browser-side value.
+      let uploadedUrl = '';
+      if (imageFile) {
+        const form = new FormData();
+        form.append('file', imageFile);
+        const uploadRes = await fetch('/api/upload/product-image', { method: 'POST', body: form });
+        const upload = await uploadRes.json().catch(() => ({}));
+        if (!uploadRes.ok || !upload.ok) {
+          setError(upload.error || 'Could not upload the image. Please try again.');
+          setSubmitting(false);
+          return;
+        }
+        uploadedUrl = typeof upload.url === 'string' ? upload.url : '';
       }
 
       const { error: insertError } = await supabase.from('products').insert([
@@ -127,7 +134,7 @@ export default function AddProductPage() {
           price: priceKobo,
           category,
           description: description.trim(),
-          image_url: upload.url || null,
+          image_url: uploadedUrl || null,
           stock: stockValue,
           unit: unit.trim() || null,
           sizes: optionList(sizes),
@@ -282,7 +289,7 @@ export default function AddProductPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-mono text-neutral-300">Product Image (JPG/PNG/WEBP/GIF, max 5MB)</label>
+            <label className="text-xs font-mono text-neutral-300">Product Image (JPG/PNG/WEBP/GIF, max 4MB)</label>
 
             {storageQuota !== null && (
               <div className="flex items-center gap-2 text-[11px] font-mono text-neutral-400 bg-neutral-900/60 border border-neutral-800 p-3 rounded-xl">
@@ -311,7 +318,7 @@ export default function AddProductPage() {
               <input type="file" accept="image/*" onChange={handleFile} className="hidden" />
             </label>
             <p className="text-[10px] text-neutral-500 font-mono">
-              Tip: compress your photos (many phone camera images are larger than 5MB) — you have a set storage allowance per seller.
+              Tip: compress your photos (many phone camera images are larger than 4MB) — you have a set storage allowance per seller.
             </p>
           </div>
 

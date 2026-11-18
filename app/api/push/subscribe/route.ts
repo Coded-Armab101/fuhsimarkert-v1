@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { validatePushSubscription } from '@/utils/push-endpoint';
 
 /**
  * Save a browser's Web Push subscription for the signed-in user.
@@ -33,23 +34,35 @@ export async function POST(request: Request) {
         }
       | null;
 
-    const subscription = body?.subscription;
-    const endpoint = subscription?.endpoint;
-    const p256dh = subscription?.keys?.p256dh;
-    const auth = subscription?.keys?.auth;
+    // Reject SSRF endpoints and malformed VAPID keys before anything is stored.
+    const subscription = validatePushSubscription(
+      body && typeof body === 'object' ? (body as Record<string, unknown>).subscription : null,
+    );
+    if (!subscription) {
+      return NextResponse.json({ error: 'Invalid push subscription.' }, { status: 400 });
+    }
+    const { endpoint, p256dh, auth } = subscription;
 
-    if (!endpoint || !p256dh || !auth) {
+    const admin = createAdminClient();
+
+    // `endpoint` is unique table-wide. Never let one signed-in user silently
+    // reassign another device's row by replaying its endpoint.
+    const { data: owner } = await admin
+      .from('push_subscriptions')
+      .select('user_id')
+      .eq('endpoint', endpoint)
+      .maybeSingle<{ user_id: string }>();
+    if (owner && owner.user_id !== user.id) {
       return NextResponse.json({ error: 'Invalid push subscription.' }, { status: 400 });
     }
 
-    const admin = createAdminClient();
     const { error } = await admin.from('push_subscriptions').upsert(
       {
         user_id: user.id,
         endpoint,
         p256dh,
         auth,
-        user_agent: request.headers.get('user-agent'),
+        user_agent: request.headers.get('user-agent')?.slice(0, 500) ?? null,
       },
       { onConflict: 'endpoint' },
     );

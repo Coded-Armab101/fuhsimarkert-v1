@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { LEGAL_TERMS_VERSION } from '@/utils/legal';
+import { safeRedirectPath } from '@/utils/safe-redirect';
 import {
   SESSION_NONCE_COOKIE,
   SESSION_NONCE_COOKIE_MAX_AGE,
@@ -22,10 +23,10 @@ import {
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get('code');
-  const requestedNext = searchParams.get('next') ?? '/buyer';
-  const next = requestedNext.startsWith('/') && !requestedNext.startsWith('//')
-    ? requestedNext
-    : '/buyer';
+  const origin = request.nextUrl.origin;
+  // Only ever redirect to a path on our own origin. See safeRedirectPath for
+  // the backslash / protocol-relative / absolute-URL bypasses this prevents.
+  const next = safeRedirectPath(searchParams.get('next'), origin);
   const legalAccepted = searchParams.get('legal') === LEGAL_TERMS_VERSION;
 
   if (!code) {
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const redirect = NextResponse.redirect(new URL(next, request.nextUrl.origin));
+  const redirect = NextResponse.redirect(new URL(next, origin));
 
   for (const cookie of cookieStore.getAll()) {
     redirect.cookies.set(cookie.name, cookie.value, cookie);

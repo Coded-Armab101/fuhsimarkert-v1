@@ -232,7 +232,11 @@ export default function ProfilePage() {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch(`/api/wallet/fund/verify?reference=${encodeURIComponent(reference)}`);
+        const response = await fetch('/api/wallet/fund/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reference }),
+        });
         const data = await response.json().catch(() => ({}));
         if (cancelled) return;
         if (!response.ok || data.status !== 'success') {

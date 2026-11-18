@@ -8,7 +8,7 @@
  * HTML" finding). Only local blob previews created by `URL.createObjectURL` and
  * absolute `https:` URLs are ever allowed through.
  */
-export const MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB per file
+export const MAX_PRODUCT_IMAGE_BYTES = 4 * 1024 * 1024; // 4MB (under Vercel's 4.5MB body limit)
 export const ALLOWED_PRODUCT_IMAGE_TYPES = [
   'image/jpeg',
   'image/png',
@@ -24,7 +24,7 @@ export function productImageFileError(file: File): string | null {
     return 'Only JPG, PNG, WEBP or GIF images are allowed.';
   }
   if (file.size > MAX_PRODUCT_IMAGE_BYTES) {
-    return 'Image must be 5MB or smaller.';
+    return 'Image must be 4MB or smaller.';
   }
   return null;
 }
