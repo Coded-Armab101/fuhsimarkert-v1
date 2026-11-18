@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { notifyUsers } from '@/utils/notifications';
 import { getWalletPaidKobo, refundCardPortion } from '@/utils/paystack/refund';
 import { sendEmailToUsers, appLink } from '@/utils/email';
 import { formatNaira } from '@/utils/money';
@@ -147,17 +148,30 @@ export async function POST(request: Request) {
       if (requestedReturn) {
         try {
           const sellerIds = Array.from(new Set(group.map((row) => row.seller_id)));
-          const notifications = group.map((row) => ({
-            user_id: row.seller_id,
-            order_id: row.id,
-            type: 'order_return_requested',
-            title: 'Disputed item awaiting return',
-            message: 'The buyer opened a dispute and says they have the item. Confirm in Sales only after the returned item is back with you.',
-          }));
-          await admin.from('notifications').upsert(notifications, {
-            onConflict: 'user_id,order_id,type',
-            ignoreDuplicates: true,
-          });
+          // Inbox row + push so sellers are told immediately a return is pending.
+          for (const row of group) {
+            if (!row.seller_id) continue;
+            await notifyUsers(admin, {
+              userIds: [row.seller_id],
+              orderId: row.id,
+              type: 'order_return_requested',
+              title: 'Disputed item awaiting return',
+              message: 'The buyer opened a dispute and says they have the item. Confirm in Sales only after the returned item is back with you.',
+              url: '/seller/orders',
+            });
+          }
+          // Confirm to the buyer that their seller was notified, so both sides
+          // have a visible record of the dispute in the app.
+          if (group.length > 0) {
+            await notifyUsers(admin, {
+              userIds: [user.id],
+              orderId: group[0].id,
+              type: 'dispute_opened',
+              title: 'Dispute opened',
+              message: 'We have asked the seller to confirm they received the returned item. Your refund follows once they do.',
+              url: '/buyer/orders',
+            });
+          }
           await sendEmailToUsers(admin, sellerIds, {
             subject: 'A disputed FuhsiMarket item is being returned',
             heading: 'Return confirmation required',
@@ -317,21 +331,28 @@ export async function POST(request: Request) {
         new Set(group.map((row) => row.seller_id).filter(Boolean)),
       );
 
-      const notifications = group.map((row) => ({
-        user_id: row.seller_id,
-        order_id: row.id,
-        type: 'order_refunded',
-        title: 'Order refunded',
-        message: 'The buyer reported a problem and the payment was refunded.',
-      }));
-      const { error: notificationError } = await admin
-        .from('notifications')
-        .upsert(notifications, {
-          onConflict: 'user_id,order_id,type',
-          ignoreDuplicates: true,
+      // Inbox + push for each seller that this sale was refunded.
+      for (const row of group) {
+        if (!row.seller_id) continue;
+        await notifyUsers(admin, {
+          userIds: [row.seller_id],
+          orderId: row.id,
+          type: 'order_refunded',
+          title: 'Order refunded',
+          message: 'The buyer reported a problem and the payment was refunded.',
+          url: '/seller/orders',
         });
-      if (notificationError) {
-        console.warn('[orders/dispute] notification failed', notificationError);
+      }
+      // And the buyer gets a visible record of the refund outcome in-app.
+      if (group.length > 0) {
+        await notifyUsers(admin, {
+          userIds: [user.id],
+          orderId: group[0].id,
+          type: 'order_refunded',
+          title: 'Refund processed',
+          message: 'Your refund has been processed. Check your card and FuhsiMarket wallet for the credit.',
+          url: '/buyer/profile',
+        });
       }
 
       const productIds = group

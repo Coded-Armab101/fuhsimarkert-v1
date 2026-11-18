@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { notifyUsers } from '@/utils/notifications';
 
 /**
  * Admin fulfilment view: every combined order (one order_ref), grouped, with the
@@ -279,15 +280,14 @@ export async function POST(request: Request) {
     });
     if (eventError) console.error('[admin/orders] return override audit failed', eventError);
 
-    await admin.from('notifications').upsert({
-      user_id: order.buyer_id,
-      order_id: order.id,
+    // Inbox + push so the buyer knows support verified the return evidence.
+    await notifyUsers(admin, {
+      userIds: [order.buyer_id],
+      orderId: order.id,
       type: 'order_return_received',
       title: 'Return confirmed by support',
       message: 'An administrator verified the return evidence. Open the disputed order to continue the protected refund.',
-    }, {
-      onConflict: 'user_id,order_id,type',
-      ignoreDuplicates: true,
+      url: '/buyer/orders',
     });
 
     return NextResponse.json({ ok: true, returnReceivedAt: new Date().toISOString() });

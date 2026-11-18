@@ -57,7 +57,18 @@ Then apply `supabase/migrations/20261119_wallet_funding_fees.sql`. It adds sourc
 
 Then apply `supabase/migrations/20261120_wallet_subscription_renewal.sql`. It lets sellers renew their monthly plan from spendable wallet balance (including money still inside the 14-day cash-out hold), records the subscription debit, and can reverse it if activation fails. Without it, the wallet renewal button stays hidden because the wallet summary RPC is unavailable.
 
-Finally apply `supabase/migrations/20261121_review_update_hardening.sql`. It limits review updates to `rating`/`comment` via column grants, RLS and a trigger, so a buyer cannot move a review to another product/order after the verified-purchase check.
+Then apply `supabase/migrations/20261121_review_update_hardening.sql`. It limits review updates to `rating`/`comment` via column grants, RLS and a trigger, so a buyer cannot move a review to another product/order after the verified-purchase check.
+
+Finally apply `supabase/migrations/20261122_notifications_inbox.sql`. It adds `read_at`, `url` and `created_at` to `public.notifications`, an index for the inbox query, and an RLS update policy plus column grant so a signed-in user can only mark their OWN notifications read. Without it the notification bell and bottom-nav badge cannot work, and `POST /api/notifications/read` will fail.
+
+### Notifications (in-app inbox + Web Push)
+
+Both buyers and sellers receive notifications for the full order lifecycle — new paid order, packing/ready for pickup, completion, disputes, returns and refunds. Two delivery channels are used together:
+
+1. **In-app inbox** — every event writes a persistent row to `public.notifications`. The bell (`OrderNotificationBell`) and the buyer bottom-nav badge read unread rows (`read_at is null`) from that table, so an alert generated while the tab was closed is still visible on return. `POST /api/notifications/read` marks the signed-in user's rows read. Messages are only ever written by trusted server code (`utils/notifications.ts`); clients get SELECT and `UPDATE (read_at)` only.
+2. **Web Push** — `utils/notifications.ts` also calls `sendPushToUsers()` so the same event reaches the phone even when the app is closed. Sellers enrol from Settings or the bell; buyers enrol from the profile page ("Get order alerts on your phone") or the bell. Both roles use the same VAPID keys and device subscription (stored per user).
+
+All notification failures are best-effort and never block the order/payment transition that triggered them. Email reminders (via `RESEND_API_KEY`) remain an additional channel but are not required for the in-app inbox to work.
 
 ### Product image uploads
 
@@ -106,11 +117,13 @@ If an older failed attempt is already recorded as `unknown`, Reject remains bloc
 
 For password reset, add `<your site origin>/auth/callback?next=/reset-password` to the Supabase Auth **Redirect URLs** allow-list.
 
-## Phone alerts for sellers (Web Push)
+## Phone alerts for buyers and sellers (Web Push)
 
-Sellers can turn on order alerts from **Seller Settings**, or from the bell menu in
-the seller header. Alerts use a service worker (`public/sw.js`) plus Web Push, so
-they arrive on an installed PWA even when the app is closed.
+Sellers can turn on sales alerts from **Seller Settings** or the bell menu in the
+seller header. Buyers can turn on order alerts from the **Account** page (the
+"Get order alerts on your phone" card) or from the bell menu in the buyer home
+header. Alerts use a service worker (`public/sw.js`) plus Web Push, so they arrive
+on an installed PWA even when the app is closed.
 
 1. Apply `supabase/migrations/20261111_push_subscriptions.sql`.
 2. Generate a VAPID key pair (for example `npx web-push generate-vapid-keys`).
@@ -122,7 +135,7 @@ they arrive on an installed PWA even when the app is closed.
    VAPID_SUBJECT=mailto:you@example.com
    ```
 
-4. Redeploy, open **Seller Settings**, and tap **Enable order alerts**.
+4. Redeploy, then enable alerts from **Seller Settings** or the **Buyer Account** page (or either bell menu).
 
 Push is best-effort: if the keys are missing or a device is offline, the order is
 still recorded and the in-app bell still updates. Installation and notifications

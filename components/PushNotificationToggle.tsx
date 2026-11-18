@@ -12,6 +12,9 @@ import {
 type Props = {
   /** `card` is the full settings panel, `inline` fits inside a dropdown. */
   variant?: 'card' | 'inline';
+  /** Sellers get sales copy, buyers get order-tracking copy. Subscriptions are
+   *  stored per user, so this only changes the wording, not the mechanism. */
+  role?: 'buyer' | 'seller';
 };
 
 const BUTTON_LABEL: Partial<Record<PushState, string>> = {
@@ -19,7 +22,16 @@ const BUTTON_LABEL: Partial<Record<PushState, string>> = {
   granted: 'Enable order alerts',
 };
 
-function stateCopy(state: PushState): { title: string; detail: string; tone: 'ok' | 'warn' | 'muted' } {
+function stateCopy(state: PushState, role: 'buyer' | 'seller'): { title: string; detail: string; tone: 'ok' | 'warn' | 'muted' } {
+  // Sellers care about new paid sales; buyers care about their order moving
+  // through packing → pickup → completion, so tailor the "on" and CTA copy.
+  const activeDetail = role === 'seller'
+    ? 'New paid orders will pop up on this phone, even when the app is closed.'
+    : 'Order updates will pop up on this phone, even when the app is closed.';
+  const enableDetail = role === 'seller'
+    ? 'Install FuhsiMarket, then allow notifications so a new paid sale reaches you immediately.'
+    : 'Install FuhsiMarket, then allow notifications so you know when your order is packed, ready or completed.';
+
   switch (state) {
     case 'checking':
       return { title: 'Checking this device…', detail: 'Seeing whether phone alerts can be turned on.', tone: 'muted' };
@@ -43,8 +55,8 @@ function stateCopy(state: PushState): { title: string; detail: string; tone: 'ok
       };
     case 'subscribed':
       return {
-        title: 'Order alerts are on',
-        detail: 'New paid orders will pop up on this phone, even when the app is closed.',
+        title: role === 'seller' ? 'Sales alerts are on' : 'Order alerts are on',
+        detail: activeDetail,
         tone: 'ok',
       };
     case 'error':
@@ -61,14 +73,14 @@ function stateCopy(state: PushState): { title: string; detail: string; tone: 'ok
       };
     default:
       return {
-        title: 'Get order alerts on your phone',
-        detail: 'Install FuhsiMarket, then allow notifications so a new paid order reaches you immediately.',
+        title: role === 'seller' ? 'Get sales alerts on your phone' : 'Get order alerts on your phone',
+        detail: enableDetail,
         tone: 'muted',
       };
   }
 }
 
-export default function PushNotificationToggle({ variant = 'card' }: Props) {
+export default function PushNotificationToggle({ variant = 'card', role = 'seller' }: Props) {
   const [state, setState] = useState<PushState>('checking');
   const [busy, setBusy] = useState(false);
 
@@ -92,7 +104,7 @@ export default function PushNotificationToggle({ variant = 'card' }: Props) {
     setBusy(false);
   };
 
-  const copy = stateCopy(state);
+  const copy = stateCopy(state, role);
   const canEnable = state === 'default' || state === 'granted';
   const isLoading = state === 'checking' || busy;
 

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { notifyUsers } from '@/utils/notifications';
 import { accountIsActive } from '@/utils/account';
 
 /**
@@ -53,6 +54,15 @@ export async function POST(request: Request) {
     }
 
     const admin = createAdminClient();
+
+    // Read every seller row in this order group before confirming, so we can
+    // tell each seller their escrow was released once the RPC succeeds.
+    const { data: groupRows, error: groupError } = await admin
+      .from('orders')
+      .select('id, seller_id')
+      .eq('order_ref', order.order_ref);
+    if (groupError) throw groupError;
+
     const { data: ok, error } = await admin.rpc('confirm_order_group', {
       p_order_ref: order.order_ref,
       p_buyer_id: user.id,
@@ -61,6 +71,36 @@ export async function POST(request: Request) {
 
     if (ok !== true) {
       return NextResponse.json({ ok: false, reason: 'already-handed-off' }, { status: 409 });
+    }
+
+    // Best-effort completion notices for BOTH sides — this route previously
+    // sent nothing, so nobody was told the order had finished and money moved.
+    try {
+      // One notice per seller for their own order row.
+      const sellerRows = new Map<string, string>();
+      for (const row of groupRows ?? []) {
+        if (row.seller_id && !sellerRows.has(row.seller_id)) sellerRows.set(row.seller_id, row.id);
+      }
+      for (const [sellerId, orderRowId] of sellerRows) {
+        await notifyUsers(admin, {
+          userIds: [sellerId],
+          orderId: orderRowId,
+          type: 'order_completed',
+          title: 'Sale completed',
+          message: 'The buyer confirmed receipt. Your payout has been released to your wallet.',
+          url: '/seller/wallet',
+        });
+      }
+      await notifyUsers(admin, {
+        userIds: [user.id],
+        orderId: order.id,
+        type: 'order_completed',
+        title: 'Order completed',
+        message: 'Receipt confirmed. Thank you for shopping on FuhsiMarket.',
+        url: '/buyer/orders',
+      });
+    } catch (notifyError) {
+      console.warn('[orders/complete] notification failed', notifyError);
     }
 
     return NextResponse.json({ ok: true, status: 'completed' });

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { notifyUsers } from '@/utils/notifications';
 import { appLink, sendEmailToUsers } from '@/utils/email';
 import { accountIsActive } from '@/utils/account';
 
@@ -96,25 +97,31 @@ export async function POST(request: Request) {
         if (titles.length > 0) label = titles.join(', ');
       }
 
-      const notifications = rows
-        .filter((row) => Boolean(row.seller_id))
-        .map((row) => ({
-          user_id: row.seller_id,
-          order_id: row.id,
+      // Inbox row + push for each seller. Previously this only wrote DB rows
+      // (no push), so an offline seller saw nothing about their released payout.
+      for (const row of rows) {
+        if (!row.seller_id) continue;
+        await notifyUsers(admin, {
+          userIds: [row.seller_id],
+          orderId: row.id,
+          type: 'order_completed',
+          title: 'Sale completed',
+          message: 'The buyer confirmed receipt. Your wallet has been credited.',
+          url: '/seller/wallet',
+        });
+      }
+
+      // The buyer previously got an email only — give them a persistent inbox
+      // row and push too so completion is visible in the app.
+      if (rows.length > 0) {
+        await notifyUsers(admin, {
+          userIds: [user.id],
+          orderId: rows[0].id,
           type: 'order_completed',
           title: 'Order completed',
-          message: 'The buyer confirmed receipt. Your wallet has been credited.',
-        }));
-      if (notifications.length > 0) {
-        const { error: notificationError } = await admin
-          .from('notifications')
-          .upsert(notifications, {
-            onConflict: 'user_id,order_id,type',
-            ignoreDuplicates: true,
-          });
-        if (notificationError) {
-          console.warn('[orders/complete-group] notification failed', notificationError);
-        }
+          message: 'You confirmed receipt. The seller has been paid — leave a review when you are happy.',
+          url: '/buyer/orders',
+        });
       }
 
       await sendEmailToUsers(admin, [user.id], {

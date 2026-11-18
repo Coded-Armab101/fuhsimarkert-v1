@@ -12,6 +12,7 @@ import { formatNaira } from '@/utils/money';
 import { uploadStudentId, uploadVerificationVideo } from '@/utils/verify';
 import VerificationRecorder from '../VerificationRecorder';
 import ProfileInstallApp from '@/components/ProfileInstallApp';
+import PushNotificationToggle from '@/components/PushNotificationToggle';
 import { useNotifications } from '@/components/NotificationProvider';
 import { SELLER_VERIFICATION_CONSENT_VERSION } from '@/utils/legal';
 import {
@@ -641,6 +642,11 @@ export default function ProfilePage() {
       </section>
 
       <ProfileInstallApp />
+
+      {/* Buyers need a way to enrol in phone alerts too — previously only the
+          seller settings page exposed PushNotificationToggle, so buyers never
+          subscribed and therefore never received order-status pushes. */}
+      <PushNotificationToggle role="buyer" />
 
       <nav className="grid grid-cols-3 gap-2 rounded-[1.5rem] border border-[#eee4dc] bg-white p-2 shadow-sm" aria-label="Account sections">
         {[

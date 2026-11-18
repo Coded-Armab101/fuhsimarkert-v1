@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { sellerCommissionKobo, buyerServiceFeeKobo } from '@/utils/pricing';
 import { createAdminClient } from '@/utils/supabase/admin';
-import { sendPushToUsers } from '@/utils/push';
+import { notifyUsers } from '@/utils/notifications';
 import { appLink, sendEmailToUsers } from '@/utils/email';
 import { formatNaira } from '@/utils/money';
 import { cleanOption, normalizeVariantKey } from '@/utils/variants';
@@ -325,47 +325,44 @@ export async function recordOrder(
     .eq('order_ref', input.reference);
   if (createdOrdersError) throw createdOrdersError;
 
-  // Notify each seller only for rows this call inserted, so the losing side of
-  // the webhook/verify race never sends a duplicate alert. Push is best-effort:
-  // a missing service key or offline phone must never break a paid order.
+  // Notify BOTH sides for rows this call inserted, so the losing side of the
+  // webhook/verify race never sends a duplicate alert. The inbox row + push are
+  // best-effort: a missing service key or offline phone must never break a paid
+  // order. Previously only sellers got a push and buyers got no in-app row at
+  // all, which is why neither side reliably saw what happened.
   if (newlyInsertedOrders.length > 0) {
     try {
       const admin = createAdminClient();
-      const notifications = newlyInsertedOrders.map((order) => ({
-        user_id: order.seller_id,
-        type: 'order_new',
-        title: 'New paid order',
-        message: 'A buyer has paid for your product. Open Sales to prepare the order.',
-        order_id: order.id,
-      }));
-      const { error: notificationError } = await admin
-        .from('notifications')
-        .upsert(notifications, { onConflict: 'user_id,order_id,type', ignoreDuplicates: true });
-      if (notificationError) {
-        console.error('[recordOrder] seller notification failed', notificationError);
-      } else {
-        const sellerIds = Array.from(
-          new Set(
-            newlyInsertedOrders
-              .map((row) => row.seller_id as string | null)
-              .filter((id): id is string => Boolean(id)),
-          ),
-        );
-        try {
-          await sendPushToUsers(admin, sellerIds, {
-            title: 'New paid order',
-            body: 'A buyer has paid for your product. Open Sales to prepare the order.',
-            url: '/seller/orders',
-            tag: `order-${input.reference}`,
-          });
-        } catch (pushError) {
-          // Push is best-effort: never fail a paid order because a phone was offline.
-          console.error('[recordOrder] push notification failed', pushError);
-        }
+
+      // One notice per seller (a seller with two items in this order gets one
+      // alert), attached to one of their newly inserted order rows.
+      const sellerRows = new Map<string, string>();
+      for (const row of newlyInsertedOrders) {
+        if (row.seller_id && !sellerRows.has(row.seller_id)) sellerRows.set(row.seller_id, row.id);
       }
+      for (const [sellerId, orderId] of sellerRows) {
+        await notifyUsers(admin, {
+          userIds: [sellerId],
+          orderId,
+          type: 'order_new',
+          title: 'New paid order',
+          message: 'A buyer has paid for your product. Open Sales to prepare the order.',
+          url: '/seller/orders',
+        });
+      }
+
+      // One notice for the buyer per checkout, even for a multi-seller order.
+      await notifyUsers(admin, {
+        userIds: [input.buyerId],
+        orderId: newlyInsertedOrders[0].id,
+        type: 'order_placed',
+        title: 'Order placed successfully',
+        message: 'Your payment is safely held in escrow. Follow your order from the Orders page.',
+        url: '/buyer/orders',
+      });
     } catch (notifyError) {
       // Notifications are a side effect — the order is already safely escrowed.
-      console.error('[recordOrder] notification setup failed', notifyError);
+      console.error('[recordOrder] notification failed', notifyError);
     }
   }
 

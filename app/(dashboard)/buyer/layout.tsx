@@ -12,9 +12,8 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const { totalItems } = useCart();
   const [savedCount, setSavedCount] = useState(0);
-  const [orderUnread, setOrderUnread] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
   useEffect(() => {
-    const key = 'fuhsi_order_notifications_buyer';
     const supabase = createClient();
     let userId: string | null = null;
     let stopped = false;
@@ -23,21 +22,16 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
       try {
         if (document.visibilityState !== 'visible' || !userId || stopped || requestInFlight) return;
         requestInFlight = true;
-        const { data } = await supabase
-          .from('orders')
-          .select('id, status')
-          .eq('buyer_id', userId)
-          .order('created_at', { ascending: false })
-          .limit(30);
-        if (stopped) return;
-        const rows = (data || []) as { id: string; status: string }[];
-        let read: Record<string, string> = {};
-        try {
-          read = JSON.parse(localStorage.getItem(key) || '{}') as Record<string, string>;
-        } catch {
-          read = {};
-        }
-        setOrderUnread(rows.filter((o) => !(o.id in read) || read[o.id] !== o.status).length);
+        // The badge now counts real unread inbox rows written by trusted server
+        // code, not localStorage/derived order statuses. An alert generated
+        // while the tab was closed is still unread when the buyer returns.
+        const { count, error } = await supabase
+          .from('notifications')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', userId)
+          .is('read_at', null);
+        if (stopped || error) return;
+        setUnreadCount(count || 0);
       } finally {
         requestInFlight = false;
       }
@@ -51,15 +45,20 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
     const onVisible = () => {
       if (document.visibilityState === 'visible') void load();
     };
+    const onMarked = () => void load();
     void start();
     // One lightweight refresh per minute while the tab is visible. The old
     // 15-second loop also called Auth every time, multiplying Supabase traffic.
     const t = window.setInterval(() => void load(), 60000);
     document.addEventListener('visibilitychange', onVisible);
+    // The bell dispatches this event after "Mark all read" so the bottom nav
+    // updates immediately instead of waiting for the next poll.
+    window.addEventListener('fuhsi-notifications-read', onMarked);
     return () => {
       stopped = true;
       window.clearInterval(t);
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('fuhsi-notifications-read', onMarked);
     };
   }, []);
   useEffect(() => { const supabase = createClient(); void (async () => { const { data: { user } } = await supabase.auth.getUser(); if (!user) return; const { count } = await supabase.from('wishlists').select('*', { count: 'exact', head: true }).eq('user_id', user.id); setSavedCount(count || 0); })(); }, []);
@@ -95,7 +94,7 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
               }`}
             >
               <Icon size={20} />
-              {((item.href === '/buyer/cart' && totalItems > 0) || (item.href === '/buyer/wishlist' && savedCount > 0) || (item.href === '/buyer/orders' && orderUnread > 0)) && <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[#ef6b3b] px-1 text-[9px] font-black text-white">{item.href === '/buyer/cart' ? totalItems : item.href === '/buyer/wishlist' ? savedCount : orderUnread}</span>}
+              {((item.href === '/buyer/cart' && totalItems > 0) || (item.href === '/buyer/wishlist' && savedCount > 0) || (item.href === '/buyer/orders' && unreadCount > 0)) && <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[#ef6b3b] px-1 text-[9px] font-black text-white">{item.href === '/buyer/cart' ? totalItems : item.href === '/buyer/wishlist' ? savedCount : unreadCount}</span>}
               <span className="text-[10px] font-mono mt-1">{item.label}</span>
             </Link>
           );

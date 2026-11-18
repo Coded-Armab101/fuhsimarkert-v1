@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { notifyUsers } from '@/utils/notifications';
 import { appLink, sendEmailToUsers } from '@/utils/email';
 import { accountIsActive } from '@/utils/account';
 
@@ -74,17 +75,16 @@ export async function POST(request: Request) {
     const allReturnsConfirmed = (pendingReturns ?? 0) === 0;
 
     try {
-      await admin.from('notifications').upsert({
-        user_id: order.buyer_id,
-        order_id: order.id,
+      // Inbox row + push so the buyer knows the seller received the return.
+      await notifyUsers(admin, {
+        userIds: [order.buyer_id],
+        orderId: order.id,
         type: 'order_return_received',
         title: allReturnsConfirmed ? 'Return confirmed' : 'One returned item confirmed',
         message: allReturnsConfirmed
           ? 'All affected sellers confirmed their returned items. Open the disputed order to finish the protected refund.'
           : 'A seller confirmed receipt of a returned item. Other return confirmations are still outstanding.',
-      }, {
-        onConflict: 'user_id,order_id,type',
-        ignoreDuplicates: true,
+        url: '/buyer/orders',
       });
 
       if (allReturnsConfirmed) {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { notifyUsers } from '@/utils/notifications';
 import { accountIsActive } from '@/utils/account';
 
 const TRANSITIONS: Record<string, string[]> = {
@@ -85,13 +86,19 @@ export async function POST(request: Request) {
     const message = status === 'ready_for_pickup'
       ? 'Your seller has marked this order ready for pickup.'
       : 'Your seller has started preparing your order.';
-    await admin.from('notifications').upsert({
-      user_id: order.buyer_id,
-      type: 'order_update',
+    // Record the inbox row AND push this status change to the buyer's phone.
+    // Previously this wrote a DB row only, so buyers with the tab closed never
+    // learned that their order had moved to packing/ready for pickup. Distinct
+    // types per stage keep both updates in the inbox instead of overwriting the
+    // first one via the (user_id, order_id, type) unique key.
+    await notifyUsers(admin, {
+      userIds: [order.buyer_id],
+      orderId: order.id,
+      type: status === 'ready_for_pickup' ? 'order_ready_for_pickup' : 'order_packing',
       title,
       message,
-      order_id: order.id,
-    }, { onConflict: 'user_id,order_id,type' });
+      url: '/buyer/orders',
+    });
 
     return NextResponse.json({ ok: true, status });
   } catch (err) {
