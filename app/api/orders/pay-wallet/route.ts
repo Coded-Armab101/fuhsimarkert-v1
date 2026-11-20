@@ -3,10 +3,10 @@ import crypto from 'crypto';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { recordOrder } from '@/utils/paystack/recordOrder';
-import { buyerServiceFeeKobo, deliveryFeeForOrder } from '@/utils/pricing';
+import { buyerServiceFeeKobo, deliveryFeeForOrder, discountedUnitPriceKobo } from '@/utils/pricing';
 import { checkoutDatabaseReady } from '@/utils/paystack/checkoutReady';
 import { cleanOption, normalizeVariantKey, resolveProductOptions } from '@/utils/variants';
-import { accountIsActive } from '@/utils/account';
+import { accountIsActive, buyerProfileComplete } from '@/utils/account';
 
 type CartRow = {
   product_id: string;
@@ -57,6 +57,12 @@ export async function POST(request: Request) {
     }
     if (!(await accountIsActive(supabase, user.id))) {
       return NextResponse.json({ error: 'This account is suspended.' }, { status: 403 });
+    }
+    if (!(await buyerProfileComplete(supabase, user.id))) {
+      return NextResponse.json(
+        { error: 'Complete your profile (full name, matric number, hostel and date of birth) before buying.' },
+        { status: 403 },
+      );
     }
 
     const admin = createAdminClient();
@@ -171,10 +177,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const priceById = new Map((products ?? []).map((p) => [p.id, Number(p.price) || 0]));
+    // Use the discounted price everywhere: the wallet debit, buyer fee, and the
+    // immutable escrow items must all agree with what the buyer saw on screen.
+    const unitPriceById = new Map(
+      (products ?? []).map((p) => [p.id, discountedUnitPriceKobo(p)]),
+    );
 
     const itemsTotalKobo = cartLines.reduce((acc, item) => {
-      const unit = priceById.get(item.productId) ?? 0;
+      const unit = unitPriceById.get(item.productId) ?? 0;
       const quantity = item.quantity;
       const line = unit * quantity;
       const next = acc + line;
@@ -222,7 +232,7 @@ export async function POST(request: Request) {
         size: item.size,
         color: item.color,
         quantity: item.quantity,
-        unitPriceKobo: priceById.get(item.productId) ?? 0,
+        unitPriceKobo: unitPriceById.get(item.productId) ?? 0,
       })),
       deliveryType,
       deliveryFeeKobo: chargedDeliveryKobo,
@@ -242,7 +252,7 @@ export async function POST(request: Request) {
         size: item.size,
         color: item.color,
         quantity: item.quantity,
-        unitPriceKobo: priceById.get(item.productId) ?? 0,
+        unitPriceKobo: unitPriceById.get(item.productId) ?? 0,
       })),
       deliveryType,
       deliveryFeeKobo: chargedDeliveryKobo,

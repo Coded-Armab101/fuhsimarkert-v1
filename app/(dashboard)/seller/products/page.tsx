@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { formatNaira } from '@/utils/money';
+import { discountedUnitPriceKobo } from '@/utils/pricing';
 import { Package, Plus, Trash2, Pencil, Image as ImageIcon } from 'lucide-react';
 import { safeImageSrc } from '@/utils/safeImage';
 import { optionList } from '@/utils/variants';
@@ -14,6 +15,7 @@ type Product = {
   title: string;
   description?: string | null;
   price: number;
+  discount_percent?: number | null;
   image_url?: string | null;
   stock?: number | null;
   sizes?: string[] | null;
@@ -144,7 +146,15 @@ export default function SellerProductsPage() {
                     ))}
                   </div>
                 )}
-                <div className="text-red-500 font-bold font-mono text-sm">₦{formatNaira(item.price)}</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-red-500 font-bold font-mono text-sm">₦{formatNaira(discountedUnitPriceKobo(item))}</span>
+                  {item.discount_percent ? (
+                    <>
+                      <span className="rounded-full bg-emerald-950/80 border border-emerald-800/60 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400">{item.discount_percent}% OFF</span>
+                      <span className="text-[10px] text-neutral-500 line-through">₦{formatNaira(item.price)}</span>
+                    </>
+                  ) : null}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2">

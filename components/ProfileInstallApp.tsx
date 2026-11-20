@@ -13,12 +13,22 @@ import {
 } from '@/utils/pwaInstall';
 import { useNotifications } from '@/components/NotificationProvider';
 
-/** Profile install card, hidden automatically inside the installed PWA. */
+/**
+ * Profile install card.
+ *
+ * `beforeinstallprompt` only fires in Chromium when the browser decides the app
+ * is installable. iOS Safari/Chrome and Firefox never fire it, so hiding the
+ * card until that event arrives made the install button invisible for most
+ * users. The card is now always shown (unless installed/dismissed) and falls
+ * back to plain-language manual instructions when no native prompt exists.
+ */
 export default function ProfileInstallApp() {
   const { notify } = useNotifications();
   const [checked, setChecked] = useState(false);
   const [handled, setHandled] = useState(false);
   const [promptEvent, setPromptEvent] = useState<PwaInstallPromptEvent | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
+  const [isApple, setIsApple] = useState(false);
 
   useEffect(() => {
     const refreshState = () => {
@@ -30,6 +40,13 @@ export default function ProfileInstallApp() {
 
     const initialState = window.setTimeout(() => {
       refreshState();
+      // Deferred so the server and first client render match during hydration.
+      const iosNavigator = navigator as Navigator & { standalone?: boolean };
+      setIsApple(
+        /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+          iosNavigator.standalone === true,
+      );
     }, 0);
 
     const unsubscribe = subscribeToPwaInstallPrompt((event) => {
@@ -54,7 +71,10 @@ export default function ProfileInstallApp() {
   }, []);
 
   const install = async () => {
-    if (!promptEvent) return;
+    if (!promptEvent) {
+      setShowHelp(true);
+      return;
+    }
 
     try {
       await promptEvent.prompt();
@@ -66,7 +86,8 @@ export default function ProfileInstallApp() {
     } catch {
       clearPwaInstallPrompt();
       setPromptEvent(null);
-      notify('This browser cannot install FuhsiMarket right now.', { tone: 'warning' });
+      setShowHelp(true);
+      notify('This browser cannot install FuhsiMarket right now. Use the manual steps instead.', { tone: 'warning' });
     }
   };
 
@@ -76,25 +97,30 @@ export default function ProfileInstallApp() {
     setPromptEvent(null);
   };
 
-  // `beforeinstallprompt` is the browser's authoritative signal that a direct
-  // install is possible. No prompt means no misleading button or manual steps.
-  if (!checked || handled || !promptEvent) return null;
+  if (!checked || handled) return null;
+
+  const instructions = isApple
+    ? 'Tap the Share button, then choose “Add to Home Screen”.'
+    : 'Open your browser menu and choose “Install app” or “Add to Home screen”.';
 
   return (
-    <section className="relative flex items-center gap-3 rounded-2xl border border-[#eee4dc] bg-white px-4 py-3 shadow-sm">
+    <section className="relative flex flex-wrap items-center gap-3 rounded-2xl border border-[#eee4dc] bg-white px-4 py-3 shadow-sm">
       <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#faf6f2] text-[#81756d]">
         <Smartphone size={17} />
       </div>
       <div className="min-w-0 flex-1">
         <h2 className="text-xs font-bold text-[#251d18]">Install on this device</h2>
         <p className="truncate text-[10px] text-[#81756d]">Open FuhsiMarket directly from your home screen.</p>
+        {showHelp && (
+          <p className="mt-1 text-[10px] leading-4 text-[#5f5650]">{instructions}</p>
+        )}
       </div>
       <button
         type="button"
-        onClick={install}
+        onClick={() => void install()}
         className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[#e3dad1] bg-[#faf6f2] px-3 py-2 text-[11px] font-bold text-[#5f5650] transition-colors hover:border-[#ef6b3b] hover:text-[#d8552e]"
       >
-        <Download size={13} /> Install
+        <Download size={13} /> {promptEvent ? 'Install' : showHelp ? 'Hide steps' : 'How to install'}
       </button>
       <button
         type="button"

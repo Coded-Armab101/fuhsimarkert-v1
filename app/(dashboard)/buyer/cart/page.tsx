@@ -26,6 +26,7 @@ export default function BuyerCartPage() {
   } = useCart();
   const [checkingOut, setCheckingOut] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
   const [walletBalance, setWalletBalance] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<'paystack' | 'wallet'>('paystack');
   const [paymentNotice, setPaymentNotice] = useState<{
@@ -69,9 +70,15 @@ export default function BuyerCartPage() {
       if (!user) return;
       const { data: profile } = await supabase
         .from('profiles')
-        .select('full_name, matric_no, hostel')
+        .select('full_name, matric_no, hostel, dob')
         .eq('id', user.id)
         .maybeSingle();
+      setProfileComplete(Boolean(
+        profile?.full_name?.trim() &&
+        profile?.matric_no?.trim() &&
+        profile?.hostel?.trim() &&
+        profile?.dob?.trim(),
+      ));
       setDelivery((d) => ({
         ...d,
         name: d.name || profile?.full_name || '',
@@ -184,6 +191,14 @@ export default function BuyerCartPage() {
    */
   const handleCheckout = async () => {
     if (checkoutItems.length === 0) return;
+
+    // Buyers must be identifiable for order tracking before any money moves.
+    // The server repeats this check; this redirect just gives a clear next step.
+    if (profileComplete === false) {
+      setCheckoutError('Complete your profile before buying.');
+      router.push('/buyer/profile?complete=1');
+      return;
+    }
 
     // Validate the delivery form before starting the transaction.
     if (!delivery.name.trim()) {
@@ -341,6 +356,19 @@ export default function BuyerCartPage() {
         )}
       </div>
 
+      {profileComplete === false && (
+        <Link
+          href="/buyer/profile?complete=1"
+          className="flex items-start gap-3 rounded-2xl border border-[#f3cdbb] bg-[#fff5f0] p-4 text-[#7a3b22]"
+        >
+          <User size={18} className="mt-0.5 shrink-0" />
+          <span className="text-xs leading-5">
+            <strong className="block font-bold">Complete your profile to buy</strong>
+            Add your full name, matric number, hostel and date of birth so we can track your order. Tap here to finish.
+          </span>
+        </Link>
+      )}
+
       {checkoutItems.length === 0 ? (
         <div className="rounded-3xl bg-white p-12 text-center space-y-4">
           <ShoppingBag size={40} className="mx-auto text-[#e7ddd4]" />
@@ -391,7 +419,7 @@ export default function BuyerCartPage() {
                       </p>
                     )}
                     <p className="text-xs font-bold text-[#ef6b3b] mt-1">
-                      ₦{formatNaira(item.price)}{item.unit ? ` / ${item.unit}` : ''} x {item.quantity}
+                      ₦{formatNaira(item.price)}{item.discount_percent ? <span className="ml-1.5 rounded-full bg-[#e8f7ef] px-1.5 py-0.5 text-[9px] font-bold text-[#17805b]">{item.discount_percent}% OFF</span> : null}{item.discount_percent ? <span className="ml-1 font-medium text-[#a99c92] line-through">₦{formatNaira(item.list_price)}</span> : null}{item.unit ? ` / ${item.unit}` : ''} x {item.quantity}
                     </p>
                   </div>
                 </div>

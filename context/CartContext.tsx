@@ -8,7 +8,11 @@ import { cartLineKey, normalizeVariantKey } from "@/utils/variants";
 export interface CartItem {
   id: string;
   title: string;
+  /** Effective unit price in kobo (already includes any seller discount). */
   price: number;
+  /** Original list price and discount, for the struck-through display price. */
+  list_price?: number;
+  discount_percent?: number | null;
   quantity: number;
   image?: string | null;
   image_url?: string | null;

@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { rateLimit, PAYMENT_INIT_LIMIT } from '@/utils/rate-limit';
-import { buyerServiceFeeKobo, deliveryFeeForOrder } from '@/utils/pricing';
+import { buyerServiceFeeKobo, deliveryFeeForOrder, discountedUnitPriceKobo } from '@/utils/pricing';
 import { grossUpPaystackLocalKobo } from '@/utils/payment-fees';
 import { checkoutDatabaseReady } from '@/utils/paystack/checkoutReady';
 import { cleanOption, normalizeVariantKey, resolveProductOptions } from '@/utils/variants';
-import { accountIsActive } from '@/utils/account';
+import { accountIsActive, buyerProfileComplete } from '@/utils/account';
 
 type CartRow = {
   product_id: string;
@@ -56,6 +56,14 @@ export async function POST(request: Request) {
     }
     if (!(await accountIsActive(supabase, user.id))) {
       return NextResponse.json({ error: 'This account is suspended.' }, { status: 403 });
+    }
+    // The buyer's identity fields are needed for order tracking and delivery.
+    // Enforce here as well as in the UI so a crafted POST cannot bypass it.
+    if (!(await buyerProfileComplete(supabase, user.id))) {
+      return NextResponse.json(
+        { error: 'Complete your profile (full name, matric number, hostel and date of birth) before buying.' },
+        { status: 403 },
+      );
     }
 
     // Never take a Paystack payment when the database still has the legacy
@@ -205,8 +213,11 @@ export async function POST(request: Request) {
       }
     }
 
-    const priceById = new Map(
-      (products ?? []).map((p) => [p.id, Number(p.price) || 0]),
+    // The effective unit price already includes the seller's percentage-off
+    // discount. Never charge list price here: the same value goes into the
+    // immutable checkout_items metadata used to escrow the order.
+    const unitPriceById = new Map(
+      (products ?? []).map((p) => [p.id, discountedUnitPriceKobo(p)]),
     );
 
     // 3. Compute absolute pricing metrics in Kobo on the server side.
@@ -219,7 +230,7 @@ export async function POST(request: Request) {
     // Delivery is charged per seller (one fee per seller, not a flat fee), and
     // the fee always comes from the DATABASE, never the client payload.
     const itemsTotalKobo = cartLines.reduce((acc, item) => {
-      const unit = priceById.get(item.productId) ?? 0;
+      const unit = unitPriceById.get(item.productId) ?? 0;
       const qty = item.quantity;
       if (!Number.isSafeInteger(unit) || unit < 0 || !Number.isSafeInteger(qty) || qty < 1) return Number.NaN;
       const line = unit * qty;
@@ -244,7 +255,7 @@ export async function POST(request: Request) {
         itemsTotalKobo,
         isPaidDelivery,
         productIds,
-        priceById: Object.fromEntries(priceById),
+        unitPriceById: Object.fromEntries(unitPriceById),
         cartItems: JSON.stringify(cartItems),
       });
       return NextResponse.json({ error: 'Invalid financial amount calculation.' }, { status: 400 });
@@ -301,7 +312,7 @@ export async function POST(request: Request) {
         size: item.size,
         color: item.color,
         quantity: item.quantity > 0 ? item.quantity : 1,
-        unit_price_kobo: priceById.get(item.productId) ?? 0,
+        unit_price_kobo: unitPriceById.get(item.productId) ?? 0,
       })),
       expected_total_kobo: trueTotalKobo,
       gateway_principal_kobo: gatewayPrincipalKobo,

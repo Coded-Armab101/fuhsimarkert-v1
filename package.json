@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test tests/safeImage.test.ts tests/safe-redirect.test.ts tests/push-endpoint.test.ts"
+    "test": "node --test tests/safeImage.test.ts tests/safe-redirect.test.ts tests/push-endpoint.test.ts tests/pricing.test.ts"
   },
   "dependencies": {
     "@paystack/inline-js": "^2.28.2",

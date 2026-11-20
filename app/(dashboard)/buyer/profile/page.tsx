@@ -257,6 +257,15 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, [notify, refreshWalletSummary]);
 
+  // Sent here when checkout is blocked because the tracking fields are missing.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('complete') !== '1') return;
+    notify('Complete your full name, matric number, hostel and date of birth before buying.', { tone: 'warning' });
+    url.searchParams.delete('complete');
+    window.history.replaceState(null, '', url.toString());
+  }, [notify]);
+
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userAuth) return;

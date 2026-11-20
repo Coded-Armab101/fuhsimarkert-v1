@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, CheckCheck } from 'lucide-react';
+import { Bell, CheckCheck, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import PushNotificationToggle from '@/components/PushNotificationToggle';
@@ -163,6 +163,9 @@ export default function OrderNotificationBell({ role, className = '' }: Props) {
         setNotices((prev) => prev.map((n) => (n.read_at ? n : { ...n, read_at: now })));
         // Keep the bottom-nav badge on other pages in sync immediately.
         window.dispatchEvent(new Event('fuhsi-notifications-read'));
+        // The user is done reading: close the panel instead of leaving an empty
+        // dropdown they have to dismiss with a second tap.
+        setOpen(false);
       }
       if (showSubscriptionNotice) dismissSubscription();
     } catch (err) {
@@ -180,8 +183,13 @@ export default function OrderNotificationBell({ role, className = '' }: Props) {
 
   return (
     <div className={`relative ${className}`}>
-      <button onClick={openNotifications} aria-label={role === 'seller' ? 'Seller sales notifications' : 'Buyer order notifications'} className="relative grid h-10 w-10 place-items-center rounded-full bg-white/80 text-[#2e2520] shadow-sm border border-[#eee4dc]">
-        <Bell size={18} />
+      <button
+        onClick={openNotifications}
+        aria-label={open ? 'Close notifications' : role === 'seller' ? 'Seller sales notifications' : 'Buyer order notifications'}
+        aria-expanded={open}
+        className="relative grid h-10 w-10 place-items-center rounded-full bg-white/80 text-[#2e2520] shadow-sm border border-[#eee4dc]"
+      >
+        {open ? <X size={18} /> : <Bell size={18} />}
         {badgeCount > 0 && <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[#ef6b3b] px-1 text-[9px] font-black text-white">{badgeCount > 9 ? '9+' : badgeCount}</span>}
       </button>
       {open && (

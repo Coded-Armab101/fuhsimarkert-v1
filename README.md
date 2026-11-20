@@ -59,7 +59,9 @@ Then apply `supabase/migrations/20261120_wallet_subscription_renewal.sql`. It le
 
 Then apply `supabase/migrations/20261121_review_update_hardening.sql`. It limits review updates to `rating`/`comment` via column grants, RLS and a trigger, so a buyer cannot move a review to another product/order after the verified-purchase check.
 
-Finally apply `supabase/migrations/20261122_notifications_inbox.sql`. It adds `read_at`, `url` and `created_at` to `public.notifications`, an index for the inbox query, and an RLS update policy plus column grant so a signed-in user can only mark their OWN notifications read. Without it the notification bell and bottom-nav badge cannot work, and `POST /api/notifications/read` will fail.
+Then apply `supabase/migrations/20261122_notifications_inbox.sql`. It adds `read_at`, `url` and `created_at` to `public.notifications`, an index for the inbox query, and an RLS update policy plus column grant so a signed-in user can only mark their OWN notifications read. Without it the notification bell and bottom-nav badge cannot work, and `POST /api/notifications/read` will fail.
+
+Finally apply `supabase/migrations/20261123_product_discounts.sql`. It adds `products.discount_percent` (whole numbers 0–100, default 0) with a check constraint. Without it, sellers cannot save a percentage-off discount and product saves will fail with an unknown-column error. Checkout always charges the discounted price; the 3% seller commission and tiered buyer fee are computed from that discounted amount.
 
 ### Notifications (in-app inbox + Web Push)
 

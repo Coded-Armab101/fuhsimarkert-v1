@@ -45,8 +45,13 @@ export async function PATCH(request: Request) {
     const bankName = text(body.bankName, 120);
     const accountNumber = text(body.accountNumber, 10);
 
-    if (!fullName) {
-      return NextResponse.json({ error: 'Full name is required.' }, { status: 400 });
+    // These four fields identify a buyer for order tracking; checkout refuses
+    // any profile that is missing one, so do not let the form save a partial one.
+    if (!fullName || !matricNo || !hostel || !dob) {
+      return NextResponse.json(
+        { error: 'Complete your full name, matric number, hostel and date of birth.' },
+        { status: 400 },
+      );
     }
     if (accountNumber && !/^\d{10}$/.test(accountNumber)) {
       return NextResponse.json({ error: 'Account number must be exactly 10 digits.' }, { status: 400 });

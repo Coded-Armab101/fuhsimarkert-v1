@@ -19,6 +19,7 @@ export default function AddProductPage() {
 
   const [title, setTitle] = useState('');
   const [price, setPrice] = useState('');
+  const [discountPercent, setDiscountPercent] = useState('0');
   const [category, setCategory] = useState('General');
   const [description, setDescription] = useState('');
   const [stock, setStock] = useState('');
@@ -92,6 +93,12 @@ export default function AddProductPage() {
       return;
     }
 
+    const discountValue = discountPercent.trim() === '' ? 0 : Number(discountPercent);
+    if (!Number.isInteger(discountValue) || discountValue < 0 || discountValue > 100) {
+      setError('Discount must be a whole number between 0 and 100 percent.');
+      return;
+    }
+
     // stock is optional; blank means untracked (unlimited).
     let stockValue: number | null = null;
     if (stock.trim() !== '') {
@@ -132,6 +139,7 @@ export default function AddProductPage() {
           seller_id: user.id,
           title: title.trim(),
           price: priceKobo,
+          discount_percent: discountValue,
           category,
           description: description.trim(),
           image_url: uploadedUrl || null,
@@ -215,6 +223,23 @@ export default function AddProductPage() {
                 ))}
               </select>
             </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-mono text-neutral-300">Discount off price (%)</label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              placeholder="0"
+              value={discountPercent}
+              onChange={(e) => setDiscountPercent(e.target.value)}
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-600"
+            />
+            <p className="text-[10px] text-neutral-500 font-mono">
+              Optional. Enter 10 for 10% off — buyers pay the discounted price and you still earn 3% commission on it.
+            </p>
           </div>
 
           <div className="space-y-1.5">

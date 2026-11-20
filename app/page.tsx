@@ -30,12 +30,15 @@ import {
 } from 'lucide-react';
 import { safeImageSrc } from '@/utils/safeImage';
 import { hasProductOptions, optionList } from '@/utils/variants';
+import { discountedUnitPriceKobo } from '@/utils/pricing';
 
 type Product = {
   id: string;
   title: string;
   description?: string | null;
   price: number;
+  list_price?: number;
+  discount_percent?: number | null;
   image_url?: string | null;
   category?: string | null;
   hostel_location?: string | null;
@@ -48,6 +51,16 @@ type Product = {
   sizes?: string[] | null;
   colors?: string[] | null;
 };
+
+/** Store the effective price so cart/buy-now match what the server charges. */
+function withDiscountedPrice(row: Product): Product {
+  const listPrice = Number(row.price) || 0;
+  return {
+    ...row,
+    list_price: listPrice,
+    price: discountedUnitPriceKobo({ price: listPrice, discount_percent: row.discount_percent }),
+  };
+}
 
 const isAvailable = (p: Product) =>
   p.stock === null || p.stock === undefined || p.stock > 0;
@@ -168,6 +181,16 @@ function ProductCard({
         <div className="mt-auto pt-2">
           <p className="text-base font-black text-[#2C2C2C]">
             ₦{formatNaira(product.price)}
+            {product.discount_percent ? (
+              <span className="ml-1.5 rounded-full bg-[#e8f7ef] px-1.5 py-0.5 align-middle text-[9px] font-bold text-[#17805b]">
+                {product.discount_percent}% OFF
+              </span>
+            ) : null}
+            {product.discount_percent ? (
+              <span className="ml-1 text-[10px] font-medium text-[#a99c92] line-through">
+                ₦{formatNaira(product.list_price)}
+              </span>
+            ) : null}
             {product.unit ? (
               <span className="text-[11px] font-semibold text-[#81756D]"> / {product.unit}</span>
             ) : null}
@@ -331,7 +354,7 @@ export default function LandingPage() {
         }
 
         // No demo rows: an empty catalogue stays empty.
-        setProducts(rows);
+        setProducts(rows.map(withDiscountedPrice));
       } catch (err) {
         if (cancelled) return;
         console.error('Failed to fetch landing products:', err);
@@ -804,8 +827,18 @@ export default function LandingPage() {
                 <h2 className="text-xl font-black leading-tight text-[#2C2C2C]">
                   {selected.title}
                 </h2>
-                <span className="shrink-0 text-xl font-black text-[#DE6437]">
+                <span className="shrink-0 text-right text-xl font-black text-[#DE6437]">
                   ₦{formatNaira(selected.price)}
+                  {selected.discount_percent ? (
+                    <span className="ml-1.5 rounded-full bg-[#e8f7ef] px-1.5 py-0.5 align-middle text-[10px] font-bold text-[#17805b]">
+                      {selected.discount_percent}% OFF
+                    </span>
+                  ) : null}
+                  {selected.discount_percent ? (
+                    <span className="ml-1 block text-xs font-medium text-[#a99c92] line-through">
+                      ₦{formatNaira(selected.list_price)}
+                    </span>
+                  ) : null}
                   {selected.unit ? (
                     <span className="text-xs font-semibold text-[#81756D]"> / {selected.unit}</span>
                   ) : null}

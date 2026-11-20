@@ -60,3 +60,39 @@ export function sellerCommissionKobo(goodsKobo: number): number {
 export function sellerPayoutForGoodsKobo(goodsKobo: number): number {
   return Math.max(0, (Number(goodsKobo) || 0) - sellerCommissionKobo(goodsKobo));
 }
+
+/* -------------------------------------------------------------------------- */
+/* Seller percentage-off discounts                                            */
+/* -------------------------------------------------------------------------- */
+
+/** The subset of a product row needed to work out its effective price. */
+export type DiscountableProduct = {
+  price: number | string | null | undefined;
+  discount_percent?: number | string | null;
+};
+
+/**
+ * Normalise a seller-entered discount to a whole percentage between 0 and 100.
+ * Supabase returns bigint as a string, so accept either representation. Anything
+ * unparseable is treated as "no discount" rather than throwing during checkout.
+ */
+export function normalizeDiscountPercent(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.min(100, Math.max(0, Math.round(parsed)));
+}
+
+/**
+ * Effective unit price in kobo after the seller's percentage-off discount.
+ * This is the ONLY price checkout should charge: it is used both when computing
+ * the Paystack amount and when writing the immutable order snapshot, so the
+ * buyer can never be charged one amount while escrow records another.
+ */
+export function discountedUnitPriceKobo(product: DiscountableProduct): number {
+  const listPrice = Number(product.price) || 0;
+  const discount = normalizeDiscountPercent(product.discount_percent);
+  if (listPrice <= 0 || discount <= 0) return listPrice;
+
+  const effective = Math.round(listPrice * (100 - discount) / 100);
+  return Number.isSafeInteger(effective) && effective > 0 ? effective : 0;
+}
