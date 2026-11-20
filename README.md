@@ -61,7 +61,9 @@ Then apply `supabase/migrations/20261121_review_update_hardening.sql`. It limits
 
 Then apply `supabase/migrations/20261122_notifications_inbox.sql`. It adds `read_at`, `url` and `created_at` to `public.notifications`, an index for the inbox query, and an RLS update policy plus column grant so a signed-in user can only mark their OWN notifications read. Without it the notification bell and bottom-nav badge cannot work, and `POST /api/notifications/read` will fail.
 
-Finally apply `supabase/migrations/20261123_product_discounts.sql`. It adds `products.discount_percent` (whole numbers 0–100, default 0) with a check constraint. Without it, sellers cannot save a percentage-off discount and product saves will fail with an unknown-column error. Checkout always charges the discounted price; the 3% seller commission and tiered buyer fee are computed from that discounted amount.
+Then apply `supabase/migrations/20261123_product_discounts.sql`. It adds `products.discount_percent` (whole numbers 0–100, default 0) with a check constraint. Without it, sellers cannot save a percentage-off discount and product saves will fail with an unknown-column error. Checkout always charges the discounted price; the 3% seller commission and tiered buyer fee are computed from that discounted amount.
+
+Finally apply `supabase/migrations/20261124_manual_payment_confirmation.sql`. It creates `checkout_attempts` (the frozen, server-side checkout snapshot written before Paystack initialize) and an append-only `manual_payment_confirmation_events` audit table. Without it, checkout cannot start because there is nowhere to record the payment reference, and the admin Payments tab cannot verify a paid-but-unrecorded order.
 
 ### Notifications (in-app inbox + Web Push)
 
@@ -101,6 +103,24 @@ NEXT_PUBLIC_SITE_URL=https://your-site.example
 ```
 
 `EMAIL_FROM` must be a verified sender/domain in Resend. When `RESEND_API_KEY` is absent, every send is skipped and the rest of the app behaves normally.
+
+## Customer support WhatsApp + paid-but-unrecorded orders
+
+Set the support number that buyers can chat with when a bank transfer was made but the order did not appear:
+
+```bash
+NEXT_PUBLIC_SUPPORT_WHATSAPP_NUMBER=+234 803 000 0000
+```
+
+Formatting (spaces, dashes, `+`) is stripped automatically; a Nigerian 11-digit `0803…` number is converted to `234803…`. The floating **Need help?** button and the **Contact support** link on a failed payment banner only appear when a plausible number is configured. Because `NEXT_PUBLIC_*` values are inlined at build time, changing the number requires a Vercel redeploy.
+
+Every checkout now writes a `checkout_attempts` row with a generated reference before Paystack is initialised. Operators recover a stuck payment from **Admin board → Payments**:
+
+1. Give the buyer's reference/email and ask them to confirm the bank transfer and amount.
+2. Click **Re-check Paystack**. The server verifies the exact reference against Paystack and only records the order when the transaction is `success` with a matching buyer, NGN currency and charged amount. This is the normal, safest path.
+3. Only if Paystack genuinely has not processed it, click **Confirm manually**, enter the evidence note (bank, account, date, amount, buyer's proof) and tick the attestation. The order and escrow rows are then created from the frozen snapshot.
+
+Both actions call the existing idempotent `recordOrder()` routine, so a late webhook, a buyer retry and an admin action can never create two orders, debit a wallet twice or double-count escrow. A conditional status update makes confirmation single-winner, and every action is written to the append-only audit table with the admin id and note.
 
 ## Automatic seller payouts (Paystack Transfers)
 

@@ -20,6 +20,7 @@ import {
   TriangleAlert,
   LayoutDashboard,
   Users,
+  CreditCard,
   RefreshCw,
   Sun,
   Moon,
@@ -107,6 +108,29 @@ type FulfilmentGroup = {
   items: FulfilmentItem[];
 };
 
+type PaymentAttempt = {
+  reference: string;
+  buyer_id: string;
+  buyer_email: string | null;
+  status: 'initialized' | 'initialize_failed' | 'confirmed_paystack' | 'confirmed_manual';
+  item_count: number;
+  expected_total_kobo: number;
+  gateway_charge_kobo: number;
+  wallet_kobo: number;
+  paystack_checked_at: string | null;
+  confirmed_at: string | null;
+  confirmed_by: string | null;
+  confirmation_note: string | null;
+  created_at: string;
+};
+
+const PAYMENT_STATUS_STYLE: Record<string, string> = {
+  initialized: 'bg-amber-950/60 text-amber-300 border-amber-800',
+  initialize_failed: 'bg-red-950/60 text-red-300 border-red-800',
+  confirmed_paystack: 'bg-emerald-950/60 text-emerald-300 border-emerald-800',
+  confirmed_manual: 'bg-sky-950/60 text-sky-300 border-sky-800',
+};
+
 const STATUS_STYLE: Record<string, string> = {
   pending: 'bg-amber-950/60 text-amber-300 border-amber-800',
   processing: 'bg-blue-950/60 text-blue-300 border-blue-800',
@@ -180,6 +204,14 @@ export default function AdminDashboardPage() {
   const [returnOverride, setReturnOverride] = useState<FulfilmentItem | null>(null);
   const [returnOverrideReason, setReturnOverrideReason] = useState('');
   const [savingReturnOverride, setSavingReturnOverride] = useState(false);
+
+  const [payments, setPayments] = useState<PaymentAttempt[]>([]);
+  const [pLoading, setPLoading] = useState(true);
+  const [pError, setPError] = useState<string | null>(null);
+  const [actingPayment, setActingPayment] = useState<string | null>(null);
+  const [manualTarget, setManualTarget] = useState<PaymentAttempt | null>(null);
+  const [manualNote, setManualNote] = useState('');
+  const [manualAttested, setManualAttested] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -288,6 +320,21 @@ setSLoading(false);
     }
   };
 
+  const loadPayments = async () => {
+    setPLoading(true);
+    setPError(null);
+    try {
+      const res = await fetch('/api/admin/payments');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load');
+      setPayments(data.attempts || []);
+    } catch (err) {
+      setPError(err instanceof Error ? err.message : 'Failed to load payment attempts');
+    } finally {
+      setPLoading(false);
+    }
+  };
+
   const loadOverview = async () => {
     setOLoading(true);
     setOError(null);
@@ -310,6 +357,7 @@ setSLoading(false);
     loadSellers();
     loadVerifications();
     loadFulfilments();
+    loadPayments();
   };
 
   useEffect(() => {
@@ -320,6 +368,7 @@ setSLoading(false);
     loadSellers();
     loadVerifications();
     loadFulfilments();
+    loadPayments();
   }, [isAdmin]);
 
   const act = async (action: 'approve' | 'reject', id: string) => {
@@ -472,6 +521,67 @@ setSLoading(false);
     }
   };
 
+  const recheckPayment = async (reference: string) => {
+    setActingPayment(reference);
+    setPError(null);
+    try {
+      const res = await fetch('/api/admin/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'recheck', reference }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not re-check this payment.');
+      if (data.ok) {
+        notify(data.message || 'Payment confirmed. The order is now in escrow.', { tone: 'success' });
+      } else {
+        notify(data.message || 'Paystack has not confirmed this payment yet.', { tone: 'warning' });
+      }
+      await loadPayments();
+    } catch (err) {
+      setPError(err instanceof Error ? err.message : 'Could not re-check this payment.');
+    } finally {
+      setActingPayment(null);
+    }
+  };
+
+  const confirmPaymentManually = async () => {
+    if (!manualTarget) return;
+    if (manualNote.trim().length < 10) {
+      notify('Add an evidence note of at least 10 characters.', { tone: 'warning' });
+      return;
+    }
+    if (!manualAttested) {
+      notify('Confirm that you verified the transfer before continuing.', { tone: 'warning' });
+      return;
+    }
+    setActingPayment(manualTarget.reference);
+    setPError(null);
+    try {
+      const res = await fetch('/api/admin/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'confirm_manual',
+          reference: manualTarget.reference,
+          note: manualNote.trim(),
+          attested: true,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not confirm this payment.');
+      notify(data.message || 'Payment confirmed. The buyer’s order is now in escrow.', { tone: 'success' });
+      setManualTarget(null);
+      setManualNote('');
+      setManualAttested(false);
+      await loadPayments();
+    } catch (err) {
+      setPError(err instanceof Error ? err.message : 'Could not confirm this payment.');
+    } finally {
+      setActingPayment(null);
+    }
+  };
+
   if (isAdmin === null) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
@@ -494,9 +604,10 @@ setSLoading(false);
   const pendingCount = withdrawals.filter((w) => w.status === 'pending').length;
   const pendingVerifications = verifications.filter((v) => v.status === 'pending').length;
   const slowSellerCount = fulfilments.filter((g) => g.items.some((i) => i.slow)).length;
+  const unresolvedPayments = payments.filter((p) => p.status === 'initialized' || p.status === 'initialize_failed').length;
   const dangerAlerts = overview?.alerts.filter((alert) => alert.level === 'danger').length ?? 0;
   const warningAlerts = overview?.alerts.filter((alert) => alert.level === 'warn').length ?? 0;
-  const refreshing = oLoading || wLoading || vLoading || fLoading || sLoading;
+  const refreshing = oLoading || wLoading || vLoading || fLoading || sLoading || pLoading;
 
   const tabs: Array<{ id: AdminTab; label: string; icon: React.ReactNode; badge?: number; danger?: boolean }> = [
     { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={14} />, badge: dangerAlerts, danger: true },
@@ -505,6 +616,7 @@ setSLoading(false);
     { id: 'broadcasts', label: 'Broadcasts', icon: <Megaphone size={14} /> },
     { id: 'withdrawals', label: 'Payouts', icon: <Banknote size={14} />, badge: pendingCount },
     { id: 'verifications', label: 'Verifications', icon: <IdCard size={14} />, badge: pendingVerifications },
+    { id: 'payments', label: 'Payments', icon: <CreditCard size={14} />, badge: unresolvedPayments },
     { id: 'fulfilment', label: 'Fulfilment', icon: <Package size={14} />, badge: slowSellerCount, danger: true },
     { id: 'storage', label: 'Storage', icon: <HardDrive size={14} /> },
   ];
@@ -567,6 +679,14 @@ setSLoading(false);
               {pendingVerifications} verification{pendingVerifications === 1 ? '' : 's'} waiting
             </button>
           ) : null}
+          {unresolvedPayments > 0 ? (
+            <button
+              onClick={() => setTab('payments')}
+              className="rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1 text-[10px] font-mono text-amber-300"
+            >
+              {unresolvedPayments} payment{unresolvedPayments === 1 ? '' : 's'} waiting
+            </button>
+          ) : null}
           {slowSellerCount > 0 ? (
             <button
               onClick={() => setTab('fulfilment')}
@@ -583,7 +703,7 @@ setSLoading(false);
               {dangerAlerts} critical alert{dangerAlerts === 1 ? '' : 's'}
             </button>
           ) : null}
-          {pendingCount === 0 && pendingVerifications === 0 && slowSellerCount === 0 && dangerAlerts === 0 && warningAlerts === 0 ? (
+          {pendingCount === 0 && pendingVerifications === 0 && unresolvedPayments === 0 && slowSellerCount === 0 && dangerAlerts === 0 && warningAlerts === 0 ? (
             <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1 text-[10px] font-mono text-emerald-300">
               All systems normal
             </span>
@@ -627,6 +747,11 @@ setSLoading(false);
             {wMessage}
           </p>
         )}
+        {tab === 'payments' && pError && (
+          <p className="mb-4 rounded-xl border border-red-900/50 bg-red-950/30 px-3 py-2.5 font-mono text-[11px] text-red-400">
+            {pError}
+          </p>
+        )}
 
         {tab === 'overview' ? (
           <OverviewTab
@@ -647,6 +772,138 @@ setSLoading(false);
           <PeopleTab onOpenTab={setTab} refreshToken={refreshToken} />
         ) : tab === 'broadcasts' ? (
           <BroadcastsTab refreshToken={refreshToken} />
+        ) : tab === 'payments' ? (
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-[11px] leading-relaxed text-amber-200">
+              <strong>Buyer paid but no order appeared?</strong> First use{' '}
+              <span className="font-mono">Re-check Paystack</span> — it only records a transaction Paystack confirms with a matching reference, buyer, currency and amount. Use{' '}
+              <span className="font-mono">Confirm manually</span> only after you verified the bank transfer receipt yourself; the evidence note and your attestation are saved in the audit trail. Both actions are idempotent and cannot create a second order.
+            </div>
+            {pLoading ? (
+              <div className="flex justify-center py-16">
+                <Loader2 className="animate-spin text-neutral-600" size={24} />
+              </div>
+            ) : payments.length === 0 ? (
+              <p className="text-center text-xs text-neutral-500 py-16 font-mono">No checkout attempts recorded yet.</p>
+            ) : (
+              payments.map((p) => {
+                const confirmed = p.status === 'confirmed_paystack' || p.status === 'confirmed_manual';
+                const isManualTarget = manualTarget?.reference === p.reference;
+                return (
+                  <div
+                    key={p.reference}
+                    className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-base">₦{formatNaira(p.expected_total_kobo)}</span>
+                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border uppercase ${PAYMENT_STATUS_STYLE[p.status] || PAYMENT_STATUS_STYLE.initialized}`}>
+                            {p.status.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                        <p className="text-[10px] font-mono text-neutral-500 break-all">{p.reference}</p>
+                        <p className="text-[11px] text-neutral-400">
+                          {p.buyer_email || p.buyer_id} · {p.item_count} product line{p.item_count === 1 ? '' : 's'}
+                        </p>
+                        {Number(p.wallet_kobo) > 0 ? (
+                          <p className="text-[10px] font-mono text-sky-400/80">
+                            Wallet portion ₦{formatNaira(p.wallet_kobo)} will be debited once by the existing wallet ledger.
+                          </p>
+                        ) : null}
+                        <p className="text-[10px] font-mono text-neutral-600">
+                          started {new Date(p.created_at).toLocaleString()}
+                        </p>
+                      </div>
+                      {!confirmed ? (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => recheckPayment(p.reference)}
+                            disabled={actingPayment === p.reference}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
+                          >
+                            {actingPayment === p.reference ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                            Re-check Paystack
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setManualTarget(p);
+                              setManualNote('');
+                              setManualAttested(false);
+                            }}
+                            disabled={actingPayment === p.reference}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 disabled:opacity-50"
+                          >
+                            <ShieldCheck size={13} /> Confirm manually
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {p.paystack_checked_at ? (
+                      <p className="text-[10px] font-mono text-neutral-500">
+                        Paystack checked {new Date(p.paystack_checked_at).toLocaleString()}
+                      </p>
+                    ) : null}
+                    {confirmed ? (
+                      <div className="rounded-xl border border-emerald-900/40 bg-emerald-950/20 px-3 py-2 text-[10px] font-mono text-emerald-300 space-y-1">
+                        <p>Confirmed {p.confirmed_at ? new Date(p.confirmed_at).toLocaleString() : ''}</p>
+                        {p.confirmation_note ? <p className="text-neutral-400 break-words">Evidence: {p.confirmation_note}</p> : null}
+                      </div>
+                    ) : null}
+
+                    {isManualTarget && !confirmed ? (
+                      <div className="rounded-xl border border-amber-500/25 bg-amber-500/[0.06] p-3 space-y-2">
+                        <p className="text-[11px] leading-relaxed text-amber-200">
+                          Confirming this will create the buyer&apos;s order and escrow rows from the frozen checkout snapshot. Only continue when you have checked the exact transfer and bank account yourself.
+                        </p>
+                        <textarea
+                          value={manualNote}
+                          onChange={(event) => setManualNote(event.target.value)}
+                          placeholder="Evidence note: bank, account, amount, date, reference shown by the buyer…"
+                          rows={3}
+                          className="w-full rounded-xl border border-white/10 bg-neutral-900 px-3 py-2 text-xs text-neutral-100 outline-none focus:border-amber-500"
+                        />
+                        <label className="flex items-start gap-2 text-[10px] leading-relaxed text-neutral-400">
+                          <input
+                            type="checkbox"
+                            checked={manualAttested}
+                            onChange={(event) => setManualAttested(event.target.checked)}
+                            className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                          />
+                          <span>I verified this exact bank transfer and accept that the evidence note is stored in the audit trail.</span>
+                        </label>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={confirmPaymentManually}
+                            disabled={actingPayment === p.reference}
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                          >
+                            {actingPayment === p.reference ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                            Confirm payment
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setManualTarget(null);
+                              setManualNote('');
+                              setManualAttested(false);
+                            }}
+                            className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-neutral-300 hover:text-white"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })
+            )}
+          </div>
         ) : tab === 'withdrawals' ? (
         <div className="space-y-3">
           <div className="rounded-2xl border border-blue-500/20 bg-blue-500/[0.06] px-4 py-3 text-[11px] leading-relaxed text-blue-200">

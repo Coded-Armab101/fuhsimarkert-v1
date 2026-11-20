@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { rateLimit, PAYMENT_INIT_LIMIT } from '@/utils/rate-limit';
@@ -68,7 +69,8 @@ export async function POST(request: Request) {
 
     // Never take a Paystack payment when the database still has the legacy
     // one-product constraints or is missing the reliability migration.
-    const checkoutReady = await checkoutDatabaseReady(createAdminClient());
+    const admin = createAdminClient();
+    const checkoutReady = await checkoutDatabaseReady(admin);
     if (!checkoutReady.ready) {
       console.error('[paystack] checkout database is not ready', checkoutReady.reason);
       return NextResponse.json({
@@ -288,6 +290,59 @@ export async function POST(request: Request) {
     const gatewayQuote = grossUpPaystackLocalKobo(gatewayPrincipalKobo);
     const paystackAmountKobo = gatewayQuote.grossKobo;
 
+    // 3.c. Freeze the checkout BEFORE money moves. We generate the Paystack
+    //      reference ourselves and persist an immutable snapshot, so the
+    //      webhook, the buyer's browser verify and the admin payment-recovery
+    //      board all work from the same reference and the same agreed amounts.
+    //      If this write fails, no Paystack session is opened at all.
+    const reference = `FHSI-${Date.now().toString(36).toUpperCase()}-${crypto
+      .randomBytes(6)
+      .toString('hex')
+      .toUpperCase()}`;
+    const checkoutItems = cartLines.map((item) => ({
+      product_id: item.productId,
+      variant_key: item.variantKey,
+      size: item.size,
+      color: item.color,
+      quantity: item.quantity > 0 ? item.quantity : 1,
+      unit_price_kobo: unitPriceById.get(item.productId) ?? 0,
+    }));
+
+    const { error: attemptError } = await admin.from('checkout_attempts').insert({
+      reference,
+      buyer_id: user.id,
+      buyer_email: user.email ?? null,
+      purpose: 'marketplace_checkout',
+      status: 'initialized',
+      product_ids: productIds,
+      checkout_items: checkoutItems,
+      expected_total_kobo: trueTotalKobo,
+      gateway_principal_kobo: gatewayPrincipalKobo,
+      processing_fee_kobo: gatewayQuote.processingFeeKobo,
+      gateway_charge_kobo: paystackAmountKobo,
+      wallet_kobo: walletKobo,
+      delivery_type: deliveryType,
+      delivery_fee_kobo: isPaidDelivery ? deliveryFeeKobo : 0,
+      buyer_fee_kobo: buyerServiceFee,
+      receiver_name: receiverName,
+      receiver_phone: receiverPhone,
+      matric_number: matricNumber,
+      delivery_address: deliveryAddress,
+      checkout_mode: buyNow ? 'buy_now' : 'cart',
+      currency: 'NGN',
+    });
+    if (attemptError) {
+      console.error('[paystack] could not freeze checkout attempt', {
+        reference,
+        userId: user.id,
+        message: attemptError.message,
+      });
+      return NextResponse.json(
+        { error: 'Checkout is temporarily unavailable. No payment was taken.' },
+        { status: 503 },
+      );
+    }
+
     // 4. Dispatch a hidden credentialed request to Paystack's API engine
     const origin = request.headers.get('origin') || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
     const callbackUrl = `${origin.replace(/\/$/, '')}/buyer/orders`;
@@ -300,20 +355,14 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         email: user.email,
-       amount: paystackAmountKobo,
+        amount: paystackAmountKobo,
+        reference,
         callback_url: callbackUrl,
     // ⚡ CRITICAL CRITERIA: This metadata structure maps the transaction assets
     metadata: {
       buyer_id: user.id,
       product_ids: productIds, // Array of IDs being purchased
-      checkout_items: cartLines.map((item) => ({
-        product_id: item.productId,
-        variant_key: item.variantKey,
-        size: item.size,
-        color: item.color,
-        quantity: item.quantity > 0 ? item.quantity : 1,
-        unit_price_kobo: unitPriceById.get(item.productId) ?? 0,
-      })),
+      checkout_items: checkoutItems,
       expected_total_kobo: trueTotalKobo,
       gateway_principal_kobo: gatewayPrincipalKobo,
       processing_fee_kobo: gatewayQuote.processingFeeKobo,
@@ -336,11 +385,30 @@ export async function POST(request: Request) {
     const paystackData = await paystackResponse.json();
 
     if (!paystackData.status) {
+      await admin
+        .from('checkout_attempts')
+        .update({ status: 'initialize_failed' })
+        .eq('reference', reference);
       return NextResponse.json({ error: 'Failed to initialize system transaction with Paystack.' }, { status: 500 });
     }
 
-    // Pass the secure authorization portal link back out to the UI
-    return NextResponse.json({ authorization_url: paystackData.data.authorization_url });
+    const { error: initUpdateError } = await admin
+      .from('checkout_attempts')
+      .update({ paystack_initialized_at: new Date().toISOString() })
+      .eq('reference', reference);
+    if (initUpdateError) {
+      console.error('[paystack] could not mark attempt initialized', {
+        reference,
+        message: initUpdateError.message,
+      });
+    }
+
+    // Pass the secure authorization portal link back out to the UI. The
+    // reference is included so support can identify the exact attempt.
+    return NextResponse.json({
+      authorization_url: paystackData.data.authorization_url,
+      reference,
+    });
 
   } catch {
     return NextResponse.json({ error: 'Internal system gateway exception occurred.' }, { status: 500 });

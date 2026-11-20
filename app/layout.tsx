@@ -3,6 +3,7 @@ import { Manrope, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { CartProvider } from '@/context/CartContext';
 import PwaInstall from './PwaInstall';
+import SupportWhatsAppButton from '@/components/SupportWhatsAppButton';
 import { NotificationProvider } from '@/components/NotificationProvider';
 
 /**
@@ -72,6 +73,7 @@ export default function RootLayout({
           <CartProvider>
             {children}
             <PwaInstall />
+            <SupportWhatsAppButton />
           </CartProvider>
         </NotificationProvider>
       </body>

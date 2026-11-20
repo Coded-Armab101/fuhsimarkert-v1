@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes, ChevronDown, ChevronUp, RefreshCw, Clock, X } from 'lucide-react';
+import { CreditCard, MapPin, Truck, User, Phone, Hash, AlertTriangle, CheckCircle2, Loader2, Package, Boxes, ChevronDown, ChevronUp, RefreshCw, Clock, X, MessageCircle } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { useCart } from '@/context/CartContext';
@@ -12,6 +12,7 @@ import LeaveReview from '@/components/LeaveReview';
 import { safeImageSrc } from '@/utils/safeImage';
 import { variantLabel } from '@/utils/variants';
 import { useNotifications } from '@/components/NotificationProvider';
+import { supportWhatsappUrl } from '@/utils/support';
 
 type BuyerOrderRow = {
   id: string;
@@ -359,6 +360,7 @@ export default function OrdersPage() {
   // the list is not fetched before the freshly escrowed order row exists.
   const [confirmingReturn, setConfirmingReturn] = useState(true);
   const [returnReference, setReturnReference] = useState<string | null>(null);
+  const [buyerEmail, setBuyerEmail] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
 
   // Remove the Paystack return params only after a terminal answer. On a
@@ -417,6 +419,18 @@ export default function OrdersPage() {
     // and the helpers only touch stable setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Used only to pre-fill the support chat. A missing email must never break
+  // the orders page, so this stays a best-effort side lookup.
+  useEffect(() => {
+    let cancelled = false;
+    void supabase.auth.getUser().then(({ data }) => {
+      if (!cancelled) setBuyerEmail(data.user?.email ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
 
   const handleCheckPaymentAgain = async () => {
     const url = new URL(window.location.href);
@@ -572,6 +586,16 @@ export default function OrdersPage() {
     void handleGroupRefund(disputeTarget, disputeReason.trim(), returnRequired);
   };
 
+  const paymentSupportMessage = [
+    'Hello FuhsiMarket support, I made a payment but it has not reflected in my orders.',
+    returnReference ? `Paystack reference: ${returnReference}.` : null,
+    buyerEmail ? `My account email: ${buyerEmail}.` : null,
+    'Please verify the transfer from your admin board so my order shows as paid.',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const paymentSupportUrl = supportWhatsappUrl(paymentSupportMessage);
+
   if (loading) {
     if (returnReference) {
       return (
@@ -613,6 +637,16 @@ export default function OrdersPage() {
             <AlertTriangle size={18} className="flex-shrink-0" />
           )}
           <span>{paymentNotice.message}</span>
+          {paymentNotice.kind === 'error' && paymentSupportUrl ? (
+            <a
+              href={paymentSupportUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#25D366] px-3 py-1.5 text-[10px] font-bold text-[#06251a] hover:brightness-105"
+            >
+              <MessageCircle size={12} /> Contact support
+            </a>
+          ) : null}
           {paymentNotice.retry ? (
             <button
               onClick={handleCheckPaymentAgain}
