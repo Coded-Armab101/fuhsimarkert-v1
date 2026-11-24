@@ -27,7 +27,7 @@ import {
  */
 
 /** Route prefixes that require a signed-in user. */
-const AUTH_REQUIRED = ['/buyer', '/seller', '/admin-dashboard'];
+const AUTH_REQUIRED = ['/buyer', '/seller', '/admin-dashboard', '/pickup'];
 
 /** Pages a signed-in user has no reason to see. */
 const GUEST_ONLY = ['/login', '/signup'];
@@ -207,14 +207,29 @@ export async function proxy(request: NextRequest) {
   const gate = ROLE_GATES.find(
     (candidate) => isUnder(pathname, candidate.prefix) && pathname !== candidate.fallback,
   );
+  const pickupGate = isUnder(pathname, '/pickup');
 
-  if (gate) {
-    const { data: profile } = await supabase
+  let profile: RoleProfile | null = null;
+  if (gate || pickupGate) {
+    const { data } = await supabase
       .from('profiles')
-      .select('user_persona, is_seller, seller_active, subscription_expires_at, is_admin, is_approved_seller')
+      .select('user_persona, is_seller, seller_active, subscription_expires_at, is_admin, is_approved_seller, is_pickup_staff')
       .eq('id', user.id)
       .maybeSingle<RoleProfile>();
+    profile = data ?? null;
+  }
 
+  // Pickup staff is a separate boolean role, not a paid persona. Check it
+  // before the generic role gates so /pickup is not matched by any of them.
+  // Admins bypass; everyone else goes to /buyer (never /pickup, no loop).
+  if (pickupGate && !isAdmin(profile) && profile?.is_pickup_staff !== true) {
+    const fallback = request.nextUrl.clone();
+    fallback.pathname = '/buyer';
+    fallback.search = '';
+    return redirectPreservingCookies(fallback, response);
+  }
+
+  if (gate) {
     // Admins bypass paid-role checks on every gate.
     if (isAdmin(profile)) return response;
 

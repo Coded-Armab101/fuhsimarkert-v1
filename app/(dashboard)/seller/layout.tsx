@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Package, ShoppingBag, Settings, Wallet, Clock, TrendingUp } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Settings, Wallet, Clock, TrendingUp, MessageCircle } from 'lucide-react';
 import OrderNotificationBell from '@/components/OrderNotificationBell';
 import { createClient } from '@/utils/supabase';
 import SellerVerificationGate, { type SellerGateProfile } from '../SellerVerificationGate';
@@ -83,6 +83,14 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href="/buyer/support"
+            aria-label="Open support center"
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#eee4dc] bg-white px-2.5 py-1.5 text-[11px] font-bold text-[#65584f] transition-colors hover:border-[#efc8b6] hover:text-[#d8552e]"
+          >
+            <MessageCircle size={15} />
+            <span className="hidden sm:inline">Support</span>
+          </Link>
           {approved && <OrderNotificationBell role="seller" />}
         </div>
       </header>

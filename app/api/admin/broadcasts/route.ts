@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { adminDateWindow, applyAdminRange, parseAdminRange } from '@/utils/admin/date-range';
 
 /**
  * Admin broadcast management.
@@ -66,17 +67,20 @@ function dateWasProvided(value: unknown): boolean {
   return value !== null && value !== undefined && value !== '';
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const auth = await requireAdmin();
     if (auth.error) return auth.error;
     const { admin } = auth;
 
-    const { data, error } = await admin
+    const range = parseAdminRange(new URL(request.url).searchParams.get('range'));
+    const window = adminDateWindow(range);
+    let query = admin
       .from('broadcasts')
       .select('id, title, message, audience, starts_at, ends_at, is_active, created_at, updated_at')
-      .order('created_at', { ascending: false })
-      .limit(100);
+      .order('created_at', { ascending: false });
+    query = applyAdminRange(query, window, 'created_at');
+    const { data, error } = await query.limit(100);
 
     if (error) throw error;
 

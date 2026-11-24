@@ -6,6 +6,9 @@ import { SESSION_NONCE_COOKIE, nonceValid } from '@/utils/single-session';
 import { accountIsActive } from '@/utils/account';
 import {
   paystackTransferFeeKobo,
+  PLATFORM_TRANSFER_FEE_SOURCE,
+  platformTransferFeeNote,
+  sellerWithdrawalDebitKobo,
   WALLET_WITHDRAWAL_DAILY_MAX_KOBO,
   WALLET_WITHDRAWAL_MIN_KOBO,
 } from '@/utils/payment-fees';
@@ -35,10 +38,12 @@ function namesLikelyMatch(profileName: string, bankName: string): boolean {
  * RLS is intentionally closed to direct user writes on `wallets`/`withdrawals`.
  * Validates:
  *  - caller is authenticated,
- *  - the wallet exists and has enough balance,
+ *  - the withdrawable balance covers the BANK AMOUNT only,
  *  - bank details are present.
- * On success it deducts the amount from the wallet and records a pending
- * withdrawal that an operator later pays out (Paystack transfer).
+ *
+ * Paystack transfer/stamp charges are a platform cost funded by the 3%
+ * commission. The expected fee is still computed and sent to the RPC for the
+ * accounting record, but the wallet is debited only the bank amount.
  */
 export async function POST(request: Request) {
   try {
@@ -117,7 +122,10 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
+    // Audit only: the RPC validates this against its own fee function and stores
+    // it on the withdrawal row. The seller never pays it from their wallet.
     const transferFeeKobo = paystackTransferFeeKobo(amount);
+    const walletDebitKobo = sellerWithdrawalDebitKobo(amount);
 
     // One pending withdrawal at a time: a user may not stack withdrawal requests
     // (which could otherwise be raced from two devices). Only a settled/rejected
@@ -153,7 +161,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'You already have a pending withdrawal request. Wait for it to be settled before requesting another.' }, { status: 409 });
       }
       if (message.includes('insufficient withdrawable')) {
-        return NextResponse.json({ error: 'Your withdrawable balance does not cover the bank amount and transfer fee. Held funding/refunds unlock after 14 days.' }, { status: 400 });
+        return NextResponse.json({ error: 'Your withdrawable balance does not cover the bank amount. Held funding/refunds unlock after 14 days.' }, { status: 400 });
       }
       if (message.includes('daily withdrawal')) {
         return NextResponse.json({ error: 'The ₦100,000 daily withdrawal limit would be exceeded.' }, { status: 409 });
@@ -174,7 +182,9 @@ export async function POST(request: Request) {
       withdrawal_id: withdrawalId,
       amount_kobo: amount,
       transfer_fee_kobo: transferFeeKobo,
-      wallet_debit_kobo: amount + transferFeeKobo,
+      transfer_fee_source: PLATFORM_TRANSFER_FEE_SOURCE,
+      wallet_debit_kobo: walletDebitKobo,
+      message: platformTransferFeeNote(transferFeeKobo, amount),
       account_name: resolvedAccount.account_name,
     });
   } catch (err) {

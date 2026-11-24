@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
+import {
+  adminDateWindow,
+  authUserIdsInRange,
+  parseAdminRange,
+} from '@/utils/admin/date-range';
 
 /**
  * Admin tool to view and adjust per-seller storage quotas.
@@ -11,7 +16,7 @@ import { createAdminClient } from '@/utils/supabase/admin';
  *
  * Authorization: caller must have profiles.is_admin = true.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -29,6 +34,10 @@ export async function GET() {
       return NextResponse.json({ error: 'Forbidden.' }, { status: 403 });
     }
 
+    const range = parseAdminRange(new URL(request.url).searchParams.get('range'));
+    const window = adminDateWindow(range);
+    const signupIds = await authUserIdsInRange(admin, window);
+
     const { data, error } = await admin
       .from('profiles')
       .select('id, full_name, storage_quota, user_persona')
@@ -36,8 +45,12 @@ export async function GET() {
       .order('full_name', { ascending: true });
     if (error) throw error;
 
+    const sellers = signupIds
+      ? (data || []).filter((seller) => signupIds.has(seller.id))
+      : (data || []);
+
     return NextResponse.json({
-      sellers: (data || []).map((s) => ({ ...s, storage_quota: s.storage_quota != null ? Number(s.storage_quota) : null })),
+      sellers: sellers.map((s) => ({ ...s, storage_quota: s.storage_quota != null ? Number(s.storage_quota) : null })),
     });
   } catch (err) {
     console.error('[admin/storage] error:', err);

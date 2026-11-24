@@ -10,6 +10,7 @@ import {
 } from '@/utils/paystack/recordOrder';
 import { buyerServiceFeeKobo } from '@/utils/pricing';
 import { notifyUsers } from '@/utils/notifications';
+import { adminDateWindow, applyAdminRange, parseAdminRange } from '@/utils/admin/date-range';
 
 /**
  * Admin-only recovery for a buyer who paid but whose order never appeared.
@@ -333,16 +334,19 @@ async function writeAudit(
   if (error) console.error('[admin/payments] audit write failed', error.message);
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const ctx = await requireAdmin();
   if ('error' in ctx) return NextResponse.json({ error: ctx.error }, { status: ctx.status });
 
   try {
-    const { data, error } = await ctx.admin
+    const range = parseAdminRange(new URL(request.url).searchParams.get('range'));
+    const window = adminDateWindow(range);
+    let query = ctx.admin
       .from('checkout_attempts')
       .select('*')
-      .order('created_at', { ascending: false })
-      .limit(100);
+      .order('created_at', { ascending: false });
+    query = applyAdminRange(query, window, 'created_at');
+    const { data, error } = await query.limit(100);
     if (error) throw error;
     return NextResponse.json({ attempts: (data ?? []).map((row) => toListItem(row)) });
   } catch (error) {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { adminDateWindow, applyAdminRange, parseAdminRange } from '@/utils/admin/date-range';
 
 /**
  * Admin review of seller identity-verification submissions.
@@ -65,7 +66,7 @@ async function signUrls(admin: ReturnType<typeof createAdminClient>, docs: Verif
   return out;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -83,13 +84,17 @@ export async function GET() {
       return NextResponse.json({ error: 'Forbidden.' }, { status: 403 });
     }
 
-    const { data, error } = await admin
+    const range = parseAdminRange(new URL(request.url).searchParams.get('range'));
+    const window = adminDateWindow(range);
+    let query = admin
       .from('profiles')
       .select(
         'id, full_name, is_approved_seller, verification_status, verification_submitted_at, verification_reviewed_at, verification_reject_reason, verification_consent_at, verification_consent_version, student_id_url, verification_video_url'
       )
       .in('verification_status', ['pending', 'rejected'])
       .order('verification_submitted_at', { ascending: true, nullsFirst: false });
+    query = applyAdminRange(query, window, 'verification_submitted_at');
+    const { data, error } = await query;
     if (error) throw error;
 
     const sellers = await Promise.all(

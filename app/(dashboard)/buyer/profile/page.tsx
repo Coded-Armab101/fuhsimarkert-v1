@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { User, Wallet, Landmark, Save, PlusCircle, Cake, Store, X, CheckCircle, Zap, LayoutDashboard, Loader2, LogOut, IdCard, UploadCloud, ShieldCheck, Lock, RefreshCw } from 'lucide-react';
+import { User, Wallet, Landmark, Save, PlusCircle, Cake, Store, X, CheckCircle, Zap, LayoutDashboard, Loader2, LogOut, IdCard, UploadCloud, ShieldCheck, Lock, RefreshCw, ClipboardList } from 'lucide-react';
 import { createClient } from '@/utils/supabase';
 import { useCart } from '@/context/CartContext';
 import { ROLE_PLANS, type RolePlan } from '@/utils/plans';
@@ -18,6 +18,8 @@ import { SELLER_VERIFICATION_CONSENT_VERSION } from '@/utils/legal';
 import {
   grossUpPaystackLocalKobo,
   paystackTransferFeeKobo,
+  platformTransferFeeNote,
+  sellerWithdrawalDebitKobo,
   WALLET_FUNDING_DAILY_MAX_KOBO,
   WALLET_FUNDING_MIN_KOBO,
   WALLET_WITHDRAWAL_DAILY_MAX_KOBO,
@@ -82,6 +84,8 @@ export default function ProfilePage() {
   // True when the user used to be a seller but the paid month has run out.
   // Those users need a renew CTA, not a "choose a role" pitch.
   const [sellerLapsed, setSellerLapsed] = useState(false);
+  // Campus pickup staff get a discreet shortcut to the handover console.
+  const [isPickupStaff, setIsPickupStaff] = useState(false);
 
   // State for Role Selection Modal
   const [showRoleModal, setShowRoleModal] = useState(false);
@@ -172,7 +176,7 @@ export default function ProfilePage() {
       // 2. Fetch Profile
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('*')
+        .select('*, is_pickup_staff')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -189,6 +193,7 @@ export default function ProfilePage() {
         const usedToSell = profile?.is_seller === true || profile?.seller_active === true;
         setIsSeller(paidSellerActive);
         setSellerLapsed(!paidSellerActive && usedToSell && hasLapsedRole(profile));
+        setIsPickupStaff(profile?.is_pickup_staff === true);
         setVerification({
           isApproved: profile?.is_approved_seller === true,
           status: profile?.verification_status || null,
@@ -323,7 +328,7 @@ export default function ProfilePage() {
   const fundQuote = grossUpPaystackLocalKobo(fundCreditKobo);
   const withdrawalBankKobo = Math.floor(Number(withdrawAmount) * 100) || 0;
   const withdrawalFeeKobo = paystackTransferFeeKobo(withdrawalBankKobo);
-  const withdrawalWalletDebitKobo = withdrawalBankKobo + withdrawalFeeKobo;
+  const withdrawalWalletDebitKobo = sellerWithdrawalDebitKobo(withdrawalBankKobo);
 
   const handleFundWallet = async () => {
     if (
@@ -358,7 +363,7 @@ export default function ProfilePage() {
       return;
     }
     if (withdrawalWalletDebitKobo > walletSummary.withdrawableKobo) {
-      notify('Your withdrawable balance must cover both the bank amount and Paystack transfer fee.', { tone: 'warning' });
+      notify('Your withdrawable balance must cover the bank amount.', { tone: 'warning' });
       return;
     }
     if (!profileData.bankName || !profileData.accountNumber) {
@@ -391,7 +396,10 @@ export default function ProfilePage() {
       await refreshWalletSummary();
       setShowWithdrawModal(false);
       setWithdrawAmount('');
-      notify(`Withdrawal requested. ₦${formatNaira(amount)} will reach the bank after admin approval; ₦${formatNaira(Number(data.transfer_fee_kobo) || withdrawalFeeKobo)} covers transfer charges.`, { tone: 'success' });
+      notify(
+        `Withdrawal requested. ₦${formatNaira(withdrawalWalletDebitKobo)} will reach the bank after admin approval. ${data?.message || platformTransferFeeNote(Number(data.transfer_fee_kobo) || withdrawalFeeKobo, amount)}`,
+        { tone: 'success' },
+      );
     } catch (err) {
       console.error('Withdrawal error:', err);
       notify('Could not process your withdrawal request. Please try again.', { tone: 'error' });
@@ -651,6 +659,24 @@ export default function ProfilePage() {
       </section>
 
       <ProfileInstallApp />
+
+      {isPickupStaff ? (
+        <Link
+          href="/pickup"
+          className="flex items-center justify-between gap-3 rounded-2xl border border-[#eee4dc] bg-white px-4 py-3 shadow-sm transition-colors hover:border-[#ef6b3b]/40 hover:bg-[#fff7f2]"
+        >
+          <span className="flex items-center gap-2.5">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#fff0e9] text-[#d8552e]">
+              <ClipboardList size={15} />
+            </span>
+            <span>
+              <span className="block text-xs font-bold text-[#251d18]">Pickup console</span>
+              <span className="block text-[11px] text-[#81756d]">Log handovers and transfers</span>
+            </span>
+          </span>
+          <span className="shrink-0 text-[11px] font-bold text-[#d8552e]">Open →</span>
+        </Link>
+      ) : null}
 
       {/* Buyers need a way to enrol in phone alerts too — previously only the
           seller settings page exposed PushNotificationToggle, so buyers never
@@ -1244,7 +1270,7 @@ export default function ProfilePage() {
 
             <div className="space-y-2 rounded-2xl bg-[#faf6f2] p-4 text-[11px] text-[#6f625a]">
               <div className="flex justify-between"><span>Bank receives</span><strong>₦{formatNaira(withdrawalBankKobo)}</strong></div>
-              <div className="flex justify-between"><span>Transfer + stamp charge</span><strong>₦{formatNaira(withdrawalFeeKobo)}</strong></div>
+              <p className="leading-relaxed">{platformTransferFeeNote(withdrawalFeeKobo, withdrawalBankKobo)}</p>
               <div className="flex justify-between border-t border-[#e9dfd7] pt-2 text-xs text-[#251d18]"><span>Wallet debit</span><strong>₦{formatNaira(withdrawalWalletDebitKobo)}</strong></div>
             </div>
 

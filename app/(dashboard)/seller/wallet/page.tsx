@@ -5,7 +5,11 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase';
 import { formatNaira, nairaToKobo } from '@/utils/money';
 import { Wallet, Loader2, Banknote, ArrowDownUp, CheckCircle2, Clock, Landmark, ShoppingBag } from 'lucide-react';
-import { paystackTransferFeeKobo } from '@/utils/payment-fees';
+import {
+  paystackTransferFeeKobo,
+  platformTransferFeeNote,
+  sellerWithdrawalDebitKobo,
+} from '@/utils/payment-fees';
 
 type Withdrawal = {
   id: string;
@@ -95,8 +99,8 @@ export default function SellerWalletPage() {
       return;
     }
     const transferFeeKobo = paystackTransferFeeKobo(amountKobo);
-    if (amountKobo + transferFeeKobo > withdrawableKobo) {
-      setFeedback({ kind: 'error', msg: 'Your withdrawable balance must cover the bank amount and transfer charges.' });
+    if (amountKobo > withdrawableKobo) {
+      setFeedback({ kind: 'error', msg: 'Your withdrawable balance must cover the bank amount.' });
       return;
     }
 
@@ -131,7 +135,10 @@ export default function SellerWalletPage() {
           if (refreshed.data) setWithdrawals((refreshed.data as Withdrawal[]) || []);
         }
         setAmountInput('');
-        setFeedback({ kind: 'ok', msg: `₦${formatNaira(amountKobo)} requested for the bank. ₦${formatNaira(Number(data.transfer_fee_kobo) || transferFeeKobo)} covers transfer charges.` });
+        setFeedback({
+          kind: 'ok',
+          msg: `₦${formatNaira(sellerWithdrawalDebitKobo(amountKobo))} requested for the bank. ${data?.message || platformTransferFeeNote(Number(data.transfer_fee_kobo) || transferFeeKobo, amountKobo)}`,
+        });
       } else {
         setFeedback({ kind: 'error', msg: data?.error || 'Could not request withdrawal.' });
       }
@@ -209,8 +216,8 @@ export default function SellerWalletPage() {
 
         <div className="rounded-2xl bg-[#faf6f2] p-4 text-[11px] text-[#6f625a] space-y-2">
           <div className="flex justify-between"><span>Bank receives</span><strong>₦{formatNaira(requestAmountKobo)}</strong></div>
-          <div className="flex justify-between"><span>Transfer + stamp charge</span><strong>₦{formatNaira(requestFeeKobo)}</strong></div>
-          <div className="flex justify-between border-t border-[#e8ddd4] pt-2 text-[#251d18]"><span>Wallet debit</span><strong>₦{formatNaira(requestAmountKobo + requestFeeKobo)}</strong></div>
+          <p className="leading-relaxed">{platformTransferFeeNote(requestFeeKobo, requestAmountKobo)}</p>
+          <div className="flex justify-between border-t border-[#e8ddd4] pt-2 text-[#251d18]"><span>Wallet debit</span><strong>₦{formatNaira(sellerWithdrawalDebitKobo(requestAmountKobo))}</strong></div>
         </div>
 
         <div className="space-y-2">
@@ -274,7 +281,7 @@ export default function SellerWalletPage() {
                     {w.bank_name || '—'} ••••{w.account_number ? w.account_number.slice(-4) : '—'} ·{' '}
                     {new Date(w.created_at).toLocaleDateString()}
                   </p>
-                  {Number(w.transfer_fee_kobo) > 0 ? <p className="text-[9px] text-[#9d9188]">Fee ₦{formatNaira(Number(w.transfer_fee_kobo))}</p> : null}
+                  {Number(w.transfer_fee_kobo) > 0 ? <p className="text-[9px] text-[#9d9188]">Platform-paid transfer cost ₦{formatNaira(Number(w.transfer_fee_kobo))}</p> : null}
                 </div>
                 <span className={`flex shrink-0 items-center gap-1 text-[10px] font-mono uppercase px-2.5 py-1 rounded border ${
                   w.status === 'paid'

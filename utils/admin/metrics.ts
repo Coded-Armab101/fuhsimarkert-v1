@@ -1,5 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buyerServiceFeeKobo, sellerCommissionKobo } from '@/utils/pricing';
+import {
+  adminDateWindow,
+  inAdminRange,
+  trendBucket,
+  trendBuckets,
+  type AdminRange,
+} from '@/utils/admin/date-range';
 
 /**
  * Server-only aggregation for the operator console.
@@ -19,6 +26,9 @@ export type AdminTab =
   | 'fulfilment'
   | 'broadcasts'
   | 'payments'
+  | 'support'
+  | 'seller_activity'
+  | 'pickup'
   | 'storage';
 
 export type AdminAlertLevel = 'danger' | 'warn' | 'info';
@@ -41,6 +51,9 @@ export type AdminTrendPoint = {
 
 export type AdminOverview = {
   generatedAt: string;
+  range: AdminRange;
+  rangeLabel: string;
+  rangeStart: string | null;
   users: {
     total: number;
     newToday: number;
@@ -140,6 +153,11 @@ export type AdminUserRow = {
   isSuspended: boolean;
   suspensionReason: string | null;
   suspendedAt: string | null;
+  isPickupStaff: boolean;
+  dob: string | null;
+  birthdayLabel: string | null;
+  nextBirthday: string | null;
+  daysToBirthday: number | null;
   createdAt: string;
   walletKobo: number;
   buyerOrders: number;
@@ -159,6 +177,8 @@ type ProfileRow = {
   is_suspended?: boolean | null;
   suspension_reason?: string | null;
   suspended_at?: string | null;
+  is_pickup_staff?: boolean | null;
+  dob?: string | null;
   /**
    * Not every deployment has a timestamp on `profiles` (the original schema
    * only guaranteed `updated_at`), so this is optional and only used as a
@@ -202,6 +222,7 @@ type PaymentTransactionRow = {
   purpose: string;
   processing_fee_kobo: number | null;
   provider_fee_kobo: number | null;
+  created_at?: string | null;
 };
 
 type WalletCreditRow = {
@@ -209,17 +230,20 @@ type WalletCreditRow = {
   source: string;
   remaining_kobo: number | null;
   withdrawable_at: string | null;
+  created_at?: string | null;
 };
 
 type ProductRow = {
   id: string;
   stock: number | null;
+  created_at?: string | null;
 };
 
 type SubscriptionRow = {
   user_id: string;
   amount_kobo: number | null;
   expires_at: string | null;
+  created_at?: string | null;
 };
 
 type OrderGroup = {
@@ -303,14 +327,33 @@ function time(value: string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/** Birthday metadata for the People tab, without leaking age. */
+function birthdayInfo(
+  dob: string | null | undefined,
+  now = new Date(),
+): { label: string | null; nextBirthday: string | null; daysToBirthday: number | null } {
+  if (!dob || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+    return { label: null, nextBirthday: null, daysToBirthday: null };
+  }
+  const birth = new Date(`${dob}T00:00:00.000Z`);
+  if (Number.isNaN(birth.getTime())) {
+    return { label: null, nextBirthday: null, daysToBirthday: null };
+  }
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  let next = Date.UTC(now.getUTCFullYear(), birth.getUTCMonth(), birth.getUTCDate());
+  if (next < today.getTime()) next = Date.UTC(now.getUTCFullYear() + 1, birth.getUTCMonth(), birth.getUTCDate());
+  const days = Math.round((next - today.getTime()) / DAY_MS);
+  return {
+    label: new Intl.DateTimeFormat('en-NG', { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(birth),
+    nextBirthday: new Date(next).toISOString().slice(0, 10),
+    daysToBirthday: days,
+  };
+}
+
 function startOfUtcDay(input: Date): Date {
   const day = new Date(input);
   day.setUTCHours(0, 0, 0, 0);
   return day;
-}
-
-function isoDay(input: Date): string {
-  return input.toISOString().slice(0, 10);
 }
 
 function summarizeGroupStatus(statuses: string[]): string {
@@ -369,7 +412,11 @@ function isSlow(order: OrderRow, now: number): boolean {
   return false;
 }
 
-export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOverview> {
+export async function loadAdminOverview(
+  admin: SupabaseClient,
+  range: AdminRange = 'all',
+): Promise<AdminOverview> {
+  const window = adminDateWindow(range);
   const [
     profiles,
     orders,
@@ -407,13 +454,13 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
         { column: 'id', ascending: true },
       ),
     ),
-    fetchAllRows<ProductRow>(admin, 'products', 'id, stock', { column: 'id', ascending: true }),
+    fetchAllRows<ProductRow>(admin, 'products', 'id, stock, created_at', { column: 'id', ascending: true }),
     // Subscriptions are a bonus revenue line. A missing/renamed table must not
     // take down the whole console, so this one query is allowed to fail softly.
     fetchAllRows<SubscriptionRow>(
       admin,
       'subscriptions',
-      'user_id, amount_kobo, expires_at',
+      'user_id, amount_kobo, expires_at, created_at',
       { column: 'reference', ascending: true },
     ).catch(() => [] as SubscriptionRow[]),
     // New accounting tables only exist after the 20261119 migration. Until then,
@@ -421,33 +468,48 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
     fetchAllRows<PaymentTransactionRow>(
       admin,
       'payment_transactions',
-      'reference, purpose, processing_fee_kobo, provider_fee_kobo',
+      'reference, purpose, processing_fee_kobo, provider_fee_kobo, created_at',
       { column: 'reference', ascending: true },
     ).catch(() => [] as PaymentTransactionRow[]),
     fetchAllRows<WalletCreditRow>(
       admin,
       'wallet_credits',
-      'user_id, source, remaining_kobo, withdrawable_at',
+      'user_id, source, remaining_kobo, withdrawable_at, created_at',
       { column: 'user_id', ascending: true },
     ).catch(() => [] as WalletCreditRow[]),
     fetchAuthSignups(admin),
   ]);
 
-  const now = Date.now();
+  const now = window.end;
+  // One shared window for every dataset. A profile's signup time comes from
+  // auth.users when available; everything else uses its own created_at.
+  const filteredProfiles = profiles.filter((profile) =>
+    inAdminRange(signupAt(profile, authSignups), window),
+  );
+  const filteredOrders = orders.filter((order) => inAdminRange(order.created_at, window));
+  const filteredWithdrawals = withdrawals.filter((withdrawal) =>
+    inAdminRange(withdrawal.created_at, window),
+  );
+  const filteredProducts = products.filter((product) => inAdminRange(product.created_at, window));
+  const filteredSubscriptions = subscriptions.filter((subscription) =>
+    inAdminRange(subscription.created_at, window),
+  );
+  const filteredPayments = payments.filter((payment) => inAdminRange(payment.created_at, window));
+
   const today = startOfUtcDay(new Date(now));
   const sevenDaysAgo = now - 7 * DAY_MS;
   const thirtyDaysAgo = now - 30 * DAY_MS;
 
-  const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const profilesById = new Map(filteredProfiles.map((profile) => [profile.id, profile]));
   const sellerIds = new Set(
-    profiles
+    filteredProfiles
       .filter((profile) => profile.is_seller === true || profile.user_persona === 'seller')
       .map((profile) => profile.id),
   );
 
-  const groups = buildGroups(orders);
-  const activeRows = orders.filter((order) => ACTIVE_STATUSES.includes(order.status));
-  const completedRows = orders.filter((order) => COMPLETED_STATUSES.includes(order.status));
+  const groups = buildGroups(filteredOrders);
+  const activeRows = filteredOrders.filter((order) => ACTIVE_STATUSES.includes(order.status));
+  const completedRows = filteredOrders.filter((order) => COMPLETED_STATUSES.includes(order.status));
   const completedGroups = groups.filter((group) => group.status === 'completed');
   const cancelledGroups = groups.filter((group) => group.status === 'cancelled');
   const disputedGroups = groups.filter((group) => group.status === 'disputed');
@@ -471,7 +533,7 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
     (sum, group) => sum + group.deliveryFeeKobo,
     0,
   );
-  const subscriptionRevenueKobo = subscriptions.reduce(
+  const subscriptionRevenueKobo = filteredSubscriptions.reduce(
     (sum, subscription) => sum + num(subscription.amount_kobo),
     0,
   );
@@ -487,24 +549,24 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
   // processing fee is a pass-through: only the surplus/shortfall is ours. A
   // refund does not return Paystack's original charge, so that fee becomes a
   // platform cost even though the order itself is no longer revenue.
-  const processingCollectedKobo = payments.reduce(
+  const processingCollectedKobo = filteredPayments.reduce(
     (sum, payment) => sum + num(payment.processing_fee_kobo),
     0,
   );
-  const providerCollectionFeesKobo = payments.reduce(
+  const providerCollectionFeesKobo = filteredPayments.reduce(
     (sum, payment) => sum + num(payment.provider_fee_kobo),
     0,
   );
   const paymentFeeSurplusKobo = processingCollectedKobo - providerCollectionFeesKobo;
   const refundedReferences = new Set(
-    orders
+    filteredOrders
       .filter((order) => Boolean(order.refunded_at))
       .map((order) => order.order_ref || order.id),
   );
-  const refundedProviderFeesKobo = payments
+  const refundedProviderFeesKobo = filteredPayments
     .filter((payment) => refundedReferences.has(payment.reference))
     .reduce((sum, payment) => sum + num(payment.provider_fee_kobo), 0);
-  const transferFeesCollectedKobo = withdrawals.reduce(
+  const transferFeesCollectedKobo = filteredWithdrawals.reduce(
     (sum, withdrawal) => sum + num(withdrawal.transfer_fee_kobo),
     0,
   );
@@ -532,6 +594,8 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
   let buyerWalletKobo = 0;
   let heldBuyerMoneyKobo = 0;
 
+  // Wallet credit rows keep their balances even when created outside the
+  // selected window: the money tab is a point-in-time balance, not an event feed.
   if (credits.length > 0) {
     // Source beats profile role: a verified seller can also fund a buyer wallet.
     for (const credit of credits) {
@@ -559,8 +623,8 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
       ? num(withdrawal.wallet_debit_kobo)
       : num(withdrawal.amount_kobo) + num(withdrawal.transfer_fee_kobo);
 
-  const pendingWithdrawalRows = withdrawals.filter((withdrawal) => withdrawal.status === 'pending');
-  const paidWithdrawalRows = withdrawals.filter((withdrawal) => withdrawal.status === 'paid');
+  const pendingWithdrawalRows = filteredWithdrawals.filter((withdrawal) => withdrawal.status === 'pending');
+  const paidWithdrawalRows = filteredWithdrawals.filter((withdrawal) => withdrawal.status === 'paid');
   const pendingWithdrawalsKobo = pendingWithdrawalRows.reduce(
     (sum, withdrawal) => sum + withdrawalDebitKobo(withdrawal),
     0,
@@ -574,41 +638,36 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
     0,
   );
 
-  const outOfStock = products.filter(
+  const outOfStock = filteredProducts.filter(
     (product) => product.stock !== null && num(product.stock) <= 0,
   ).length;
-  const lowStock = products.filter((product) => {
+  const lowStock = filteredProducts.filter((product) => {
     const stock = product.stock === null ? null : num(product.stock);
     return stock !== null && stock > 0 && stock <= 3;
   }).length;
 
-  const trend: AdminTrendPoint[] = [];
-  const trendIndex = new Map<string, number>();
-  for (let offset = 6; offset >= 0; offset -= 1) {
-    const day = new Date(today.getTime() - offset * DAY_MS);
-    const key = isoDay(day);
-    trendIndex.set(key, trend.length);
-    trend.push({ day: key, signups: 0, orders: 0, revenueKobo: 0 });
-  }
+  const trend: AdminTrendPoint[] = trendBuckets(range, now).map((day) => ({
+    day,
+    signups: 0,
+    orders: 0,
+    revenueKobo: 0,
+  }));
+  const trendIndex = new Map(trend.map((point, index) => [point.day, index]));
 
-  for (const profile of profiles) {
-    const joinedAt = signupAt(profile, authSignups);
-    const key = joinedAt ? isoDay(new Date(joinedAt)) : '';
-    const index = trendIndex.get(key);
+  for (const profile of filteredProfiles) {
+    const index = trendIndex.get(trendBucket(signupAt(profile, authSignups), range));
     if (index !== undefined) trend[index].signups += 1;
   }
 
   for (const group of groups) {
-    if (!group.createdAt) continue;
-    const key = isoDay(new Date(group.createdAt));
-    const index = trendIndex.get(key);
+    const index = trendIndex.get(trendBucket(group.createdAt, range));
     if (index === undefined) continue;
     trend[index].orders += 1;
     if (group.status !== 'cancelled') trend[index].revenueKobo += group.goodsKobo;
   }
 
   const slowRows = activeRows.filter((order) => isSlow(order, now));
-  const failedRecent = withdrawals.filter(
+  const failedRecent = filteredWithdrawals.filter(
     (withdrawal) => withdrawal.status === 'failed' && time(withdrawal.created_at) > sevenDaysAgo,
   ).length;
   const oldestPendingHours = pendingWithdrawalRows.reduce((oldest, withdrawal) => {
@@ -632,7 +691,7 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
     });
   }
 
-  const pendingVerifications = profiles.filter(
+  const pendingVerifications = filteredProfiles.filter(
     (profile) => profile.verification_status === 'pending',
   ).length;
   if (pendingVerifications > 0) {
@@ -699,7 +758,7 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
     });
   }
 
-  const recentSignups = profiles
+  const recentSignups = filteredProfiles
     .map((profile) => ({ profile, joinedAt: signupAt(profile, authSignups) }))
     .filter((entry) => Boolean(entry.joinedAt))
     .sort((a, b) => time(b.joinedAt) - time(a.joinedAt))
@@ -736,7 +795,7 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
       };
     });
 
-  const recentWithdrawals = withdrawals
+  const recentWithdrawals = filteredWithdrawals
     .slice()
     .sort((a, b) => time(b.created_at) - time(a.created_at))
     .slice(0, 5)
@@ -756,20 +815,23 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
 
   return {
     generatedAt: new Date().toISOString(),
+    range,
+    rangeLabel: window.label,
+    rangeStart: window.startIso,
     users: {
-      total: profiles.length,
-      newToday: profiles.filter((profile) => time(signupAt(profile, authSignups)) >= today.getTime()).length,
-      new7d: profiles.filter((profile) => time(signupAt(profile, authSignups)) >= sevenDaysAgo).length,
-      new30d: profiles.filter((profile) => time(signupAt(profile, authSignups)) >= thirtyDaysAgo).length,
-      buyers: profiles.length - sellerIds.size,
+      total: filteredProfiles.length,
+      newToday: filteredProfiles.filter((profile) => time(signupAt(profile, authSignups)) >= today.getTime()).length,
+      new7d: filteredProfiles.filter((profile) => time(signupAt(profile, authSignups)) >= sevenDaysAgo).length,
+      new30d: filteredProfiles.filter((profile) => time(signupAt(profile, authSignups)) >= thirtyDaysAgo).length,
+      buyers: filteredProfiles.length - sellerIds.size,
       sellers: sellerIds.size,
-      approvedSellers: profiles.filter((profile) => profile.is_approved_seller === true).length,
+      approvedSellers: filteredProfiles.filter((profile) => profile.is_approved_seller === true).length,
       pendingSellers: pendingVerifications,
-      rejectedSellers: profiles.filter(
+      rejectedSellers: filteredProfiles.filter(
         (profile) => profile.verification_status === 'rejected',
       ).length,
-      admins: profiles.filter((profile) => profile.is_admin === true).length,
-      suspended: profiles.filter((profile) => profile.is_suspended === true).length,
+      admins: filteredProfiles.filter((profile) => profile.is_admin === true).length,
+      suspended: filteredProfiles.filter((profile) => profile.is_suspended === true).length,
       activeSubscriptions: activeSubscriptionUsers.size,
     },
     orders: {
@@ -817,7 +879,7 @@ export async function loadAdminOverview(admin: SupabaseClient): Promise<AdminOve
       paidTransferFeesKobo,
     },
     catalogue: {
-      total: products.length,
+      total: filteredProducts.length,
       outOfStock,
       lowStock,
     },
@@ -835,7 +897,9 @@ export async function loadAdminUsers(
   admin: SupabaseClient,
   search = '',
   limit = 200,
+  range: AdminRange = 'all',
 ): Promise<{ total: number; users: AdminUserRow[]; generatedAt: string }> {
+  const window = adminDateWindow(range);
   const [profiles, orders, wallets, authSignups] = await Promise.all([
     // See loadAdminOverview: `*` tolerates a profiles table without created_at.
     fetchAllRows<ProfileRow>(admin, 'profiles', '*', { column: 'id', ascending: true }),
@@ -857,8 +921,9 @@ export async function loadAdminUsers(
   const sellerRefs = new Map<string, Set<string>>();
   const spendByUser = new Map<string, number>();
   const earnedByUser = new Map<string, number>();
+  const ordersInRange = orders.filter((order) => inAdminRange(order.created_at, window));
 
-  for (const order of orders) {
+  for (const order of ordersInRange) {
     if (!CANCELLED_STATUSES.includes(order.status)) {
       const ref = order.order_ref || order.id;
       const buyerSet = buyerRefs.get(order.buyer_id) ?? new Set<string>();
@@ -886,6 +951,7 @@ export async function loadAdminUsers(
 
   const needle = search.trim().toLowerCase();
   const filtered = profiles.filter((profile) => {
+    if (!inAdminRange(signupAt(profile, authSignups), window)) return false;
     if (!needle) return true;
     return (
       (profile.full_name || '').toLowerCase().includes(needle) ||
@@ -897,7 +963,9 @@ export async function loadAdminUsers(
     .map((profile) => ({ profile, joinedAt: signupAt(profile, authSignups) }))
     .sort((a, b) => time(b.joinedAt) - time(a.joinedAt))
     .slice(0, Math.max(1, limit))
-    .map(({ profile, joinedAt }) => ({
+    .map(({ profile, joinedAt }) => {
+      const birthday = birthdayInfo(profile.dob, new Date(window.end));
+      return {
       id: profile.id,
       fullName: profile.full_name || 'Unnamed student',
       persona: profile.user_persona || 'buyer',
@@ -908,13 +976,19 @@ export async function loadAdminUsers(
       isSuspended: profile.is_suspended === true,
       suspensionReason: profile.suspension_reason || null,
       suspendedAt: profile.suspended_at || null,
+      isPickupStaff: profile.is_pickup_staff === true,
+      dob: profile.dob || null,
+      birthdayLabel: birthday.label,
+      nextBirthday: birthday.nextBirthday,
+      daysToBirthday: birthday.daysToBirthday,
       createdAt: joinedAt,
       walletKobo: walletByUser.get(profile.id) ?? 0,
       buyerOrders: buyerRefs.get(profile.id)?.size ?? 0,
       spendKobo: spendByUser.get(profile.id) ?? 0,
       sellerOrders: sellerRefs.get(profile.id)?.size ?? 0,
       earnedKobo: earnedByUser.get(profile.id) ?? 0,
-    }));
+      };
+    });
 
   return {
     total: filtered.length,

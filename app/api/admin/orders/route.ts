@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { notifyUsers } from '@/utils/notifications';
+import { adminDateWindow, applyAdminRange, parseAdminRange } from '@/utils/admin/date-range';
 
 /**
  * Admin fulfilment view: every combined order (one order_ref), grouped, with the
@@ -34,7 +35,7 @@ function statusTone(s: string): string {
   return 'neutral';
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -52,7 +53,9 @@ export async function GET() {
       return NextResponse.json({ error: 'Forbidden.' }, { status: 403 });
     }
 
-    const { data: rows, error } = await admin
+    const range = parseAdminRange(new URL(request.url).searchParams.get('range'));
+    const window = adminDateWindow(range);
+    let query = admin
       .from('orders')
       .select(`
         id,
@@ -81,8 +84,9 @@ export async function GET() {
         return_confirmation_source,
         products ( id, title, image_url )
       `)
-      .order('created_at', { ascending: false })
-      .limit(500);
+      .order('created_at', { ascending: false });
+    query = applyAdminRange(query, window, 'created_at');
+    const { data: rows, error } = await query.limit(1000);
     if (error) throw error;
 
     const orders = rows || [];

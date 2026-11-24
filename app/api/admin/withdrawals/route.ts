@@ -10,6 +10,7 @@ import {
 } from '@/utils/paystack/transfer';
 import { sendEmailToUsers, appLink } from '@/utils/email';
 import { formatNaira } from '@/utils/money';
+import { adminDateWindow, applyAdminRange, parseAdminRange } from '@/utils/admin/date-range';
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 type WithdrawalForPayout = {
@@ -42,7 +43,7 @@ type WithdrawalForPayout = {
  * The cookie client proves identity; the service-role client does the writes
  * because `wallets`/`withdrawals` are not user-writable under RLS.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -61,12 +62,16 @@ export async function GET() {
     }
 
     // Join seller profile for names/email. All via service role (RLS bypass).
-    const { data, error } = await admin
+    const range = parseAdminRange(new URL(request.url).searchParams.get('range'));
+    const window = adminDateWindow(range);
+    let query = admin
       .from('withdrawals')
       .select(
         'id, seller_id, amount_kobo, transfer_fee_kobo, wallet_debit_kobo, bank_name, bank_code, account_number, account_name, status, request_note, transfer_reference, transfer_code, transfer_status, transfer_error, manual_reconciled_at, manual_reconcile_note, created_at, processed_at',
       )
       .order('created_at', { ascending: false });
+    query = applyAdminRange(query, window, 'created_at');
+    const { data, error } = await query;
     if (error) throw error;
 
     // Join seller profile for names. All via service role (RLS bypass).

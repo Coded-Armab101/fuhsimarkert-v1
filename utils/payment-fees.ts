@@ -1,10 +1,16 @@
+import { formatNaira } from './money.ts';
+
 /**
  * Paystack Nigeria fee helpers. All values are integer kobo.
  *
  * Local collections (2026): 1.5%, plus ₦100 from ₦2,500 upward, capped at
  * ₦2,000. We round the estimate up so the platform never under-collects due to
  * a fractional-kobo boundary. The verified provider fee is stored separately.
+ *
+ * Withdrawal transfer/stamp charges are a PLATFORM cost funded by the 3%
+ * seller commission. Sellers are debited only the bank amount they requested.
  */
+
 const LOCAL_RATE = 0.015;
 const LOCAL_FLAT_KOBO = 10_000;
 const LOCAL_FLAT_THRESHOLD_KOBO = 250_000;
@@ -53,6 +59,26 @@ export function paystackTransferFeeKobo(bankAmountKobo: number): number {
   const providerFee = amount <= 500_000 ? 1_000 : amount <= 5_000_000 ? 2_500 : 5_000;
   const stampDuty = amount >= 1_000_000 ? 5_000 : 0;
   return providerFee + stampDuty;
+}
+
+/** Accounting source for provider transfer costs after 2026-11-27. */
+export const PLATFORM_TRANSFER_FEE_SOURCE = 'platform_commission' as const;
+
+/**
+ * Seller withdrawals never add the transfer fee to the wallet debit. The fee
+ * stays on the withdrawal row for accounting, funded by the 3% commission.
+ */
+export function sellerWithdrawalDebitKobo(bankAmountKobo: number): number {
+  return Math.max(0, Math.floor(Number(bankAmountKobo) || 0));
+}
+
+/** Shared customer-facing explanation for platform-paid transfer charges. */
+export function platformTransferFeeNote(feeKobo: number, bankAmountKobo?: number): string {
+  const fee = `₦${formatNaira(feeKobo)}`;
+  const debit = bankAmountKobo === undefined
+    ? 'the bank amount'
+    : `₦${formatNaira(sellerWithdrawalDebitKobo(bankAmountKobo))}`;
+  return `Transfer/stamp charge (${fee}) is covered by FuhsiMarket from our commission. You are debited only ${debit}.`;
 }
 
 export const WALLET_FUNDING_MIN_KOBO = 50_000; // ₦500

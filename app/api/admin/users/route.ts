@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { loadAdminUsers } from '@/utils/admin/metrics';
+import { parseAdminRange } from '@/utils/admin/date-range';
 
 /**
  * Operator people directory: every profile with role, verification state,
@@ -10,6 +11,7 @@ import { loadAdminUsers } from '@/utils/admin/metrics';
  * Query params:
  *   q      – case-insensitive name or id search
  *   limit  – max rows returned (default 200, capped at 500)
+ *   range  – shared admin date window (signup date)
  *
  * Authorization: profiles.is_admin = true.
  */
@@ -41,7 +43,8 @@ export async function GET(request: Request) {
       ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 500)
       : 200;
 
-    const result = await loadAdminUsers(admin, search, limit);
+    const range = parseAdminRange(searchParams.get('range'));
+    const result = await loadAdminUsers(admin, search, limit, range);
     return NextResponse.json(result);
   } catch (err) {
     console.error('[admin/users] failed', err);
@@ -68,7 +71,8 @@ export async function PATCH(request: Request) {
     const userId = String(body.userId ?? '').trim();
     const action = String(body.action ?? '').trim();
     const reason = String(body.reason ?? '').trim().slice(0, 500);
-    if (!userId || !['suspend', 'restore'].includes(action)) {
+    const pickupAction = action === 'assign_pickup' || action === 'remove_pickup';
+    if (!userId || !['suspend', 'restore', 'assign_pickup', 'remove_pickup'].includes(action)) {
       return NextResponse.json({ error: 'A user and valid moderation action are required.' }, { status: 400 });
     }
     if (reason.length < 5) {
@@ -93,13 +97,46 @@ export async function PATCH(request: Request) {
 
     const { data: target, error: targetError } = await admin
       .from('profiles')
-      .select('id, is_admin, is_suspended')
+      .select('id, is_admin, is_suspended, is_pickup_staff')
       .eq('id', userId)
       .maybeSingle();
     if (targetError) throw targetError;
     if (!target) return NextResponse.json({ error: 'Account not found.' }, { status: 404 });
-    if (target.is_admin === true || target.id === user.id) {
+    if (target.id === user.id) {
+      return NextResponse.json({ error: 'You cannot change your own account here.' }, { status: 403 });
+    }
+    if (!pickupAction && target.is_admin === true) {
       return NextResponse.json({ error: 'Administrator accounts cannot be suspended here.' }, { status: 403 });
+    }
+
+    if (pickupAction) {
+      const shouldBeStaff = action === 'assign_pickup';
+      if (target.is_pickup_staff === shouldBeStaff) {
+        return NextResponse.json({
+          ok: true,
+          isPickupStaff: shouldBeStaff,
+          unchanged: true,
+        });
+      }
+      const { error: roleError } = await admin
+        .from('profiles')
+        .update({ is_pickup_staff: shouldBeStaff })
+        .eq('id', userId);
+      if (roleError) throw roleError;
+      const { error: auditError } = await admin.from('pickup_staff_events').insert({
+        user_id: userId,
+        admin_id: user.id,
+        action: shouldBeStaff ? 'assigned' : 'removed',
+        reason,
+      });
+      // The role change is already committed. A missing audit table must not
+      // silently roll it back; log loudly so it can be reconciled.
+      if (auditError) console.error('[admin/users] pickup role audit failed', auditError);
+      return NextResponse.json({
+        ok: true,
+        isPickupStaff: shouldBeStaff,
+        status: shouldBeStaff ? 'pickup_staff' : 'active',
+      });
     }
 
     const shouldSuspend = action === 'suspend';

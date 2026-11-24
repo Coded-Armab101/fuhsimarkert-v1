@@ -21,6 +21,7 @@ export type RoleProfile = {
   is_admin?: boolean | null;
   is_approved_seller?: boolean | null;
   verification_status?: string | null;
+  is_pickup_staff?: boolean | null;
 };
 
 /** True if the profile is a platform admin (bypasses paid-role checks). */

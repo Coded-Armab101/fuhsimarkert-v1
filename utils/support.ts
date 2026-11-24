@@ -46,3 +46,26 @@ export const isSupportConfigured: boolean = configuredNumber !== null;
 export function supportWhatsappUrl(message?: string | null): string | null {
   return buildWhatsappUrl(configuredNumber, message);
 }
+
+/** Shared ticket vocabulary (must match the CHECK constraints in the migration). */
+export const SUPPORT_CATEGORIES = [
+  'payment',
+  'order',
+  'product',
+  'account',
+  'other',
+] as const;
+export const SUPPORT_STATUSES = ['open', 'pending', 'resolved', 'closed'] as const;
+
+export type SupportCategory = (typeof SUPPORT_CATEGORIES)[number];
+export type SupportStatus = (typeof SUPPORT_STATUSES)[number];
+
+export function isSupportCategory(value: unknown): value is SupportCategory {
+  return typeof value === 'string' &&
+    (SUPPORT_CATEGORIES as readonly string[]).includes(value);
+}
+
+export function isSupportStatus(value: unknown): value is SupportStatus {
+  return typeof value === 'string' &&
+    (SUPPORT_STATUSES as readonly string[]).includes(value);
+}

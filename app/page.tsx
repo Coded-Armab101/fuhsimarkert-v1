@@ -45,6 +45,7 @@ type Product = {
   seller_id: string;
   created_at: string;
   stock?: number | null;
+  show_stock_count?: boolean | null;
   unit?: string | null;
   delivery_fee_kobo?: number | null;
   verified?: boolean | null;
@@ -68,6 +69,14 @@ const isAvailable = (p: Product) =>
 const stockLimit = (p: Product) =>
   p.stock === null || p.stock === undefined ? Infinity : Number(p.stock) || 0;
 
+/** Only an opted-in seller with real stock gets an exact count shown to buyers. */
+const visibleStockCount = (p: Product): number | null => {
+  if (p.show_stock_count !== true) return null;
+  if (p.stock === null || p.stock === undefined) return null;
+  const stock = Number(p.stock);
+  return Number.isFinite(stock) && stock > 0 ? stock : null;
+};
+
 function ProductCard({
   product,
   saved,
@@ -87,6 +96,7 @@ function ProductCard({
   const quantity = getQuantity(product.id);
   const unavailable = !isAvailable(product);
   const hasOptions = hasProductOptions(product);
+  const availableCount = visibleStockCount(product);
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -196,6 +206,12 @@ function ProductCard({
             ) : null}
           </p>
 
+          {availableCount !== null && (
+            <p className="mt-1 text-[10px] font-bold text-[#17805B]">
+              In stock · {availableCount} left
+            </p>
+          )}
+
           {!unavailable &&
             (hasOptions ? (
               <button
@@ -205,7 +221,8 @@ function ProductCard({
                 }}
                 className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full border border-[#DE6437] py-2.5 text-[11px] font-bold text-[#C9511F] transition-colors hover:bg-[#FDF0EA]"
               >
-                <span>Choose options</span>
+                <ShoppingCart size={13} />
+                <span>Add to cart</span>
               </button>
             ) : quantity > 0 ? (
               <div className="mt-2 flex items-center justify-between rounded-full bg-[#FDF0EA] px-2 py-1 text-xs font-bold text-[#DE6437]">
@@ -451,6 +468,7 @@ export default function LandingPage() {
 
   const selectedSizes = optionList(selected?.sizes);
   const selectedColors = optionList(selected?.colors);
+  const selectedStockCount = selected ? visibleStockCount(selected) : null;
   const optionsReady =
     (!selectedSizes.length || Boolean(selectedSize)) &&
     (!selectedColors.length || Boolean(selectedColor));
@@ -848,6 +866,12 @@ export default function LandingPage() {
               <p className="text-sm leading-relaxed text-[#5F5650]">
                 {selected.description || 'No additional details provided by the seller.'}
               </p>
+
+              {selectedStockCount !== null && (
+                <p className="text-xs font-bold text-[#17805B]">
+                  In stock · {selectedStockCount} left
+                </p>
+              )}
 
               {selected.hostel_location && (
                 <div className="flex items-center gap-1.5 pt-1 text-xs font-medium text-[#5F5650]">

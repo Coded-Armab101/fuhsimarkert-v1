@@ -74,7 +74,8 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 .buyer-secondary div.profile-wallet,
 .buyer-secondary div.profile-wallet * { color: #ffffff !important; }
 .buyer-secondary div.profile-wallet .wallet-muted { color: rgba(255,255,255,.68) !important; }
-.buyer-secondary div.profile-wallet button:last-child { color: #2e2520 !important; }
+.buyer-secondary div.profile-wallet button:last-child,
+.buyer-secondary div.profile-wallet button:last-child * { color: #2e2520 !important; }
 
 /* Seller screens use the same approachable, light mobile system as the buyer app. */
 .seller-shell [class*="bg-neutral-950"] { background-color: #fff !important; border-color: #eee4dc !important; box-shadow: 0 8px 24px rgba(65,42,29,.05) !important; }

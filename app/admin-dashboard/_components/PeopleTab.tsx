@@ -3,18 +3,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
+  Cake,
   CheckCircle2,
   Loader2,
   RefreshCw,
   Search,
   ShieldCheck,
   Store,
+  Truck,
   TriangleAlert,
   UserCheck,
   UserX,
   Users,
   Wallet,
 } from 'lucide-react';
+import type { AdminRange } from '@/utils/admin/date-range';
 import type { AdminTab, AdminUserRow } from '@/utils/admin/metrics';
 import {
   compactNaira,
@@ -30,6 +33,8 @@ import { useNotifications } from '@/components/NotificationProvider';
 type Props = {
   onOpenTab: (tab: AdminTab) => void;
   refreshToken: number;
+  range: AdminRange;
+  onReviewSeller: (userId: string) => void;
 };
 
 type Filter = 'all' | 'buyers' | 'sellers' | 'pending' | 'suspended' | 'admins';
@@ -43,7 +48,7 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: 'admins', label: 'Admins' },
 ];
 
-export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
+export default function PeopleTab({ onOpenTab, refreshToken, range, onReviewSeller }: Props) {
   const { notify } = useNotifications();
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -55,6 +60,9 @@ export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
   const [moderationTarget, setModerationTarget] = useState<AdminUserRow | null>(null);
   const [moderationReason, setModerationReason] = useState('');
   const [savingModeration, setSavingModeration] = useState(false);
+  const [pickupTarget, setPickupTarget] = useState<AdminUserRow | null>(null);
+  const [pickupReason, setPickupReason] = useState('');
+  const [savingPickup, setSavingPickup] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -64,6 +72,7 @@ export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
       try {
         const params = new URLSearchParams({ limit: '500' });
         if (search.trim()) params.set('q', search.trim());
+        if (range !== 'all') params.set('range', range);
         const response = await fetch(`/api/admin/users?${params.toString()}`, {
           signal: controller.signal,
         });
@@ -83,7 +92,7 @@ export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [search, reloadKey, refreshToken]);
+  }, [search, range, reloadKey, refreshToken]);
 
   const filtered = useMemo(() => {
     return users.filter((user) => {
@@ -145,6 +154,43 @@ export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
       notify(error instanceof Error ? error.message : 'Could not update this account.', { tone: 'error' });
     } finally {
       setSavingModeration(false);
+    }
+  };
+
+  const savePickup = async () => {
+    if (!pickupTarget) return;
+    if (pickupReason.trim().length < 5) {
+      notify('Enter a clear reason of at least 5 characters.', { tone: 'warning' });
+      return;
+    }
+
+    const action = pickupTarget.isPickupStaff ? 'remove_pickup' : 'assign_pickup';
+    setSavingPickup(true);
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: pickupTarget.id,
+          action,
+          reason: pickupReason.trim(),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Could not update pickup access.');
+      notify(
+        action === 'assign_pickup'
+          ? `${pickupTarget.fullName} can now record pickup events.`
+          : `${pickupTarget.fullName} can no longer record pickup events.`,
+        { tone: 'success' },
+      );
+      setPickupTarget(null);
+      setPickupReason('');
+      setReloadKey((key) => key + 1);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not update pickup access.', { tone: 'error' });
+    } finally {
+      setSavingPickup(false);
     }
   };
 
@@ -259,6 +305,25 @@ export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <p className="truncate text-xs font-bold text-white">{user.fullName}</p>
+                        {user.birthdayLabel ? (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full border border-pink-500/25 bg-pink-500/10 px-1.5 py-0.5 text-[9px] font-mono text-pink-300"
+                            title={user.nextBirthday ? `Next birthday ${user.nextBirthday}` : undefined}
+                          >
+                            <Cake size={10} />
+                            {user.birthdayLabel}
+                            {user.daysToBirthday === 0
+                              ? ' · Today'
+                              : user.daysToBirthday !== null
+                                ? ` · in ${user.daysToBirthday} days`
+                                : ''}
+                          </span>
+                        ) : null}
+                        {user.isPickupStaff ? (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/25 bg-sky-500/10 px-1.5 py-0.5 text-[9px] font-bold text-sky-300">
+                            <Truck size={10} /> Pickup staff
+                          </span>
+                        ) : null}
                         {user.isAdmin ? <StatusPill status="admin" /> : null}
                         <StatusPill status={user.isSeller ? 'seller' : 'buyer'} />
                         {user.isSuspended ? <StatusPill status="suspended" /> : null}
@@ -310,6 +375,29 @@ export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
                       <span className="inline-flex items-center gap-1 text-[10px] font-mono text-neutral-600">
                         <CheckCircle2 size={11} /> active
                       </span>
+                    ) : null}
+                    {user.isSeller ? (
+                      <button
+                        onClick={() => onReviewSeller(user.id)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-bold text-neutral-300 transition-colors hover:bg-white/10 hover:text-white"
+                      >
+                        <Store size={11} /> Seller review
+                      </button>
+                    ) : null}
+                    {!user.isAdmin ? (
+                      <button
+                        onClick={() => {
+                          setPickupTarget(user);
+                          setPickupReason('');
+                        }}
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-bold transition-colors ${
+                          user.isPickupStaff
+                            ? 'border-sky-500/30 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20'
+                            : 'border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10 hover:text-white'
+                        }`}
+                      >
+                        <Truck size={11} /> Pickup
+                      </button>
                     ) : null}
                     {!user.isAdmin ? (
                       <button
@@ -392,6 +480,58 @@ export default function PeopleTab({ onOpenTab, refreshToken }: Props) {
               >
                 {savingModeration ? <Loader2 size={13} className="animate-spin" /> : moderationTarget.isSuspended ? <UserCheck size={13} /> : <UserX size={13} />}
                 {savingModeration ? 'Saving…' : moderationTarget.isSuspended ? 'Restore access' : 'Suspend access'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pickupTarget ? (
+        <div className="fixed inset-0 z-[111] grid place-items-center bg-black/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-sky-500/20 bg-neutral-950 p-6 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-sky-500/10 text-sky-300">
+                <Truck size={20} />
+              </div>
+              <div>
+                <h2 className="text-base font-black text-white">
+                  {pickupTarget.isPickupStaff ? 'Remove pickup access' : 'Assign pickup access'}
+                </h2>
+                <p className="mt-1 text-xs leading-relaxed text-neutral-400">
+                  {pickupTarget.isPickupStaff
+                    ? `Stop ${pickupTarget.fullName} from recording pickup handovers. The reason is saved in the audit history.`
+                    : `Allow ${pickupTarget.fullName} to record pickup handovers and delivery codes. The reason is saved in the audit history.`}
+                </p>
+              </div>
+            </div>
+            <label className="mt-5 block text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+              Reason
+              <textarea
+                value={pickupReason}
+                onChange={(event) => setPickupReason(event.target.value)}
+                maxLength={500}
+                rows={4}
+                placeholder="e.g. Trained on pickup handover and added to the shift rota"
+                className="mt-2 w-full resize-none rounded-xl border border-white/10 bg-neutral-900 px-3 py-2.5 text-xs normal-case tracking-normal text-white outline-none focus:border-sky-500"
+              />
+            </label>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setPickupTarget(null)}
+                disabled={savingPickup}
+                className="rounded-xl border border-white/10 bg-white/5 py-3 text-xs font-bold text-neutral-300 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={savePickup}
+                disabled={savingPickup}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-600 py-3 text-xs font-bold text-white hover:bg-sky-500 disabled:opacity-50"
+              >
+                {savingPickup ? <Loader2 size={13} className="animate-spin" /> : <Truck size={13} />}
+                {savingPickup ? 'Saving…' : pickupTarget.isPickupStaff ? 'Remove access' : 'Assign access'}
               </button>
             </div>
           </div>

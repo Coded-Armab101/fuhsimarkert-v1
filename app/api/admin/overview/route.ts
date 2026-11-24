@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { loadAdminOverview } from '@/utils/admin/metrics';
+import { parseAdminRange } from '@/utils/admin/date-range';
 
 /**
  * Operator overview: signups, order activity, money in escrow, platform profit
@@ -10,7 +11,7 @@ import { loadAdminOverview } from '@/utils/admin/metrics';
  * Authorization: profiles.is_admin = true. All reads use the service-role client
  * because the aggregate spans tables that RLS protects.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await createClient();
     const {
@@ -31,7 +32,8 @@ export async function GET() {
       return NextResponse.json({ error: 'Forbidden.' }, { status: 403 });
     }
 
-    const overview = await loadAdminOverview(admin);
+    const range = parseAdminRange(new URL(request.url).searchParams.get('range'));
+    const overview = await loadAdminOverview(admin, range);
     return NextResponse.json(overview);
   } catch (err) {
     console.error('[admin/overview] failed', err);

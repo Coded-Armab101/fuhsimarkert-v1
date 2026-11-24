@@ -23,6 +23,7 @@ export default function AddProductPage() {
   const [category, setCategory] = useState('General');
   const [description, setDescription] = useState('');
   const [stock, setStock] = useState('');
+  const [showStockCount, setShowStockCount] = useState(false);
   const [unit, setUnit] = useState('');
   const [sizes, setSizes] = useState<string[]>([]);
   const [colors, setColors] = useState<string[]>([]);
@@ -144,6 +145,7 @@ export default function AddProductPage() {
           description: description.trim(),
           image_url: uploadedUrl || null,
           stock: stockValue,
+          show_stock_count: showStockCount,
           unit: unit.trim() || null,
           sizes: optionList(sizes),
           colors: optionList(colors),
@@ -252,6 +254,26 @@ export default function AddProductPage() {
               onChange={(e) => setStock(e.target.value)}
               className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-600"
             />
+          </div>
+
+          <div className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-900 px-4 py-3">
+            <div>
+              <p className="text-xs font-mono text-neutral-300">Show stock count to buyers</p>
+              <p className="mt-0.5 text-[10px] font-mono text-neutral-500">OFF by default — buyers see “In stock · N left” only when this is ON.</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className={`text-[10px] font-mono ${showStockCount ? 'text-red-400' : 'text-neutral-500'}`}>{showStockCount ? 'ON' : 'OFF'}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={showStockCount}
+                aria-label="Show stock count to buyers"
+                onClick={() => setShowStockCount((value) => !value)}
+                className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${showStockCount ? 'border-red-600 bg-red-600' : 'border-neutral-700 bg-neutral-800'}`}
+              >
+                <span className={`absolute top-0.5 h-[18px] w-[18px] rounded-full bg-white transition-all ${showStockCount ? 'left-[22px]' : 'left-0.5'}`} />
+              </button>
+            </div>
           </div>
 
           <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 space-y-4">

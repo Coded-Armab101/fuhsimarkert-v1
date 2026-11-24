@@ -65,6 +65,14 @@ Then apply `supabase/migrations/20261123_product_discounts.sql`. It adds `produc
 
 Finally apply `supabase/migrations/20261124_manual_payment_confirmation.sql`. It creates `checkout_attempts` (the frozen, server-side checkout snapshot written before Paystack initialize) and an append-only `manual_payment_confirmation_events` audit table. Without it, checkout cannot start because there is nowhere to record the payment reference, and the admin Payments tab cannot verify a paid-but-unrecorded order.
 
+Then apply `supabase/migrations/20261125_product_stock_visibility.sql`. It adds `products.show_stock_count` (default `false`) so sellers control whether buyers see the remaining-unit count on a listing.
+
+Then apply `supabase/migrations/20261126_support_payment_evidence.sql`. It creates in-app support tickets, threaded replies and payment-proof submissions, plus the private `payment-proofs` Storage bucket. Without it the Support Center and failed-payment evidence form cannot work, and admin proof links cannot be signed.
+
+Apply `supabase/migrations/20261127_platform_absorbs_transfer_fees.sql` after the earlier wallet migrations. It makes the platform absorb Paystack transfer/stamp charges from the 3% seller commission: new withdrawals debit only the bank amount while the provider fee stays on the row for accounting. Historical rows are deliberately left untouched.
+
+Finally apply `supabase/migrations/20261128_seller_monitoring_pickup.sql`. It adds the pickup-staff role, tamper-proof pickup handover logs, staff-role change audit, and internal seller-review notes used by the admin Seller activity board. Pickup staff cannot write these tables directly; all logs go through authenticated API routes with the service role.
+
 ### Notifications (in-app inbox + Web Push)
 
 Both buyers and sellers receive notifications for the full order lifecycle — new paid order, packing/ready for pickup, completion, disputes, returns and refunds. Two delivery channels are used together:
@@ -84,7 +92,7 @@ Seller product images are uploaded through `POST /api/upload/product-image`, whi
 
 ## Tests
 
-Run the security regression tests (safe image URLs, same-origin redirects and push-submission SSRF validation) with:
+Run the regression tests (safe image URLs, same-origin redirects, push-submission SSRF validation, pricing/platform-fee rules and the product-variant flow) with:
 
 ```bash
 npm test
@@ -163,4 +171,51 @@ Push is best-effort: if the keys are missing or a device is offline, the order i
 still recorded and the in-app bell still updates. Installation and notifications
 require HTTPS (or localhost). On iPhone, the app must be added to the Home Screen
 (iOS 16.4+) before alerts can be enabled.
+
+## Failed and hung payments
+
+Every marketplace checkout writes a frozen `checkout_attempts` row (reference, items, expected total, wallet split, delivery details) **before** Paystack is initialized. If a buyer says they transferred but no order appeared:
+
+1. Ask the buyer for the payment reference/email **and proof of payment** (bank debit SMS, receipt or transfer screenshot). Attach that proof to the support ticket.
+2. Open **Admin board → Payments** and click **Re-check Paystack**. This is the normal, safest path: the server verifies the exact reference against Paystack and records an order only when the transaction is `success`, NGN, for the expected amount and for that buyer.
+3. A transfer Paystack still reports as `pending`/`queued`/`processing` is **hung, not failed**. Do not confirm it manually; ask the buyer to wait and re-check later. Webhooks and the buyer's return-verification call are idempotent, so a late retry cannot duplicate the order.
+4. **Confirm manually** is a last resort, used only when Paystack genuinely has no record of the money. Require the buyer's proof in the ticket, enter a detailed evidence note and tick the attestation. The order/escrow are created from the frozen snapshot through the same idempotent `recordOrder()` path, so a late webhook, buyer retry and admin action converge on one order. A conditional status update makes confirmation single-winner, and every action is appended to `manual_payment_confirmation_events` with the admin id and note. Manual confirmation is audited and never a substitute for a successful Paystack re-check.
+
+## Support
+
+- Buyers can open tickets from **Account → Support**. `support_tickets` and `support_ticket_messages` store the categories (`payment`, `order`, `product`, `account`, `other`), status (`open`, `pending`, `resolved`, `closed`) and threaded replies. Payment issues can also attach proof to `checkout_attempts` via the payment-evidence form. Work tickets from the admin support queue and link them to the payment reference/Paystack reference before changing an order.
+- WhatsApp is the optional fast channel, not the system of record. After resolving a chat, record the outcome on the ticket. The floating **Need help?** button and the **Contact support** link on the failed-payment banner open WhatsApp when a number is configured:
+
+  ```bash
+  NEXT_PUBLIC_SUPPORT_WHATSAPP_NUMBER=+234 803 000 0000
+  ```
+
+  Spaces, dashes and `+` are stripped automatically; a Nigerian `0803…` number becomes `234803…`. `NEXT_PUBLIC_*` values are inlined at build time, so changing the number needs a Vercel redeploy. See the earlier **Customer support WhatsApp + paid-but-unrecorded orders** section for the buyer-facing behaviour.
+- Use WhatsApp for proof collection and reassurance only. Money and order decisions happen in the admin board so they are idempotent and audited. Never ask a buyer for OTPs, PINs or card details.
+
+## Operator review, date filters and pickup logs
+
+The admin board has one global date filter — **All time / Today / This week / This month / This year** — applied consistently to overview, orders, people, payouts, verifications, storage, broadcasts, payments, support, seller activity and pickup logs. Windows are UTC-based (weeks start Monday) so server-rendered numbers and API lists agree.
+
+Before suspending a seller, open **People → Seller review** (or the **Seller activity** tab). That view gathers the seller's products, orders, disputes, low-rated reviews/support complaints, hung checkout attempts, moderation history and internal review notes in one place. Suspension still requires a reason and writes an audit event; pickup-role changes do too. Birthdays (when a profile has a date of birth) are shown in the People directory so the team can recognise regular customers.
+
+Pickup staff are assigned from **People → Pickup** with a reason. They get `/pickup`, where they log timestamped events (`arrived`, `picked_up`, `handed_to_buyer`, `returned`, `missing`, `issue`) for a real order reference. A hand-to-buyer event must include the matching delivery code. The API verifies the staff member from their signed-in session and writes with the service role, so a client cannot forge or edit another staff member's log. Operators see every event, the current staff list and every role change under **Admin → Pickup logs**.
+
+## Seller withdrawal fees
+
+Paystack transfer and stamp charges on seller payouts are a **platform cost funded by the 3% seller commission**. The expected fee is still computed server-side and stored on `withdrawals.transfer_fee_kobo` for accounting (source `platform_commission`), but it is never added to the seller's wallet debit. Since migration `20261127_platform_absorbs_transfer_fees.sql`, `wallet_debit_kobo = amount_kobo` for every new withdrawal, and a rejected withdrawal restores only the bank amount. Historical rows are deliberately not rewritten; they still show their original debit and the seller wallet labels their fee as a platform-paid transfer cost. Do not re-add `transfer_fee_kobo` to seller debits in reports or UI.
+
+## Infrastructure and traffic plan
+
+Target: roughly 1,000 peak daily active users during a campus rush, with room to grow. Quotas below are late-2026 figures — verify them on the provider pricing pages before a launch.
+
+- **Supabase free tier reality:** 500 MB database, 1 GB file storage, 5 GB egress, 50k MAU, 2 active projects, shared Nano compute (~0.5 GB RAM, 60 direct connections / 200 pooled clients), no automatic backups or PITR, and the project pauses after a week of inactivity. That fits 1k *daily* users if queries stay small, but it is **not** a 1k-*concurrent-request* guarantee. Use the pooled/transaction and HTTP APIs from Vercel; never open a long-lived direct `postgres://` connection per serverless instance. Keep service-role writes in short RPC calls.
+- **Schema discipline:** keep RLS enabled on user tables, service-role-only execution for money functions, and the indexes already added by the ops migrations (`orders(buyer_id/seller_id, status, created_at)`, `withdrawals(seller_id, status)`, `wallet_credits(user_id, withdrawable_at)`, `checkout_attempts(reference/status)`). Check `pg_stat_statements` for sequential scans before adding more indexes. Do server-side aggregation and keyset/range pagination for order, payout and admin lists — never `select *` into the browser and slice there.
+- **Vercel Hobby reality:** 1M function invocations, 4 active CPU-hours, 100 GB fast data transfer, 1M CDN requests and 5k image transformations per month; 300s max function duration, 2 GB memory, 4.5 MB request body, and one default function region. Keep API handlers short (verify signature, write idempotently, return), keep uploads under the 4 MB app cap with direct-to-Storage signed URLs, and avoid long-running payout/reconciliation work inside a request. Hobby cannot buy more usage: exceeding the allotment pauses the project.
+- **Images and CDN:** serve product images through Supabase Storage public URLs plus `next/image`/Vercel image caching; transform/resize on upload rather than per request. A 1 GB free bucket holds only ~250 photos at 4 MB, so plan a storage upgrade or an external CDN before catalogue photos grow.
+- **Caching:** static legal/marketing pages and short ISR on catalogue/category pages; `cache: 'no-store'` for wallet, orders, payments and admin views. Cache Supabase Storage assets at the CDN edge. Never cache personalized balances or one-time payment responses.
+- **Rate limiting:** throttle login/OTP, payment initialize/verify, wallet funding, withdrawals and uploads per user + IP. Put the counters in a small Supabase table or an external store (e.g. Upstash); keep Paystack webhooks signature-verified and idempotent rather than relying on rate limits.
+- **Background work:** use `pg_cron`/`pgmq` (or a small queue table with a worker) for retries of email/webhook delivery, stale `checkout_attempts` cleanup and daily reconciliation reports. Do **not** auto-retry money movement: payouts stay admin-approved and reference-locked. The 14-day wallet hold is computed at read time, so it needs no cron.
+- **Monitoring and backups:** watch Supabase DB size/CPU/connections and slow queries, Vercel function duration/errors/Speed Insights, and Paystack failed-transfer alerts. Free Supabase has no automatic backups — export `pg_dump` nightly to external storage if the data matters, or upgrade to Pro for 7-day daily backups and optional PITR.
+- **When to upgrade:** move to Supabase Pro when the DB passes ~300–400 MB, egress passes ~3–4 GB, storage passes ~700 MB, pooled connections sit above ~70%, or p95 money queries exceed ~200–300 ms. Move to Vercel Pro when you need more invocations/CPU, multiple regions, longer functions or paid overages instead of a hard pause. A Supabase region is fixed at project creation and Vercel Hobby runs in a single region by default; pick the closest supported region up front and plan a deliberate migration (not a toggle) if you need to move. Paystack is Nigeria-focused, so keep the payment path close to Nigerian users and monitor its dashboard separately.
 

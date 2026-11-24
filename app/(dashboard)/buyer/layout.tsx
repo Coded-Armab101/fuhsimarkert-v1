@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, ShoppingCart, Clock, User, Heart } from 'lucide-react';
+import { Home, ShoppingCart, Clock, User, Heart, MessageCircle } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { createClient } from '@/utils/supabase';
 import OnboardingGuide from '@/components/OnboardingGuide';
@@ -68,6 +68,7 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
     { label: 'Cart', href: '/buyer/cart', icon: ShoppingCart },
     { label: 'Saved', href: '/buyer/wishlist', icon: Heart },
     { label: 'Orders', href: '/buyer/orders', icon: Clock },
+    { label: 'Support', href: '/buyer/support', icon: MessageCircle },
     { label: 'Account', href: '/buyer/profile', icon: User },
   ];
 
@@ -75,7 +76,7 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
     <div className="min-h-screen bg-[#fffdfa] text-[#251d18] relative pb-24">
       <main className={pathname === '/buyer' ? 'px-4 pb-4' : 'p-4'}>{children}</main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-[#eee6de] bg-white/95 px-2 py-2 backdrop-blur-xl flex items-center justify-around safe-area-pb">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-[#eee6de] bg-white/95 px-1 py-2 backdrop-blur-xl flex items-center justify-around safe-area-pb sm:px-2">
         {buyerNav.map((item) => {
           const Icon = item.icon;
           const isActive =
@@ -87,7 +88,7 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
             <Link
               key={item.href}
               href={item.href}
-              className={`relative flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all ${
+              className={`relative flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all sm:px-2 ${
                 isActive
                   ? 'bg-[#fff0e9] text-[#d8552e] font-bold'
                   : 'text-[#8f8279] hover:text-[#443832]'
@@ -95,7 +96,7 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
             >
               <Icon size={20} />
               {((item.href === '/buyer/cart' && totalItems > 0) || (item.href === '/buyer/wishlist' && savedCount > 0) || (item.href === '/buyer/orders' && unreadCount > 0)) && <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[#ef6b3b] px-1 text-[9px] font-black text-white">{item.href === '/buyer/cart' ? totalItems : item.href === '/buyer/wishlist' ? savedCount : unreadCount}</span>}
-              <span className="text-[10px] font-mono mt-1">{item.label}</span>
+              <span className="mt-1 text-[9px] font-mono sm:text-[10px]">{item.label}</span>
             </Link>
           );
         })}
